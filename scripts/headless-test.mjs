@@ -1734,6 +1734,61 @@ async function main() {
       }
     }
 
+    /** 66. AI 诊断上下文含慢请求段 —— 控制台按钮生成的文本对齐 inspect CLI */
+    {
+      /**
+       * 控制台"✨ 复制 AI 诊断上下文"按钮聚合现场文本，应含"慢请求 Top"段
+       * （之前缺这段，诊断"页面慢"时复制给 AI 的上下文丢失性能线索）。
+       * 点击按钮 → 弹窗 → 读 <pre> 文本 → 验证含慢请求段 + 至少一条请求行。
+       */
+      /** 先确保测试页已产生若干网络请求（前面测试已触发过，这里补几个保证有数据） */
+      await testPage.evaluate(async () => {
+        try { await fetch('/api/devices').catch(() => {}) } catch {}
+        try { await fetch('/api/echo', { method: 'POST', body: '{}' }).catch(() => {}) } catch {}
+      })
+      await new Promise((r) => setTimeout(r, 800))
+
+      /** 点击 header 里的 AI 上下文按钮 */
+      const clicked = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const btn = btns.find((b) => b.textContent.includes('AI 诊断上下文'))
+        if (!btn || btn.disabled) return false
+        btn.click()
+        return true
+      })
+      if (!clicked) {
+        fail('AI 诊断上下文按钮未找到或被禁用')
+      } else {
+        /** 等弹窗 + 生成（含一次 snapshot HTTP 拉取） */
+        await new Promise((r) => setTimeout(r, 1200))
+        /** 读弹窗 <pre> 内容 */
+        const ctxText = await consolePage.evaluate(() => {
+          const pre = document.querySelector('.fixed pre')
+          return pre ? pre.textContent : null
+        })
+        if (!ctxText) {
+          fail('AI 诊断上下文弹窗未展示文本')
+        } else {
+          const hasSlowSection = /慢请求 Top/.test(ctxText)
+          const hasRequestLine = /\d+ms.*?(GET|POST|PUT|DELETE|PATCH)/.test(ctxText)
+          const hasErrorSection = /## 错误/.test(ctxText)
+          const hasSnapshotSection = /## 页面快照/.test(ctxText)
+          if (hasSlowSection && hasRequestLine && hasErrorSection && hasSnapshotSection) {
+            ok(`AI 诊断上下文含慢请求段（对齐 inspect CLI：错误 ✓ 快照 ✓ 慢请求 ✓ 请求行 ✓，共 ${ctxText.length} 字符）`)
+          } else {
+            fail(`AI 上下文内容不完整：slow=${hasSlowSection} reqLine=${hasRequestLine} err=${hasErrorSection} snap=${hasSnapshotSection}`)
+          }
+        }
+        /** 关闭弹窗 */
+        await consolePage.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button'))
+          const close = btns.find((b) => b.textContent.trim() === '关闭')
+          close?.click()
+        })
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

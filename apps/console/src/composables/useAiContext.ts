@@ -107,6 +107,27 @@ function buildContext(input: AiContextInput & { snapshot: string }): string {
   }
   lines.push(``)
 
+  /**
+   * 慢请求 Top 5 —— 按耗时降序，>500ms 标记 ⚠
+   *
+   * 与 skill CLI inspect 的慢请求段对齐：诊断"页面慢/卡"时，失败的请求往往不是根因，
+   * 真正的瓶颈是那些 status 200 但耗时 2-3s 的慢请求。
+   * 控制台"AI 诊断上下文"按钮之前缺这段，导致复制给 AI 的现场丢失性能线索。
+   */
+  const SLOW_THRESHOLD = 500
+  const byDuration = [...input.network].sort((a, b) => b.duration - a.duration)
+  const slowTop = byDuration.slice(0, 5).filter((n) => n.duration > 0)
+  lines.push(`## 慢请求 Top ${slowTop.length}（> ${SLOW_THRESHOLD}ms 标记 ⚠）`)
+  if (slowTop.length === 0) {
+    lines.push(`（无网络请求）`)
+  } else {
+    for (const n of slowTop) {
+      const mark = n.duration > SLOW_THRESHOLD ? ' ⚠' : ''
+      lines.push(`- ${n.duration}ms${mark} ${n.method} ${n.status} ${n.url}`)
+    }
+  }
+  lines.push(``)
+
   /** 最近的日志（最多 20 条） */
   lines.push(`## 最近日志 (${input.logs.length})`)
   if (input.logs.length === 0) {
