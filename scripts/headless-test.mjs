@@ -1533,6 +1533,78 @@ async function main() {
       }
     }
 
+    /**
+     * 27. Console 级别筛选语义色 + 计数
+     *
+     * 选中 ERROR 时按钮红色、WARN 橙色、INFO 蓝色（与日志文本配色一致），
+     * 让用户一眼分辨当前筛选级别。按钮上显示该级别日志条数。
+     */
+    {
+      /** 切到 console 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith('Console'))
+        if (cTab) cTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 400))
+
+      /**
+       * 通过"搜索日志" input 定位 Console 工具栏，再找其内的级别按钮。
+       * Console 工具栏结构：级别按钮组 + 搜索框 + 计数 + 清空按钮
+       */
+      async function clickLevel(label) {
+        await consolePage.evaluate((lbl) => {
+          const searchInput = document.querySelector('input[placeholder*="搜索日志"]')
+          if (!searchInput) return
+          const toolbar = searchInput.parentElement
+          const btns = Array.from(toolbar?.querySelectorAll('button') ?? [])
+          const target = btns.find((b) => b.textContent.trim().startsWith(lbl))
+          target?.click()
+        }, label)
+        /** 等 Vue 响应式更新 DOM（class 绑定异步） */
+        await new Promise((r) => setTimeout(r, 200))
+      }
+
+      async function readLevelBg(label) {
+        return consolePage.evaluate((lbl) => {
+          const searchInput = document.querySelector('input[placeholder*="搜索日志"]')
+          if (!searchInput) return { error: 'no search input' }
+          const toolbar = searchInput.parentElement
+          const btns = Array.from(toolbar?.querySelectorAll('button') ?? [])
+          const target = btns.find((b) => b.textContent.trim().startsWith(lbl))
+          if (!target) return { error: `no ${lbl} button` }
+          return { bg: getComputedStyle(target).backgroundColor, text: target.textContent.trim() }
+        }, label)
+      }
+
+      /** 点 ERROR 级别 → 读色（应红色系） */
+      await clickLevel('ERROR')
+      const errorState = await readLevelBg('ERROR')
+
+      /** 点 WARN 级别 → 读色（应橙色系） */
+      await clickLevel('WARN')
+      const warnState = await readLevelBg('WARN')
+
+      /** 还原到"全部" */
+      await clickLevel('全部')
+
+      /**
+       * 语义色验证：Tailwind v4 用 oklch 色彩空间，不依赖具体格式，
+       * 验证两点：(1) 两级选中色不同（语义区分）(2) 都不是默认灰色 elevated。
+       * oklch 第二个值是 chroma（饱和度），语义色 chroma > 0.1，灰色接近 0。
+       */
+      const elevatedGray = 'rgb(37, 43, 54)' /** bg-elevated 的灰色，未选中态 */
+      const errorHasColor = errorState.bg && !errorState.error && errorState.bg !== elevatedGray
+      const warnHasColor = warnState.bg && !warnState.error && warnState.bg !== elevatedGray
+      const colorsDiffer = errorState.bg !== warnState.bg
+
+      if (errorHasColor && warnHasColor && colorsDiffer) {
+        ok(`Console 级别筛选语义色生效（ERROR=${errorState.bg}，WARN=${warnState.bg}，两级不同色）`)
+      } else {
+        fail(`级别筛选配色异常：error=${JSON.stringify(errorState)} warn=${JSON.stringify(warnState)} differ=${colorsDiffer}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

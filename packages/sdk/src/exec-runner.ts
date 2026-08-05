@@ -151,14 +151,24 @@ export async function handleExec(code: string, execId: string): Promise<void> {
      * 辅助函数（__clarosight_click 等）已挂到 window，函数体内可直接访问。
      */
     const fn = new Function(`"use strict"; return (async () => {\n${code}\n})()`) as () => Promise<unknown>
-    /** Promise.race：异步永不 resolve 时由 SDK 端超时兜底，不等 server 干等 */
-    const ret = await Promise.race([
-      fn(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('执行超时（SDK 9s）')), SDK_EXEC_TIMEOUT),
-      ),
-    ])
-    result = serializeResult(ret)
+    /**
+     * 超时兜底 + 定时器清理
+     *
+     * 正常完成时必须 clearTimeout，否则：
+     * 1. 定时器句柄泄漏 9s
+     * 2. 超时 promise reject 时无人接住 → 触发 unhandledrejection →
+     *    被 error-catcher 当成设备错误上报，污染 errorCount
+     */
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('执行超时（SDK 9s）')), SDK_EXEC_TIMEOUT)
+    })
+    try {
+      const ret = await Promise.race([fn(), timeoutPromise])
+      result = serializeResult(ret)
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   } catch (e) {
     success = false
     /**

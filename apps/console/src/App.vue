@@ -170,6 +170,25 @@ const logColor = (type: string): string => {
   return 'text-primary'
 }
 
+/**
+ * 日志级别筛选按钮选中时的语义色
+ *
+ * 与日志文本配色对齐：error 红、warn 橙、info 蓝、debug 灰、all 深灰。
+ * 让用户一眼分辨当前筛选级别，而非全灰色靠文字辨认。
+ */
+function levelActiveClass(lvl: string): string {
+  if (lvl === 'error') return 'bg-red-600 text-white'
+  if (lvl === 'warn') return 'bg-amber-500 text-white'
+  if (lvl === 'info') return 'bg-blue-600 text-white'
+  if (lvl === 'debug') return 'bg-gray-500 text-white'
+  return 'bg-gray-800 text-white'
+}
+
+/** 某级别的日志条数（筛选按钮上显示计数） */
+function levelCount(lvl: string): number {
+  return logs.value.filter((l) => l.type === lvl).length
+}
+
 /** Console 面板：级别筛选 + 搜索 */
 const logLevelFilter = ref<'all' | 'error' | 'warn' | 'info' | 'debug'>('all')
 const logSearch = ref('')
@@ -560,10 +579,11 @@ onMounted(() => connect())
                   @click="logLevelFilter = lvl"
                   class="px-2 py-0.5 text-xs rounded font-medium"
                   :class="logLevelFilter === lvl
-                    ? 'bg-gray-800 text-white'
+                    ? levelActiveClass(lvl)
                     : 'bg-elevated text-secondary bg-elevated-hover'"
                 >
                   {{ lvl === 'all' ? '全部' : lvl.toUpperCase() }}
+                  <span v-if="lvl !== 'all' && levelCount(lvl) > 0" class="ml-1 opacity-75">{{ levelCount(lvl) }}</span>
                 </button>
               </div>
               <input
