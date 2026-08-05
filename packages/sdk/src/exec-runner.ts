@@ -53,6 +53,23 @@ function serializeResult(val: unknown): string {
 export function installHelpers(): void {
   const w = window as unknown as Record<string, unknown>
 
+  /**
+   * 用原生 setter 设置 input/textarea 的 value
+   *
+   * 直接 el.value = x 在 React 等框架的受控组件上不生效（框架覆盖了 setter）。
+   * 用原型链上的原生 setter（HTMLInputElement.prototype.value 的 setter）绕过。
+   * setValue 和 type 共用此 helper，确保两者在 React/Vue 上行为一致。
+   */
+  const setNativeValue = (el: HTMLInputElement | HTMLTextAreaElement, val: string): void => {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    if (setter) {
+      setter.call(el, val)
+    } else {
+      el.value = val
+    }
+  }
+
   /** 点击元素 */
   w.__clarosight_click = (idx: number): boolean => {
     const el = getElement(idx)
@@ -65,14 +82,7 @@ export function installHelpers(): void {
   w.__clarosight_setValue = (idx: number, val: string): boolean => {
     const el = getElement(idx) as HTMLInputElement | undefined
     if (!el) return false
-    /** 使用原生 setter，绕过 React 等框架的受控组件保护 */
-    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
-    if (setter) {
-      setter.call(el, val)
-    } else {
-      el.value = val
-    }
+    setNativeValue(el, val)
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
     return true
@@ -86,9 +96,13 @@ export function installHelpers(): void {
     const el = getElement(idx) as HTMLInputElement | undefined
     if (!el) return false
     el.focus()
-    el.value = ''
+    setNativeValue(el, '')
     for (const ch of text) {
-      el.value += ch
+      /**
+       * 逐字累加也要用原生 setter —— 直接 el.value += ch 在 React 受控组件上
+       * 会被框架覆盖，导致输入不生效。每次累加后用 setNativeValue 写入完整值。
+       */
+      setNativeValue(el, el.value + ch)
       el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }))
       el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }))
       el.dispatchEvent(new Event('input', { bubbles: true }))
