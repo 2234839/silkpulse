@@ -32,6 +32,15 @@ let reconnectAttempts = 0
 let manualClose = false
 
 /**
+ * 重连定时器句柄
+ *
+ * 必须跟踪，否则 disconnect() 后已调度的重连仍会触发，建立幽灵 WS 连接。
+ * 场景：WS 断线 → onclose 调度 setTimeout(doConnect, 5s) → 期间页面卸载
+ * disconnect() → manualClose=true + close ws → 5s 到期 → doConnect 建新 WS（绕过检查）。
+ */
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
  * 离线消息缓冲队列
  *
  * 解决两个丢数据场景：
@@ -57,10 +66,20 @@ export function onMessage(handler: (msg: ServerToDeviceMessage) => void): void {
  */
 export function connect(options: WsClientOptions): void {
   manualClose = false
+  /** 清除可能残留的重连定时器（重新初始化场景） */
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
   doConnect(options)
 }
 
 function doConnect(options: WsClientOptions): void {
+  /**
+   * 重连定时器可能在 disconnect() 之后才到期（页面卸载切断了正常流程），
+   * 这时不应再建新连接。入口检查守住幽灵重连。
+   */
+  if (manualClose) return
   ws = new WebSocket(options.url)
 
   ws.onopen = () => {
@@ -93,7 +112,11 @@ function doConnect(options: WsClientOptions): void {
     /** 指数退避：1s, 2s, 4s, 8s... 上限 30s */
     const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000)
     reconnectAttempts++
-    setTimeout(() => doConnect(options), delay)
+    /** 跟踪句柄：disconnect() 时 clearTimeout，防止卸载后幽灵重连 */
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined
+      doConnect(options)
+    }, delay)
   }
 
   ws.onerror = () => {
@@ -126,6 +149,11 @@ export function getQueueLength(): number {
 /** 主动断开（页面卸载） */
 export function disconnect(): void {
   manualClose = true
+  /** 取消已调度的重连，防止卸载后定时器到期建立幽灵 WS 连接 */
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
   ws?.close()
   ws = null
 }

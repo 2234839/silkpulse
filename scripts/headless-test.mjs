@@ -671,6 +671,45 @@ async function main() {
     }
 
     /**
+     * 13.55 连续断线重连稳定性 —— 两次断网→恢复，验证重连定时器管理正确
+     *
+     * 回归 ws-client 重连定时器泄漏修复：断线时 onclose 调度 setTimeout(doConnect)，
+     * 若定时器句柄未被跟踪 + disconnect 时清理，连续断线可能累积幽灵定时器，
+     * 导致重复重连或卸载后建立幽灵 WS 连接。这里连续两次断线重连，验证稳定性。
+     */
+    {
+      const stabDev = await waitForDevice()
+      if (!stabDev) { fail('连续重连测试前置失败：无在线设备'); }
+      else {
+        const cdp = await testPage.target().createCDPSession()
+        await cdp.send('Network.enable')
+        let reconOkCount = 0
+        /** 连续两轮断网→恢复 */
+        for (let round = 0; round < 2; round++) {
+          const mark = `stab-recon-${Date.now()}-${round}`
+          await cdp.send('Network.emulateNetworkConditions', {
+            offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+          })
+          await new Promise((r) => setTimeout(r, 1500))
+          /** 断网期间产生日志（入 SDK 缓冲队列） */
+          await testPage.evaluate((m) => console.log(m), mark).catch(() => {})
+          await cdp.send('Network.emulateNetworkConditions', {
+            offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+          })
+          await new Promise((r) => setTimeout(r, 6000))
+          /** 验证本轮带标记的日志到达（重连成功 + 缓冲 flush） */
+          const logs = await (await fetch(`${SERVER}/api/devices/${stabDev.id}/logs`)).json()
+          if (logs.some((l) => l.message.includes(mark))) reconOkCount++
+        }
+        if (reconOkCount === 2) {
+          ok(`连续断线重连稳定（2 轮断网→恢复均重连 + 缓冲 flush 正常，无定时器泄漏）`)
+        } else {
+          fail(`连续重连不稳定（${reconOkCount}/2 轮成功，可能定时器累积）`)
+        }
+      }
+    }
+
+    /**
      * 13.6 最近下线设备历史 —— AI 判断"接入过但掉了" vs "从未接入"
      *
      * 设备下线后从 devices 删除，但保留摘要到 recentlyOffline（上限 10），
