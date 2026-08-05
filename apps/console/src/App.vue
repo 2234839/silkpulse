@@ -60,6 +60,11 @@ const curlCopyState = ref<'idle' | 'copied'>('idle')
  * 让 AI/开发者能直接在本地复现远程设备的请求。
  * 单引号转义：shell 单引号内用 '\'' 闭合再开。
  */
+/** 格式化 headers 对象为 "k: v" 多行文本 */
+function formatHeaders(h: Record<string, string>): string {
+  return Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('\n')
+}
+
 function toCurl(n: NetworkEntry): string {
   const parts: string[] = [`curl -X ${n.method}`]
   if (n.reqHeaders) {
@@ -541,6 +546,18 @@ onMounted(() => connect())
                   <div v-if="selectedNetwork.error" class="bg-red-soft border border-red-soft rounded p-3">
                     <div class="text-xs text-red-400 mb-1">错误</div>
                     <div class="text-sm text-red-key font-mono">{{ selectedNetwork.error }}</div>
+                  </div>
+
+                  <!-- 请求头 -->
+                  <div v-if="selectedNetwork.reqHeaders">
+                    <div class="text-xs text-faint mb-1">请求头</div>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ formatHeaders(selectedNetwork.reqHeaders) }}</pre>
+                  </div>
+
+                  <!-- 响应头 -->
+                  <div v-if="selectedNetwork.resHeaders">
+                    <div class="text-xs text-faint mb-1">响应头</div>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ formatHeaders(selectedNetwork.resHeaders) }}</pre>
                   </div>
 
                   <!-- 请求体 -->

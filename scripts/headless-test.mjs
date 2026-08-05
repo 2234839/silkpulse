@@ -212,6 +212,43 @@ async function main() {
       fail(`POST body 采集异常: ${JSON.stringify({ method: postEntry?.method, hasReq: !!postEntry?.reqBody, hasRes: !!postEntry?.resBody })}`)
     }
 
+    /** 7.2 请求头/响应头采集 —— fetch 带自定义头 + xhr setRequestHeader */
+    {
+      /** fetch 带 content-type + 自定义 x- 头 */
+      await testPage.evaluate(async () => {
+        await fetch('/api/echo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Clarosight-Test': 'header-collect' },
+          body: JSON.stringify({ purpose: 'header-test' }),
+        })
+      })
+      /** xhr 带自定义头 */
+      await testPage.evaluate(() => {
+        return new Promise((resolve) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('GET', '/api/devices')
+          xhr.setRequestHeader('X-Xhr-Custom', 'xhr-header-val')
+          xhr.onload = () => resolve()
+          xhr.send()
+        })
+      })
+      await new Promise((r) => setTimeout(r, 800))
+      const netHeaders = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+      const fetchH = netHeaders.find((n) => n.method === 'POST' && n.reqHeaders && n.reqHeaders['x-clarosight-test'])
+      const xhrH = netHeaders.find((n) => n.method === 'GET' && n.reqHeaders && n.reqHeaders['x-xhr-custom'])
+
+      /** fetch：应有 content-type + 自定义 x- 头 + 响应头 */
+      const fetchOk = fetchH && fetchH.reqHeaders['content-type'] === 'application/json' && fetchH.reqHeaders['x-clarosight-test'] === 'header-collect' && fetchH.resHeaders
+      /** xhr：应有自定义头（setRequestHeader 采集）+ 响应头（getAllResponseHeaders 采集） */
+      const xhrOk = xhrH && xhrH.reqHeaders['x-xhr-custom'] === 'xhr-header-val' && xhrH.resHeaders
+
+      if (fetchOk && xhrOk) {
+        ok(`请求头/响应头采集成功（fetch content-type + x-头 ✓，xhr setRequestHeader + 响应头 ✓）`)
+      } else {
+        fail(`headers 采集异常：fetchOk=${!!fetchOk} xhrOk=${!!xhrH} fetchH=${JSON.stringify(fetchH?.reqHeaders)} xhrH=${JSON.stringify(xhrH?.reqHeaders)}`)
+      }
+    }
+
     /** 8. error 采集 —— 运行时错误 + Promise rejection */
     await testPage.evaluate(() => document.getElementById('runtime-error-btn')?.click())
     await testPage.evaluate(() => document.getElementById('promise-error-btn')?.click())
