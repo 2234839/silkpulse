@@ -415,6 +415,50 @@ async function main() {
     }
 
     /**
+     * 5.46 exec + __clarosight_pressKey —— 键盘交互（Enter 提交 / Escape 清空）
+     *
+     * pressKey 派发 keydown + keyup 事件，验证：
+     * 1. Enter 触发 keydown 监听器 → keyboard-result 显示"已提交"
+     * 2. Escape 触发 keydown 监听器 → input 清空 + result 显示"已清空"
+     * 3. idx<0 时对 activeElement 按键
+     */
+    {
+      /** 取快照找到 keyboard-input 的 idx（input 是交互元素，快照显示 idx 不显示 id，用 placeholder 匹配） */
+      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const kbMatch = snap.match(/input #(\d+)[^\n]*Enter 提交/)
+
+      /** 先 setValue 输入文字，再 pressKey Enter */
+      const enterRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_setValue(${kbMatch ? kbMatch[1] : -1}, '测试Enter'); __clarosight_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Enter'); return document.querySelector('#keyboard-result')?.textContent` }),
+      })).json()
+      const enterOk = enterRes.success && enterRes.result?.includes('已提交') && enterRes.result?.includes('测试Enter')
+
+      /** pressKey Escape → input 清空 + result "已清空" */
+      const escRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Escape'); return { result: document.querySelector('#keyboard-result')?.textContent, inputVal: document.querySelector('#keyboard-input')?.value }` }),
+      })).json()
+      const escOk = escRes.success && escRes.result?.includes('已清空') && escRes.result?.includes('"inputVal":""')
+
+      /** idx<0 对 activeElement 按键：先 focus keyboard-input，pressKey(-1, 'Enter') 应等效 */
+      const activeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `document.querySelector('#keyboard-input').focus(); __clarosight_pressKey(-1, 'Enter'); return document.activeElement?.id` }),
+      })).json()
+      const activeOk = activeRes.success && activeRes.result?.includes('keyboard-input')
+
+      if (enterOk && escOk && activeOk) {
+        ok(`exec pressKey 生效（Enter 提交 ✓，Escape 清空 ✓，idx<0 activeElement ✓）`)
+      } else {
+        fail(`exec pressKey 异常：enter=${enterOk}（res=${enterRes.result}），esc=${escOk}（res=${escRes.result}），active=${activeOk}（res=${activeRes.result}，idx=${kbMatch?.[1]}）`)
+      }
+    }
+
+    /**
      * 5.5 设备掉线时 pending exec 立即失败（回归 server exec 定时器清理）
      *
      * 场景：AI 发起 exec → 设备在执行期间断开 → server 应立即 reject（"设备已断开"），
@@ -1085,7 +1129,15 @@ async function main() {
         ifr.srcdoc = '<!DOCTYPE html><html><body><button id="iframe-btn">iframe按钮</button><input id="iframe-input" placeholder="iframe输入框" /></body></html>'
         document.body.appendChild(ifr)
       })
-      await new Promise((r) => setTimeout(r, 800))
+      /** 轮询等待 iframe 的 contentDocument 加载完成（固定 sleep 在慢机器上不可靠） */
+      for (let i = 0; i < 20; i++) {
+        const ready = await testPage.evaluate(() => {
+          const ifr = document.querySelector('iframe[name="embed-frame"]')
+          return !!(ifr?.contentDocument?.querySelector('#iframe-btn'))
+        })
+        if (ready) break
+        await new Promise((r) => setTimeout(r, 100))
+      }
       const snapText = await (await fetch(`${SERVER}/api/devices/${iframeDev.id}/snapshot`)).text()
       /** 验证 iframe 内元素被采集 + 带 frame 标识 */
       if (snapText.includes('[frame:embed-frame]') && snapText.includes('iframe按钮')) {

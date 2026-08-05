@@ -459,6 +459,7 @@ exec code 中可直接用的辅助函数：
   __clarosight_scroll(idx, x, y)    滚动元素（idx<0 时滚窗口），触发懒加载
   __clarosight_scrollIntoView(idx)  滚动元素到可视区域
   __clarosight_hover(idx)           鼠标悬停（触发 mouseover/mouseenter）
+  __clarosight_pressKey(idx,key,mods?) 按键（Enter/Escape/方向键，派发 keydown+keyup）
   __clarosight_wait(ms)             异步等待
   __clarosight_snapshot()           手动取快照
   __clarosight_sourcemap(line,col,srcUrl?)  解析 source map（压缩位置→原始源码位置）

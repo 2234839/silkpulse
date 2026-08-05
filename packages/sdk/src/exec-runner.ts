@@ -9,9 +9,12 @@
  *
  * 暴露给 AI 的页面级辅助函数（exec code 里可直接调用）：
  * - __clarosight_click(idx)
- * - __clarosight_setValue(idx, val)
- * - __clarosight_wait(ms)
- * - __clarosight_snapshot()
+ * - __clarosight_setValue(idx, val) / __clarosight_type(idx, text)
+ * - __clarosight_pressKey(idx, key, mods?)
+ * - __clarosight_scroll(idx, x, y) / __clarosight_scrollIntoView(idx, block?)
+ * - __clarosight_hover(idx)
+ * - __clarosight_wait(ms) / __clarosight_snapshot()
+ * - __clarosight_sourcemap(...) / __clarosight_sourcemapStack(...)
  */
 
 import type { ServerToDeviceMessage, ExecResult } from '@clarosight/shared'
@@ -29,7 +32,14 @@ export function setResultSender(sender: (execId: string, result: ExecResult) => 
   resultSender = sender
 }
 
-/** 序列化 exec 返回值（限深限长，移植 pilot serializeResult） */
+/**
+ * 序列化 exec 返回值（限深限长，移植 pilot serializeResult）
+ *
+ * 截断阈值 20000：足以容纳完整页面快照（__clarosight_snapshot() 的结构化 JSON，
+ * 典型 2-8KB，大页面可达 15KB+），同时仍能挡住 `return document` 之类的失误
+ * （整个 DOM 序列化远超 20K）。WS 单帧 20K 文本在背压保护下安全。
+ */
+const MAX_RESULT_LEN = 20000
 function serializeResult(val: unknown): string {
   try {
     return JSON.stringify(val, (_, v) => {
@@ -40,7 +50,7 @@ function serializeResult(val: unknown): string {
         return (v as { toISOString(): string }).toISOString()
       }
       return v
-    }, 0)?.slice(0, 4000) ?? 'undefined'
+    }, 0)?.slice(0, MAX_RESULT_LEN) ?? 'undefined'
   } catch (e) {
     return `[serialize failed: ${e instanceof Error ? e.message : String(e)}]`
   }
@@ -178,6 +188,49 @@ export function installHelpers(): void {
     target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }))
     target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }))
     target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }))
+    return true
+  }
+
+  /**
+   * 按键（模拟键盘输入，派发 keydown + keyup 事件）
+   *
+   * 用于诊断键盘交互：Enter 提交表单、Escape 关闭弹窗、Tab 切换焦点、
+   * 方向键导航、快捷键（Ctrl+S 等）。
+   * 某些框架（Vue @keydown、React onKeyDown）只认 keydown，部分（监听 keyup 的
+   * 搜索框、Autocomplete）需要 keyup —— 两者都派发覆盖主流场景。
+   *
+   * idx 指定目标元素（先 focus 再按键）；idx<0 时对当前 activeElement 按键。
+   * mods 可选修饰键 { ctrl, shift, alt, meta }，用于模拟组合键。
+   */
+  w.__clarosight_pressKey = (
+    idx: number,
+    /** KeyboardEvent.key 值，如 'Enter' / 'Escape' / 'ArrowDown' / 'a' */
+    key: string,
+    mods?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean },
+  ): boolean => {
+    let target: Element | undefined
+    if (idx < 0) {
+      target = document.activeElement ?? undefined
+    } else {
+      target = getElement(idx)
+    }
+    if (!target) return false
+    const el = target as HTMLElement
+    el.focus?.()
+    const opts: KeyboardEventInit = {
+      key,
+      code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: mods?.ctrl ?? false,
+      shiftKey: mods?.shift ?? false,
+      altKey: mods?.alt ?? false,
+      metaKey: mods?.meta ?? false,
+    }
+    const keyDown = new KeyboardEvent('keydown', opts)
+    const keyUp = new KeyboardEvent('keyup', opts)
+    el.dispatchEvent(keyDown)
+    el.dispatchEvent(keyUp)
     return true
   }
 

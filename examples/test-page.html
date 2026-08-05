@@ -62,6 +62,10 @@
     </div>
     <button id="hover-btn">悬停看我</button>
     <div id="hover-result" style="display:none;color:#059669;font-weight:bold;">已悬停 ✓</div>
+
+    <h3>键盘交互（验证 __clarosight_pressKey）</h3>
+    <input id="keyboard-input" placeholder="聚焦后按 Enter 提交 / Escape 清空" style="width:100%;padding:6px;margin-top:8px;">
+    <div id="keyboard-result" style="margin-top:6px;color:#7c3aed;font-weight:bold;"></div>
   </div>
 
   <div class="demo">
@@ -117,6 +121,20 @@
       resultEl.textContent = matches.length > 0
         ? `找到 ${matches.length} 个结果：${matches.join('、')}`
         : '无匹配结果'
+    })
+
+    /** 键盘交互：Enter 提交、Escape 清空（验证 __clarosight_pressKey 触发 keydown） */
+    const kbInput = document.getElementById('keyboard-input')
+    const kbResult = document.getElementById('keyboard-result')
+    kbInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        kbResult.textContent = `已提交: ${e.target.value}`
+        console.log('键盘 Enter 提交:', e.target.value)
+      } else if (e.key === 'Escape') {
+        e.target.value = ''
+        kbResult.textContent = '已清空'
+        console.log('键盘 Escape 清空')
+      }
     })
 
     /** network：fetch 成功（用 httpbin 的延迟接口，或本地 /api/devices） */

@@ -90,6 +90,7 @@ return document.querySelector('#result')?.textContent
 - `__clarosight_scroll(idx, x, y)` — 滚动元素内部（idx<0 时滚动整个窗口），触发懒加载/检查 sticky
 - `__clarosight_scrollIntoView(idx, block?)` — 滚动元素到可视区域（block: 'center'|'start'|'end'|'nearest'，默认 center）
 - `__clarosight_hover(idx)` — 鼠标悬停（触发 mouseover/mouseenter），展开下拉菜单/tooltip
+- `__clarosight_pressKey(idx, key, mods?)` — 按键（派发 keydown+keyup），如 'Enter'/'Escape'/'ArrowDown'；idx<0 对当前焦点元素；mods 可选 {ctrl,shift,alt,meta}
 - `__clarosight_wait(ms)` — 异步等待
 - `__clarosight_snapshot()` — 手动取页面快照
 - `__clarosight_sourcemap(line, col, sourceUrl?)` — 解析 source map，把压缩代码位置映射回原始源码位置（线上压缩代码报错时定位真实出错点）
