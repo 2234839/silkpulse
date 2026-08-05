@@ -1263,6 +1263,37 @@ async function main() {
           fail(`错误复制按钮反馈异常：${JSON.stringify(feedback)}`)
         }
       }
+
+      /**
+       * 19.2 复制全部错误 —— 搜索栏旁的"复制全部"按钮，点击后反馈"✓ 已复制"
+       *
+       * AI 需要完整错误现场时逐条复制低效。复制全部把当前过滤后的所有错误
+       * 格式化为文本（对齐 inspect CLI 格式）一次性复制。
+       */
+      const copyAllResult = await consolePage.evaluate(() => {
+        /** 找搜索栏区域的"复制全部"按钮 */
+        const btns = Array.from(document.querySelectorAll('button'))
+        const copyAllBtn = btns.find((b) => b.textContent.trim().startsWith('复制全部'))
+        if (!copyAllBtn) return { error: 'no 复制全部 button' }
+        const before = copyAllBtn.textContent.trim()
+        copyAllBtn.click()
+        return { clicked: true, before }
+      })
+      if (copyAllResult.error) {
+        fail(`复制全部错误按钮异常：${copyAllResult.error}`)
+      } else {
+        await new Promise((r) => setTimeout(r, 300))
+        const feedback = await consolePage.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button'))
+          const btn = btns.find((b) => b.textContent.includes('已复制') || b.textContent.trim().startsWith('复制全部'))
+          return { text: btn?.textContent?.trim() ?? '' }
+        })
+        if (feedback.text.includes('✓ 已复制')) {
+          ok(`复制全部错误按钮反馈成功（${copyAllResult.before} → ✓ 已复制）`)
+        } else {
+          fail(`复制全部错误反馈异常：${JSON.stringify(feedback)}`)
+        }
+      }
     }
 
     /** 19.5 Tab 数量徽标 —— Console/Network/Errors tab 显示条数，Errors 红色高亮 */

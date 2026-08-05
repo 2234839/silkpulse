@@ -430,6 +430,18 @@ async function copyError(e: ErrorEntry) {
   }
 }
 
+/** 复制全部错误（当前过滤后的）到剪贴板 —— AI 需要完整错误现场时一键获取 */
+const copyingAllErrors = ref(false)
+async function copyAllErrors() {
+  /** 对齐 inspect CLI 输出格式：每条错误格式化 + 空行分隔 */
+  const text = filteredErrors.value.map(formatErrorText).join('\n\n')
+  const ok = await copyText(text)
+  if (ok) {
+    copyingAllErrors.value = true
+    setTimeout(() => { copyingAllErrors.value = false }, 1500)
+  }
+}
+
 /** Network 面板：关键词搜索（按 URL / 方法 / 状态码）+ 状态码筛选 */
 const networkSearch = ref('')
 /**
@@ -882,13 +894,18 @@ onMounted(() => connect())
 
           <!-- Errors 面板 -->
           <div v-else-if="activeTab === 'errors'" class="flex-1 flex flex-col overflow-hidden bg-base">
-            <!-- 搜索栏 -->
-            <div class="p-2 border-b border-base bg-surface">
+            <!-- 搜索栏 + 复制全部 -->
+            <div class="p-2 border-b border-base bg-surface flex items-center gap-2">
               <input
                 v-model="errorSearch"
                 placeholder="搜索错误（message / 堆栈 / 源码位置）"
-                class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+                class="flex-1 text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
               />
+              <button
+                v-if="filteredErrors.length > 0"
+                @click="copyAllErrors"
+                class="shrink-0 text-xs px-2 py-1 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors whitespace-nowrap"
+              >{{ copyingAllErrors ? '✓ 已复制' : `复制全部 (${filteredErrors.length})` }}</button>
             </div>
             <!-- 错误列表 -->
             <div class="flex-1 overflow-y-auto p-4 space-y-3">
