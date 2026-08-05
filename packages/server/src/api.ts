@@ -97,7 +97,12 @@ export async function handleApiRoute(
   if (pathname === '/api/echo') {
     const { body, oversize } = await readBody(req)
     if (oversize) { sendJson(res, { error: 'body 超过 2MB 上限' }, 413); return true }
-    sendJson(res, { ok: true, received: body ? JSON.parse(body) : null, time: Date.now() })
+    /** body 可能是任意格式（JSON / FormData multipart / 纯文本），非 JSON 时原样返回文本 */
+    let received: unknown = body || null
+    if (body) {
+      try { received = JSON.parse(body) } catch { /** 非 JSON，保留原始文本 */ }
+    }
+    sendJson(res, { ok: true, received, time: Date.now() })
     return true
   }
 

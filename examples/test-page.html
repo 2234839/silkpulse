@@ -76,6 +76,7 @@
     <button id="xhr-json-btn">XHR responseType=json</button>
     <button id="post-btn">POST 请求（带 body）</button>
     <button id="request-btn">POST（Request 对象）</button>
+    <button id="formdata-btn">POST FormData（表单字段）</button>
   </div>
 
   <div class="demo">
@@ -216,6 +217,23 @@
         show(`POST(Request) 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
       } catch (e) {
         show('POST(Request) 失败: ' + e.message)
+      }
+    })
+
+    /** network：POST FormData（验证 FormData body 采集字段名 + 文件名） */
+    document.getElementById('formdata-btn').addEventListener('click', async () => {
+      const fd = new FormData()
+      fd.append('username', 'alice')
+      fd.append('email', 'alice@example.com')
+      /** 模拟文件字段（用 Blob 构造 File，不依赖真实文件输入） */
+      fd.append('avatar', new File(['fake-img'], 'profile.png', { type: 'image/png' }))
+      console.log('POST(FormData) 发起: /api/echo')
+      try {
+        const res = await fetch('/api/echo', { method: 'POST', body: fd })
+        const text = await res.text()
+        show(`POST(FormData) 完成，状态码 ${res.status}`)
+      } catch (e) {
+        show('POST(FormData) 失败: ' + e.message)
       }
     })
 

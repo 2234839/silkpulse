@@ -315,13 +315,36 @@ function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | 
   try {
     if (typeof body === 'string') return truncate(body, maxLen)
     if (body instanceof URLSearchParams) return truncate(body.toString(), maxLen)
-    if (body instanceof FormData) return '[FormData]'
+    if (body instanceof FormData) return stringifyFormData(body, maxLen)
     if (body instanceof Blob) return `[Blob ${body.type}]`
     if (body instanceof ArrayBuffer) return `[ArrayBuffer ${(body as ArrayBuffer).byteLength}b]`
     return String(body).slice(0, maxLen)
   } catch {
     return '[body 不可读]'
   }
+}
+
+/**
+ * 序列化 FormData —— 列出字段名 + 文件字段的文件名
+ *
+ * 只列 key 和文件名，不读值（隐私 + 体积控制）。诊断表单提交时，知道
+ * "提交了哪些字段"和"文件字段传了什么文件"比知道具体值更有价值
+ * （能定位"漏传字段""文件名编码错误"等问题）。
+ * 格式：[FormData: username, avatar=<photo.jpg>, token]
+ */
+function stringifyFormData(form: FormData, maxLen: number): string {
+  const parts: string[] = []
+  for (const [key, value] of form.entries()) {
+    if (value instanceof File) {
+      /** 文件字段：key=<文件名>，文件名有诊断价值（编码错误/缺失一目了然） */
+      parts.push(`${key}=<${value.name}>`)
+    } else {
+      parts.push(key)
+    }
+    /** 提前截断防超长表单拼出巨大字符串 */
+    if (parts.join(', ').length > maxLen) break
+  }
+  return truncate(`[FormData: ${parts.join(', ')}]`, maxLen)
 }
 
 /**

@@ -604,6 +604,28 @@ async function main() {
       fail(`Request 对象 body 丢失: reqBody=${reqObjEntry?.reqBody ?? 'undefined'}（body 在 Request 上不在 init，需 clone 后读取）`)
     }
 
+    /**
+     * 7.4 FormData body 采集（字段名 + 文件名）
+     *
+     * FormData 之前只标记 [FormData]，丢失字段信息。现在列出字段名 +
+     * 文件字段的文件名（格式 [FormData: username, avatar=<profile.png>]）。
+     * 验证 reqBody 含字段名和文件名。
+     */
+    await testPage.evaluate(() => document.getElementById('formdata-btn')?.click())
+    await new Promise((r) => setTimeout(r, 1500))
+    const network4 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    /** 找 FormData 那条 POST（url 含 /api/echo，reqBody 应含 FormData 标记） */
+    const formDataEntry = network4
+      .filter((n) => n.method === 'POST' && n.url.includes('/api/echo'))
+      .sort((a, b) => b.seq - a.seq)[0]
+    if (formDataEntry?.reqBody?.includes('FormData')
+      && formDataEntry.reqBody.includes('username')
+      && formDataEntry.reqBody.includes('avatar=<profile.png>')) {
+      ok(`FormData body 采集成功（含字段名 + 文件名: ${formDataEntry.reqBody.slice(0, 60)}）`)
+    } else {
+      fail(`FormData body 采集异常: reqBody=${formDataEntry?.reqBody ?? 'undefined'}（应含 [FormData: username, avatar=<profile.png>]）`)
+    }
+
     /** 7.15 POST body 大小上限保护 —— 超大 body 返回 413，不撑爆内存 */
     {
       /** 3MB body，超过 2MB 上限 */
