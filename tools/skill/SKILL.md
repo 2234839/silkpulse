@@ -84,7 +84,7 @@ return document.querySelector('#result')?.textContent
 ```
 
 **辅助函数**（exec 代码中可直接用）：
-- `__clarosight_click(idx)` — 点击 snapshot 中 idx 对应的元素
+- `__clarosight_click(idx)` — 点击 snapshot 中 idx 对应的元素（触发完整鼠标事件序列 mouseover→mousedown→mouseup→click，覆盖 div[role=button] 等监听 mousedown 的自定义组件）
 - `__clarosight_setValue(idx, val)` — 设置表单值（触发 input/change 事件，兼容 Vue/React v-model）。input/textarea 传文本值；select 传 option 的 value；checkbox 传 `'true'`/`'1'` 勾选、`'false'`/`'0'` 取消；radio 传任意非空值选中（同组其他自动互斥取消）
 - `__clarosight_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup 序列，用于搜索框等监听 keyup 的场景）
 - `__clarosight_scroll(idx, x, y)` — 滚动元素内部（idx<0 时滚动整个窗口），触发懒加载/检查 sticky

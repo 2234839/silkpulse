@@ -177,6 +177,27 @@ async function main() {
       } else fail(`exec click 异常: ${JSON.stringify(clickRes)}`)
     } else fail('snapshot 未找到 button idx')
 
+    /**
+     * 5.1a __clarosight_click 对自定义组件（div[role=button] 监听 mousedown）生效
+     *
+     * 验证完整鼠标事件序列：自定义组件只绑 mousedown 不绑 click，
+     * 若 __clarosight_click 只调 .click() 则对此类组件无效（"点了没反应"）。
+     * div[role=button] 非原生交互标签，快照里显示 id 不显示 idx，
+     * 所以从 data-clarosight-idx 属性取 idx（SDK 给每个采集元素打的标记）。
+     */
+    {
+      const customRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `const el = document.querySelector('#custom-btn'); const di = el?.getAttribute('data-clarosight-idx'); if (di == null) return 'no-idx'; __clarosight_click(Number(di)); return document.querySelector('#custom-result').textContent` }),
+      })).json()
+      if (customRes.success && customRes.result?.includes('自定义按钮已触发')) {
+        ok(`exec + __clarosight_click 对 div[role=button]（mousedown）生效`)
+      } else {
+        fail(`exec click(div[role=button]) 异常: ${JSON.stringify(customRes)}`)
+      }
+    }
+
     /** 5.1 __clarosight_type —— 模拟键盘输入到搜索框，验证 keyup 触发 + value 正确写入 */
     const snapText3 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
     /** 找 search-input 的 idx（快照里 input 带 placeholder="输入关键词"） */

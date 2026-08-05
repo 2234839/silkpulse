@@ -24,6 +24,12 @@
   </div>
 
   <div class="demo">
+    <h3>自定义组件（div 模拟按钮，验证完整鼠标事件序列）</h3>
+    <div id="custom-btn" role="button" tabindex="0" style="display:inline-block;padding:8px 16px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff;">自定义按钮</div>
+    <div id="custom-result" style="margin-top:8px;color:#7c3aed;"></div>
+  </div>
+
+  <div class="demo">
     <h3>搜索（模拟真实交互场景）</h3>
     <input id="search-input" placeholder="输入关键词搜索..." />
     <div id="search-result">（输入即搜索）</div>
@@ -102,6 +108,16 @@
       const name = document.getElementById('name-input').value || '匿名'
       console.log('打招呼:', name)
       show(`你好，${name}！`)
+    })
+
+    /**
+     * 自定义组件：div[role=button] 监听 mousedown 而非 click。
+     * 模拟线上常见的自定义按钮组件（只绑 mousedown/mouseup），验证 __clarosight_click
+     * 触发完整鼠标事件序列而非只 .click()，否则对此类组件无效。
+     */
+    document.getElementById('custom-btn').addEventListener('mousedown', () => {
+      document.getElementById('custom-result').textContent = '自定义按钮已触发 ✓'
+      console.log('custom-btn mousedown 触发')
     })
 
     document.getElementById('city-select').addEventListener('change', (e) => {

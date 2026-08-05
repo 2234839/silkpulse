@@ -107,11 +107,24 @@ export function installHelpers(): void {
     return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   }
 
-  /** 点击元素 */
+  /**
+   * 点击元素（触发完整鼠标事件序列）
+   *
+   * 派发 mouseover → mousedown → mouseup → click 四个事件，而非只调 .click()。
+   * 原因：线上大量自定义组件（div[role=button]、Vue/React 按钮组件）监听的是
+   * mousedown/mouseup 而非 click，只触发 click 对它们无效，表现为"点了没反应"。
+   * 最后用 .click() 兜底，确保原生默认行为（a 跳转、button 提交）也生效。
+   * hover 类的下拉菜单会在 mouseover 时展开，也一并覆盖。
+   */
   w.__clarosight_click = (idx: number): boolean => {
-    const el = getElement(idx)
+    const el = getElement(idx) as HTMLElement | undefined
     if (!el) return false
-    ;(el as HTMLElement).click()
+    /** MouseEvent 带 bubbles + cancelable，模拟真实用户点击的事件冒泡与可取消性 */
+    const opts = { bubbles: true, cancelable: true, view: window }
+    el.dispatchEvent(new MouseEvent('mouseover', opts))
+    el.dispatchEvent(new MouseEvent('mousedown', opts))
+    el.dispatchEvent(new MouseEvent('mouseup', opts))
+    el.click()
     return true
   }
 
