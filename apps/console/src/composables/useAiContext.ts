@@ -7,6 +7,7 @@
  */
 import { ref } from 'vue'
 import type { LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
+import { copyText } from '../utils/clipboard'
 
 interface AiContextInput {
   /** 设备 id */
@@ -47,27 +48,12 @@ export function useAiContext() {
   /** 复制到剪贴板 */
   async function copyToClipboard() {
     if (!contextText.value) return
-    try {
-      await navigator.clipboard.writeText(contextText.value)
+    const ok = await copyText(contextText.value)
+    if (ok) {
       copyState.value = 'copied'
       setTimeout(() => (copyState.value = 'idle'), 1500)
-    } catch {
-      /** 降级：用临时 textarea + execCommand */
-      const ta = document.createElement('textarea')
-      ta.value = contextText.value
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      try {
-        document.execCommand('copy')
-        copyState.value = 'copied'
-        setTimeout(() => (copyState.value = 'idle'), 1500)
-      } catch {
-        copyState.value = 'error'
-      } finally {
-        document.body.removeChild(ta)
-      }
+    } else {
+      copyState.value = 'error'
     }
   }
 

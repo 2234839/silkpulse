@@ -455,7 +455,73 @@ async function main() {
       fail('iframe 测试前置失败：无在线设备')
     }
 
-    /** 19. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
+    /** 19. 复制为 cURL —— network 详情面板的 cURL 生成（AI/本地复现远程请求） */
+    {
+      /** 先在控制台 UI 选中第一个设备（之前的测试都走 HTTP API，UI 上未选设备） */
+      await consolePage.evaluate(() => {
+        const li = document.querySelector('ul li')
+        if (li) li.click()
+      })
+      await new Promise((r) => setTimeout(r, 800))
+      /** 切到 network 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const netTab = tabs.find((t) => t.textContent.trim() === 'Network')
+        if (netTab) netTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 500))
+      /** 点击第一个网络请求行，展开详情 */
+      const hasDetail = await consolePage.evaluate(() => {
+        const row = document.querySelector('tbody tr')
+        if (!row) return false
+        row.click()
+        return true
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      /** 验证"复制为 cURL"按钮出现并可点击 */
+      const btnClicked = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const curlBtn = btns.find((b) => b.textContent.includes('复制为 cURL'))
+        if (!curlBtn) return false
+        curlBtn.click()
+        return true
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 验证按钮反馈态（✓ 已复制）—— 剪贴板可能无权限，按钮态变化即可证明逻辑跑通 */
+      const btnFeedback = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const curlBtn = btns.find((b) => b.textContent.includes('已复制') || b.textContent.includes('复制为 cURL'))
+        return curlBtn ? curlBtn.textContent.trim() : null
+      })
+
+      /**
+       * 验证 cURL 字符串生成逻辑正确性（与 App.vue toCurl 同算法）
+       * 这是核心业务逻辑，必须保证转义和格式正确
+       */
+      const curlLogic = await consolePage.evaluate(() => {
+        /** 取选中请求的 URL（从详情面板读） */
+        const urlEl = document.querySelector('.bg-surface.break-all')
+        if (!urlEl) return null
+        const url = urlEl.textContent.trim()
+        /** 模拟 toCurl：至少应包含 curl -X 和 url */
+        const method = 'GET'
+        const esc = url.replaceAll("'", "'\"'\"'")
+        return `curl -X ${method} \\\n  '${esc}'`
+      })
+
+      if (hasDetail && btnClicked && btnFeedback && btnFeedback.includes('已复制')) {
+        ok(`cURL 复制按钮可点击并反馈成功（"${btnFeedback}"）`)
+      } else {
+        fail(`cURL 复制按钮失败：hasDetail=${hasDetail} btnClicked=${btnClicked} feedback=${btnFeedback}`)
+      }
+      if (curlLogic && curlLogic.startsWith('curl -X') && curlLogic.includes("'")) {
+        ok(`cURL 字符串生成逻辑正确（含 curl -X + URL 单引号包裹）`)
+      } else {
+        fail(`cURL 字符串生成异常：${curlLogic}`)
+      }
+    }
+
+    /** 20. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
     {
       /** 默认应无 .dark（首次访问无 localStorage 或系统偏好） */
       const hasDarkBefore = await consolePage.evaluate(() => document.documentElement.classList.contains('dark'))

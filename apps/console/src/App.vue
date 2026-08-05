@@ -10,6 +10,7 @@ import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
 import { useTheme } from './composables/useTheme'
+import { copyText } from './utils/clipboard'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -47,6 +48,41 @@ const deviceTypeIcon = (t: string): string => {
 
 /** network 面板：选中的请求条目（点击展开详情） */
 const selectedNetwork = ref<NetworkEntry | null>(null)
+
+/** network 面板：cURL 复制状态（用于按钮反馈） */
+const curlCopyState = ref<'idle' | 'copied'>('idle')
+
+/**
+ * 把 NetworkEntry 转成 cURL 命令
+ *
+ * 让 AI/开发者能直接在本地复现远程设备的请求。
+ * 单引号转义：shell 单引号内用 '\'' 闭合再开。
+ */
+function toCurl(n: NetworkEntry): string {
+  const parts: string[] = [`curl -X ${n.method}`]
+  if (n.reqHeaders) {
+    for (const [k, v] of Object.entries(n.reqHeaders)) {
+      const esc = v.replaceAll("'", "'\"'\"'")
+      parts.push(`-H '${k}: ${esc}'`)
+    }
+  }
+  if (n.reqBody) {
+    const esc = n.reqBody.replaceAll("'", "'\"'\"'")
+    parts.push(`--data '${esc}'`)
+  }
+  const urlEsc = n.url.replaceAll("'", "'\"'\"'")
+  parts.push(`'${urlEsc}'`)
+  return parts.join(' \\\n  ')
+}
+
+/** 复制选中请求的 cURL 命令到剪贴板 */
+async function copyCurl() {
+  if (!selectedNetwork.value) return
+  const cmd = toCurl(selectedNetwork.value)
+  await copyText(cmd)
+  curlCopyState.value = 'copied'
+  setTimeout(() => { curlCopyState.value = 'idle' }, 1500)
+}
 
 /** 设备列表搜索（按标题/URL/类型 筛选） */
 const deviceSearch = ref('')
@@ -412,6 +448,13 @@ onMounted(() => connect())
             <div class="flex-1 overflow-y-auto p-4">
               <template v-if="selectedNetwork">
                 <div class="space-y-4">
+                  <!-- 工具栏：复制为 cURL -->
+                  <div class="flex justify-end">
+                    <button
+                      @click="copyCurl"
+                      class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
+                    >{{ curlCopyState === 'copied' ? '✓ 已复制' : '复制为 cURL' }}</button>
+                  </div>
                   <!-- 基本信息 -->
                   <div>
                     <div class="text-xs text-faint mb-1">URL</div>
