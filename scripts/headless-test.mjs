@@ -420,6 +420,26 @@ async function main() {
       fail(`POST body 采集异常: ${JSON.stringify({ method: postEntry?.method, hasReq: !!postEntry?.reqBody, hasRes: !!postEntry?.resBody })}`)
     }
 
+    /**
+     * 7.2 XHR responseType=json 响应体采集
+     *
+     * responseType='json' 时 responseText 抛 InvalidStateError，
+     * 必须改用 response（已解析对象）+ JSON.stringify。
+     * 验证响应体被正确捕获（含 "devices" 关键内容），而非 undefined。
+     */
+    await testPage.evaluate(() => document.getElementById('xhr-json-btn')?.click())
+    await new Promise((r) => setTimeout(r, 1500))
+    const network2 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    /** 找最新一条 /api/devices 的 GET XHR（responseType=json 的那条） */
+    const xhrJsonEntry = network2
+      .filter((n) => n.method === 'GET' && n.url.includes('/api/devices'))
+      .sort((a, b) => b.seq - a.seq)[0]
+    if (xhrJsonEntry && xhrJsonEntry.resBody && (xhrJsonEntry.resBody.includes('devices') || xhrJsonEntry.resBody.includes('[]'))) {
+      ok(`XHR responseType=json 响应体采集成功（resBody ${xhrJsonEntry.resBody.length} 字符: ${xhrJsonEntry.resBody.slice(0, 40)}）`)
+    } else {
+      fail(`XHR responseType=json 响应体丢失: resBody=${xhrJsonEntry?.resBody ?? 'undefined'}（responseText 在 json 模式抛 InvalidStateError，需用 response 读取）`)
+    }
+
     /** 7.15 POST body 大小上限保护 —— 超大 body 返回 413，不撑爆内存 */
     {
       /** 3MB body，超过 2MB 上限 */

@@ -193,9 +193,18 @@ function installXhrHook(sink: NetworkSink): void {
     ctx.start = Date.now()
 
     this.addEventListener('loadend', () => {
+      /**
+       * 读响应体：responseText 仅在 responseType=''/'text' 时可用，设了
+       * 'json'/'arraybuffer'/'blob'/'document' 时读 responseText 会抛
+       * InvalidStateError。用 stringifyXhrResponse 统一处理所有 responseType：
+       * - text/默认：直接 responseText
+       * - json：response（已解析对象，JSON.stringify）
+       * - arraybuffer/blob：标记类型+大小
+       * - document：标记 XML/HTML
+       */
       let resBody: string | undefined
       try {
-        resBody = truncate(String(this.responseText ?? ''), MAX_RES_BODY)
+        resBody = stringifyXhrResponse(this, MAX_RES_BODY)
       } catch {
         resBody = undefined
       }
@@ -242,6 +251,48 @@ function makeEntry(
     duration: duration ?? 0,
     error,
   }
+}
+
+/**
+ * 读取 XHR 响应体（统一处理所有 responseType）
+ *
+ * responseType='text' 或 ''（默认）：responseText 直接可用
+ * responseType='json'：response 是已解析对象，JSON.stringify 序列化
+ * responseType='arraybuffer'：response 是 ArrayBuffer，标记大小
+ * responseType='blob'：response 是 Blob，标记类型+大小
+ * responseType='document'：response 是 XML/HTML Document，标记类型
+ *
+ * 不处理 responseType 时 responseText 在非 text 模式下抛 InvalidStateError，
+ * 导致 AI 丢失响应体——诊断最关键的信息之一。
+ */
+function stringifyXhrResponse(xhr: XMLHttpRequest, maxLen: number): string | undefined {
+  const rt = xhr.responseType
+  /** text/默认模式：responseText 直接读（最常见路径，零额外开销） */
+  if (rt === '' || rt === 'text') {
+    return truncate(String(xhr.responseText ?? ''), maxLen)
+  }
+  /** json：response 已是解析后的对象/数组/null */
+  if (rt === 'json') {
+    const body = xhr.response
+    if (body == null) return undefined
+    return truncate(typeof body === 'string' ? body : JSON.stringify(body), maxLen)
+  }
+  /** arraybuffer：标记字节数（二进制体无文本诊断价值，但有大小线索） */
+  if (rt === 'arraybuffer') {
+    const buf = xhr.response as ArrayBuffer | null
+    return buf ? `[ArrayBuffer ${buf.byteLength}b]` : undefined
+  }
+  /** blob：标记类型+大小 */
+  if (rt === 'blob') {
+    const blob = xhr.response as Blob | null
+    return blob ? `[Blob ${blob.type} ${blob.size}b]` : undefined
+  }
+  /** document：XML/HTML 解析结果 */
+  if (rt === 'document') {
+    const doc = xhr.response as Document | null
+    return doc ? `[Document ${doc.documentElement?.tagName ?? '?'}]` : undefined
+  }
+  return undefined
 }
 
 /** 安全 stringify 请求体 */

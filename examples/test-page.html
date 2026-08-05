@@ -56,6 +56,7 @@
     <button id="fetch-ok">fetch 成功请求</button>
     <button id="fetch-404">fetch 404 请求</button>
     <button id="xhr-btn">XHR 请求</button>
+    <button id="xhr-json-btn">XHR responseType=json</button>
     <button id="post-btn">POST 请求（带 body）</button>
   </div>
 
@@ -126,6 +127,20 @@
       xhr.onload = () => {
         console.log('XHR 完成:', xhr.status)
         show(`XHR 完成，状态码 ${xhr.status}`)
+      }
+      xhr.send()
+    })
+
+    /** network：XHR responseType=json（验证非 text 模式响应体采集） */
+    document.getElementById('xhr-json-btn').addEventListener('click', () => {
+      console.log('XHR(json) 发起: /api/devices')
+      const xhr = new XMLHttpRequest()
+      xhr.open('GET', '/api/devices')
+      xhr.responseType = 'json'
+      xhr.onload = () => {
+        const count = Array.isArray(xhr.response) ? xhr.response.length : 0
+        console.log('XHR(json) 完成:', xhr.status, '设备数', count)
+        show(`XHR(json) 完成，状态码 ${xhr.status}，设备数 ${count}`)
       }
       xhr.send()
     })
