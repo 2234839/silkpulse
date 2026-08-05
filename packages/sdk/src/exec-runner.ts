@@ -88,6 +88,25 @@ export function installHelpers(): void {
     }
   }
 
+  /**
+   * 用原生 checked setter 设置 checkbox/radio 的勾选状态，绕过框架对 checked 的 setter 覆盖。
+   * 与 setNativeValue 同理：React/Vue 受控组件会覆盖 el.checked 的赋值。
+   */
+  const setNativeChecked = (el: HTMLInputElement, checked: boolean): void => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set
+    if (setter) setter.call(el, checked)
+    else el.checked = checked
+  }
+
+  /**
+   * CSS.escape 转义 name 属性值，用于 querySelector 属性选择器中安全引用。
+   * 无 CSS.escape 时回退到双引号包裹 + 转义双引号/反斜杠。
+   */
+  const cssEscape = (s: string): string => {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s)
+    return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  }
+
   /** 点击元素 */
   w.__clarosight_click = (idx: number): boolean => {
     const el = getElement(idx)
@@ -99,13 +118,41 @@ export function installHelpers(): void {
   /**
    * 设置表单值（触发 input/change 事件，兼容 Vue/React v-model）
    *
-   * 支持 input / textarea / select 三类表单元素：
+   * 支持 input / textarea / select / checkbox / radio：
    * - input/textarea：用原生 value setter（React 受控组件兼容），触发 input + change
-   * - select：设 .value（匹配 option 的 value），触发 change（select 的框架事件是 change 非 input）
+   * - select：设 .value（匹配 option 的 value），触发 change
+   * - checkbox：val 为 'true'/'1'/'checked' 勾选，'false'/'0' 取消（原生 checked setter 兼容框架）
+   * - radio：val 有值即选中当前，并手动取消同组（同 name）其他 radio —— 合成事件不触发
+   *   浏览器的 pre-click 默认行为，互斥需自行实现
    */
   w.__clarosight_setValue = (idx: number, val: string): boolean => {
     const el = getElement(idx) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined
     if (!el) return false
+    /** checkbox/radio：设 checked 而非 value */
+    if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+      const input = el as HTMLInputElement
+      /** radio 一旦选中无法取消；checkbox 按 val 判定 */
+      const shouldCheck = el.type === 'radio'
+        ? true
+        : val === 'true' || val === '1' || val === 'checked'
+      setNativeChecked(input, shouldCheck)
+      /**
+       * radio 互斥：合成事件不触发浏览器的 pre-click activation（只有 el.click() 或真实点击才触发），
+       * 所以同组其他已选中的 radio 需手动取消，并对每个被取消的派发 change（与浏览器行为一致）
+       */
+      if (el.type === 'radio' && input.name) {
+        for (const other of document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${cssEscape(input.name)}"]`)) {
+          if (other !== input && other.checked) {
+            setNativeChecked(other, false)
+            other.dispatchEvent(new Event('change', { bubbles: true }))
+          }
+        }
+      }
+      /** checkbox/radio 的框架事件常绑在 click/change 上，两种都触发 */
+      input.dispatchEvent(new Event('click', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }
     setNativeValue(el, val)
     /** select 主要监听 change；input/textarea 主要监听 input。两种都触发，覆盖所有框架约定 */
     el.dispatchEvent(new Event('input', { bubbles: true }))

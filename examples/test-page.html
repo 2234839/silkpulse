@@ -37,6 +37,8 @@
       <option value="gz">广州</option>
     </select>
     <label><input type="checkbox" id="agree" /> 同意条款</label>
+    <label><input type="radio" name="plan" value="free" /> 免费版</label>
+    <label><input type="radio" name="plan" value="pro" /> 专业版</label>
   </div>
 
   <div class="demo">
@@ -104,6 +106,16 @@
 
     document.getElementById('city-select').addEventListener('change', (e) => {
       console.log('选择城市:', e.target.value)
+    })
+
+    /** checkbox/radio change：验证 __clarosight_setValue 对 checkbox/radio 的支持 */
+    document.getElementById('agree').addEventListener('change', (e) => {
+      console.log('同意条款:', e.target.checked ? '已同意' : '未同意')
+    })
+    document.querySelectorAll('input[name="plan"]').forEach((r) => {
+      r.addEventListener('change', (e) => {
+        console.log('选择套餐:', e.target.value)
+      })
     })
 
     /** hover：mouseover 显示提示（验证 __clarosight_hover 触发 hover 逻辑） */

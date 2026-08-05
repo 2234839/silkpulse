@@ -246,6 +246,67 @@ async function main() {
     }
 
     /**
+     * 5.16 exec + __clarosight_setValue 对 checkbox/radio
+     *
+     * checkbox：val='true' 勾选，'false' 取消（用原生 checked setter，框架兼容）
+     * radio：val 有值即选中（同组其他自动取消）
+     * 验证 setValue 后 checked 状态正确 + change 事件触发
+     */
+    {
+      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      /** checkbox 同意条款（交互元素，用 label 文本匹配 idx） */
+      const agreeMatch = snap.match(/input #(\d+)[^\n]*check[^\n]*同意条款/)
+      /** radio 专业版 */
+      const proMatch = snap.match(/input #(\d+)[^\n]*(?:type:radio|radio)[^\n]*专业版/)
+
+      /** checkbox：先确保未勾选，setValue('true') 勾选，验证 checked=true */
+      const cbRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `const cb = document.querySelector('#agree'); cb.checked = false; __clarosight_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'true'); return cb.checked` }),
+      })).json()
+      const cbOk = cbRes.success && cbRes.result === 'true'
+
+      /** checkbox：setValue('false') 取消，验证 checked=false */
+      const cbUncheckRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'false'); return document.querySelector('#agree').checked` }),
+      })).json()
+      const cbUncheckOk = cbUncheckRes.success && cbUncheckRes.result === 'false'
+
+      /**
+       * radio 互斥：先选中 free，再选中 pro，验证 pro=true 且 free 被自动取消。
+       * 这是合成事件下浏览器默认行为不生效的场景——必须由 setValue 手动实现互斥。
+       */
+      const freeMatch = snap.match(/input #(\d+)[^\n]*(?:type:radio|radio)[^\n]*免费版/)
+      /** 先选 free（用 native setter 模拟初始选中，绕过 setValue 一次） */
+      await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `const f = document.querySelector('input[name="plan"][value="free"]'); const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked').set; s.call(f, true); f.dispatchEvent(new Event('change',{bubbles:true}))` }),
+      })
+      /** 再用 setValue 选 pro，验证互斥：pro=true，free 被取消=false */
+      const radioRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_setValue(${proMatch ? proMatch[1] : -1}, 'pro'); const pro = document.querySelector('input[name="plan"][value="pro"]'); const free = document.querySelector('input[name="plan"][value="free"]'); return { pro: pro?.checked, free: free?.checked }` }),
+      })).json()
+      const radioOk = radioRes.success && radioRes.result?.includes('"pro":true') && radioRes.result?.includes('"free":false')
+
+      /** change 事件触发的日志（"同意条款" / "选择套餐"） */
+      const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const hasAgreeLog = logsAfter.some((l) => l.message.includes('同意条款'))
+      const hasPlanLog = logsAfter.some((l) => l.message.includes('选择套餐'))
+
+      if (cbOk && cbUncheckOk && radioOk && hasAgreeLog && hasPlanLog) {
+        ok(`exec setValue 对 checkbox/radio 生效（勾选✓ 取消✓ radio互斥✓ change日志✓）`)
+      } else {
+        fail(`exec setValue(checkbox/radio) 异常：cb=${cbOk} cbUncheck=${cbUncheckOk} radio=${radioOk} agreeLog=${hasAgreeLog} planLog=${hasPlanLog}（agree idx=${agreeMatch?.[1]} pro idx=${proMatch?.[1]}）`)
+      }
+    }
+
+    /**
      * 5.2 快照表单状态采集 —— disabled/readonly/required/indeterminate/aria-disabled/aria-expanded
      *
      * AI 诊断远程表单问题（"按钮为什么点不了""表单为什么提交失败"）时，
