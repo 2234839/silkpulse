@@ -249,10 +249,7 @@ export async function execOnDevice(
       resolve({ success: false, error: '执行超时（10s）' })
     }, EXEC_TIMEOUT)
 
-    device.pendingExecs.set(execId, (result) => {
-      clearTimeout(timer)
-      resolve(result)
-    })
+    device.pendingExecs.set(execId, { resolve, timer })
 
     /** ws.send 可能因竞态（readyState 检查后断开）抛异常，保护之 */
     try {

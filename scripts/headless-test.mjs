@@ -299,6 +299,50 @@ async function main() {
       }
     }
 
+    /**
+     * 5.5 设备掉线时 pending exec 立即失败（回归 server exec 定时器清理）
+     *
+     * 场景：AI 发起 exec → 设备在执行期间断开 → server 应立即 reject（"设备已断开"），
+     * 而非傻等 10s 超时。且 pendingExecs 的超时定时器必须被清理（clearTimeout），
+     * 否则掉线后定时器仍会在 10s 后触发，操作已下线设备的 Map（泄漏 + 无意义副作用）。
+     *
+     * 验证：发起挂起 exec → 立即关设备 page → exec 应在 ~3s 内返回"断开"（远小于 9s SDK 超时）。
+     */
+    {
+      /** 开独立 page 作为待下线设备 */
+      const execOfflinePage = await browser.newPage()
+      await execOfflinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+      await new Promise((r) => setTimeout(r, 1500))
+      const allDevs = await fetchDevices()
+      /** 最新接入的就是这台设备 */
+      const execOfflineDev = allDevs[allDevs.length - 1]
+
+      /** 发起挂起 exec（不 await），立即关闭设备 page 触发 WS 断开 */
+      const execPromise = fetch(`${SERVER}/api/devices/${execOfflineDev.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `return new Promise(() => {})` }),
+      }).then((r) => r.json())
+      /** 给 server 一点时间下发 exec 到设备 */
+      await new Promise((r) => setTimeout(r, 300))
+      const closeStart = Date.now()
+      await execOfflinePage.close()
+      /** 等 server 检测到 WS close（close 事件传播 ~1-2s）+ reject pending exec */
+      const execRes = await execPromise
+      const elapsed = Date.now() - closeStart
+
+      if (!execRes.success && execRes.error && execRes.error.includes('断开')) {
+        /** 应在远小于 9s（SDK 超时）内返回 —— server 掉线立即 reject */
+        if (elapsed < 5000) {
+          ok(`设备掉线时 pending exec 立即失败（${elapsed}ms 返回"${execRes.error.slice(0, 20)}"，定时器已清理）`)
+        } else {
+          fail(`设备掉线后 exec 等待过久（${elapsed}ms，可能未立即 reject/定时器泄漏）`)
+        }
+      } else {
+        fail(`设备掉线 exec 处理异常：success=${execRes.success} err=${execRes.error ?? '无'} elapsed=${elapsed}ms`)
+      }
+    }
+
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))

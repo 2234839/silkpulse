@@ -178,9 +178,10 @@ export function setupWebSocket(
           }
           case 'exec-result': {
             if (!device) return
-            const resolve = device.pendingExecs.get(msg.execId)
-            if (resolve) {
-              resolve(msg.result)
+            const entry = device.pendingExecs.get(msg.execId)
+            if (entry) {
+              clearTimeout(entry.timer)
+              entry.resolve(msg.result)
               device.pendingExecs.delete(msg.execId)
             }
             break

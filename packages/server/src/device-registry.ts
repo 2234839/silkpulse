@@ -105,8 +105,13 @@ export interface Device {
   network: NetworkBuffer
   /** 错误环形缓冲区 */
   errors: ErrorBuffer
-  /** exec 等待映射：execId → resolve 回调（server 收到 exec-result 时调用） */
-  pendingExecs: Map<string, (result: ExecResult) => void>
+  /**
+   * exec 等待映射：execId → { resolve 回调, 超时定时器句柄 }
+   *
+   * 存 timer 是为了设备掉线时能 clearTimeout，否则 unregister 遍历 resolve 后，
+   * 10s 定时器仍会触发（Promise 二次 resolve 无害但句柄泄漏 + 操作已下线设备的 Map）。
+   */
+  pendingExecs: Map<string, { resolve: (result: ExecResult) => void; timer: ReturnType<typeof setTimeout> }>
 }
 
 /**
@@ -179,9 +184,10 @@ export class DeviceRegistry {
   unregister(deviceId: string) {
     const device = this.devices.get(deviceId)
     if (!device) return
-    /** 设备掉线时，reject 所有未完成的 exec */
-    for (const [, resolve] of device.pendingExecs) {
-      resolve({
+    /** 设备掉线时，reject 所有未完成的 exec + 清理超时定时器（防泄漏） */
+    for (const [, entry] of device.pendingExecs) {
+      clearTimeout(entry.timer)
+      entry.resolve({
         success: false,
         error: '设备已断开连接',
       })
