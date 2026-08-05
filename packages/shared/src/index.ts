@@ -169,6 +169,8 @@ export interface SnapshotElement {
   text?: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 是否为当前聚焦元素（document.activeElement） */
+  focused?: boolean
   /** 是否只读（input/textarea，值不可编辑但可聚焦） */
   readOnly?: boolean
   /** 是否必填（表单校验失败时 AI 据此判断缺哪个字段） */

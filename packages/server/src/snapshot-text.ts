@@ -52,6 +52,7 @@ function serializeCompactText(els: SnapshotElement[]): string {
     if (e.type != null) parts.push(`type:${e.type}`)
     if (e.placeholder != null) parts.push(`ph:${e.placeholder}`)
     if (e.href != null) parts.push(`href:${e.href}`)
+    if (e.focused) parts.push('focus')
     if (e.disabled) parts.push('disabled')
     if (e.readOnly) parts.push('readonly')
     if (e.required) parts.push('required')

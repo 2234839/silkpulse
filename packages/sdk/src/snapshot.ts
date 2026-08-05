@@ -236,6 +236,17 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
    * - aria-disabled：自定义组件（尤 Vue/React 按钮组件）常用 aria 而非原生 disabled
    * - aria-expanded：折叠/展开态（菜单、抽屉、手风琴），AI 判断"展开后元素找不到"的关键
    */
+  /**
+   * 当前聚焦元素标记
+   *
+   * AI 远程操作表单时需知道光标位置：诊断"输入后提交失败"时，焦点在哪个输入框
+   * 是关键上下文；AI 执行 __clarosight_type 前能从快照判断是否需要先 click 定位。
+   * 用 ownerDocument 而非 document，穿透 iframe 时判断的是 iframe 内的聚焦元素。
+   */
+  if (el.ownerDocument && el.ownerDocument.activeElement === el) {
+    entry.focused = true
+  }
+
   if (htmlEl.disabled) entry.disabled = true
   if (htmlEl.readOnly) entry.readOnly = true
   if (htmlEl.required) entry.required = true

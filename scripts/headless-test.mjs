@@ -209,7 +209,26 @@ async function main() {
     }
 
     /**
-     * 5.3 exec 错误信息含 stack —— AI 诊断远程报错时需要出错位置
+     * 5.25 快照采集当前聚焦元素 —— AI 远程操作表单需知道光标位置
+     *
+     * 诊断"输入后提交失败"时，焦点在哪个输入框是关键上下文。
+     * AI 执行 __clarosight_type 前能从快照判断是否需要先 click 定位。
+     */
+    {
+      /** 聚焦 name-input */
+      await testPage.evaluate(() => document.getElementById('name-input')?.focus())
+      await new Promise((r) => setTimeout(r, 300))
+      const focusSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      /** name-input 带 placeholder="输入你的名字"，应标 focus */
+      const focusLine = focusSnap.split('\n').find((l) => l.includes('focus'))
+      if (focusLine && /输入你的名字/.test(focusLine)) {
+        ok(`快照标记聚焦元素（${focusLine.trim()}）`)
+      } else {
+        fail(`快照未正确标记聚焦元素：${focusLine ?? '无 focus 行'}`)
+      }
+    }
+
+    /** 5.3 exec 错误信息含 stack —— AI 诊断远程报错时需要出错位置
      *
      * 之前 exec catch 只返回 "TypeError: xxx" 单行，AI 无法定位。
      * 现在运行时错误附带 stack（截断），语法错误保持单行（无 stack）。
