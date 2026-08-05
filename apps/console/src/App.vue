@@ -65,6 +65,22 @@ function formatHeaders(h: Record<string, string>): string {
   return Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('\n')
 }
 
+/**
+ * 格式化请求体/响应体：JSON 则美化缩进，否则原样返回。
+ *
+ * 调试时点击网络请求看详情，压缩 JSON（如 {"code":0,"data":[...]）可读性极差。
+ * 尝试 JSON.parse 成功则 2 空格缩进美化；非 JSON（FormData 文本、纯字符串）原样返回。
+ * 这里设计上就需要 try-catch —— 输入"可能不是 JSON"是正常的，不是异常情况。
+ */
+function formatBody(body: string): string {
+  try {
+    const parsed = JSON.parse(body)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return body
+  }
+}
+
 function toCurl(n: NetworkEntry): string {
   const parts: string[] = [`curl -X ${n.method}`]
   if (n.reqHeaders) {
@@ -873,13 +889,13 @@ onMounted(() => connect())
                   <!-- 请求体 -->
                   <div v-if="selectedNetwork.reqBody">
                     <div class="text-xs text-faint mb-1">请求体</div>
-                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ selectedNetwork.reqBody }}</pre>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ formatBody(selectedNetwork.reqBody) }}</pre>
                   </div>
 
                   <!-- 响应体 -->
                   <div v-if="selectedNetwork.resBody">
                     <div class="text-xs text-faint mb-1">响应体</div>
-                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ selectedNetwork.resBody }}</pre>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ formatBody(selectedNetwork.resBody) }}</pre>
                   </div>
 
                   <!-- 无 body 提示 -->

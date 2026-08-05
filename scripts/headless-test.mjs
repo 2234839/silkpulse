@@ -1853,6 +1853,49 @@ async function main() {
       }
     }
 
+    /**
+     * 20.5 network 详情面板 JSON 响应体格式化
+     *
+     * 点击返回 JSON 的请求（POST /api/echo 回显 {"ok":true,"received":{...}}），
+     * 详情面板的响应体应被 formatBody 美化为多行缩进格式（含 \n + 双空格缩进），
+     * 而非压缩的单行 JSON。调试者看详情时压缩 JSON 可读性极差。
+     */
+    {
+      /** 已在 network 面板。找 echo 请求行（URL 含 echo），点击展开详情 */
+      const formatted = await consolePage.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tbody tr'))
+        /** 找 URL 列含 "echo" 的行（POST /api/echo 回显 JSON） */
+        const echoRow = rows.find((r) => r.textContent.includes('echo'))
+        if (!echoRow) return { found: false }
+        echoRow.click()
+        return { found: true }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 读详情面板的响应体 <pre> 内容：格式化后应含换行 + 缩进空格 */
+      const resBodyText = await consolePage.evaluate(() => {
+        /** 详情面板里"响应体"标题后的 <pre> */
+        const labels = Array.from(document.querySelectorAll('.text-xs.text-faint'))
+        const resBodyLabel = labels.find((l) => l.textContent.trim() === '响应体')
+        if (!resBodyLabel) return null
+        const pre = resBodyLabel.nextElementSibling
+        return pre ? pre.textContent : null
+      })
+      /**
+       * 格式化判定：原始 echo 响应是单行 {"ok":true,"received":{...}}，
+       * formatBody 美化后含换行 + 双空格缩进（如 '  "ok": true'）。
+       * 检测换行数 > 1 且含 '"ok":' 或 '"ok" :'（JSON key 跨行）。
+       */
+      const isFormatted = resBodyText != null
+        && resBodyText.includes('\n')
+        && resBodyText.split('\n').length > 2
+        && /"?ok"?\s*:/.test(resBodyText)
+      if (formatted.found && isFormatted) {
+        ok(`network 详情 JSON 响应体格式化生效（${resBodyText.split('\n').length} 行缩进美化）`)
+      } else {
+        fail(`network 详情 JSON 格式化异常：found=${formatted.found} body=${resBodyText ? resBodyText.slice(0, 80) : 'null'}`)
+      }
+    }
+
     /** 20. skill CLI —— network 命令展示 headers + inspect 聚合命令 */
     {
       const skillScript = path.join(process.cwd(), 'tools/skill/scripts/clarosight.mjs')
