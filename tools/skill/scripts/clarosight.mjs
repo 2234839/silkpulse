@@ -235,6 +235,7 @@ exec 的 code 也可通过 stdin 传入（适合复杂多行代码）：
 exec code 中可直接用的辅助函数：
   __clarosight_click(idx)           点击 snapshot 中的元素
   __clarosight_setValue(idx, val)   设置表单值（触发 input 事件）
+  __clarosight_type(idx, text)      模拟键盘逐字输入（触发 keydown/keyup 序列）
   __clarosight_wait(ms)             异步等待
   __clarosight_snapshot()           手动取快照
 

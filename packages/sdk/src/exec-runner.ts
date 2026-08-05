@@ -77,6 +77,25 @@ export function installHelpers(): void {
     return true
   }
 
+  /**
+   * 模拟键盘逐字输入（触发 keydown/keypress/input/keyup 序列）
+   * 用于搜索框 autocomplete、监听 keyup 的场景，setValue 不够用时使用
+   */
+  w.__clarosight_type = (idx: number, text: string): boolean => {
+    const el = getElement(idx) as HTMLInputElement | undefined
+    if (!el) return false
+    el.focus()
+    el.value = ''
+    for (const ch of text) {
+      el.value += ch
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }))
+      el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }))
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }))
+    }
+    return true
+  }
+
   /** 异步等待（exec code 中 await __clarosight_wait(100)） */
   w.__clarosight_wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

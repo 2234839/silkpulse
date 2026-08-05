@@ -105,6 +105,22 @@ async function main() {
       } else fail(`exec click 异常: ${JSON.stringify(clickRes)}`)
     } else fail('snapshot 未找到 button idx')
 
+    /** 5.1 __clarosight_type —— 模拟键盘输入到搜索框，验证 keyup 触发 */
+    const snapText3 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+    /** 找 search-input 的 idx（快照里 input 带 placeholder="输入关键词"） */
+    const searchMatch = snapText3.match(/input #(\d+)[^\n]*关键词/)
+    if (searchMatch) {
+      const searchIdx = searchMatch[1]
+      const typeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_type(${searchIdx}, "苹"); return document.querySelector("#search-result").textContent` }),
+      })).json()
+      if (typeRes.success && typeRes.result?.includes('苹果')) {
+        ok(`exec + __clarosight_type(${searchIdx}, "苹") 生效，搜索结果: ${typeRes.result}`)
+      } else fail(`exec type 异常: ${JSON.stringify(typeRes).slice(0, 150)}`)
+    } else fail('snapshot 未找到搜索框 idx')
+
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))

@@ -24,6 +24,12 @@
   </div>
 
   <div class="demo">
+    <h3>搜索（模拟真实交互场景）</h3>
+    <input id="search-input" placeholder="输入关键词搜索..." />
+    <div id="search-result">（输入即搜索）</div>
+  </div>
+
+  <div class="demo">
     <h3>表单</h3>
     <select id="city-select">
       <option value="bj">北京</option>
@@ -66,6 +72,18 @@
 
     document.getElementById('city-select').addEventListener('change', (e) => {
       console.log('选择城市:', e.target.value)
+    })
+
+    /** 搜索框：keyup 触发搜索（模拟真实交互，只能用键盘事件触发） */
+    const searchData = ['苹果', '香蕉', '橙子', '葡萄', '西瓜']
+    document.getElementById('search-input').addEventListener('keyup', (e) => {
+      const query = e.target.value.trim()
+      const resultEl = document.getElementById('search-result')
+      console.log('搜索:', query || '(空)')
+      const matches = searchData.filter((item) => item.includes(query))
+      resultEl.textContent = matches.length > 0
+        ? `找到 ${matches.length} 个结果：${matches.join('、')}`
+        : '无匹配结果'
     })
 
     /** network：fetch 成功（用 httpbin 的延迟接口，或本地 /api/devices） */

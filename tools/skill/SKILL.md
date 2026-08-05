@@ -75,6 +75,7 @@ return document.querySelector('#result')?.textContent
 **辅助函数**（exec 代码中可直接用）：
 - `__clarosight_click(idx)` — 点击 snapshot 中 idx 对应的元素
 - `__clarosight_setValue(idx, val)` — 设置表单值（触发 input 事件，兼容 Vue/React v-model）
+- `__clarosight_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup 序列，用于搜索框等监听 keyup 的场景）
 - `__clarosight_wait(ms)` — 异步等待
 - `__clarosight_snapshot()` — 手动取页面快照
 
