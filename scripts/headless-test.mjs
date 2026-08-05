@@ -36,11 +36,22 @@ let failed = 0
 function ok(msg) { console.log(`${PASS} [${step++}] ${msg}`) }
 function fail(msg, e) { console.error(`${FAIL} [${step++}] ${msg}`, e ?? ''); failed++ }
 
+/** 拉取在线设备列表（/api/devices 返回 { devices, recentlyOffline }，测试只用 devices 数组） */
+async function fetchDevices() {
+  const data = await (await fetch(`${SERVER}/api/devices`)).json()
+  return data.devices ?? data
+}
+
+/** 拉取完整设备响应（含 recentlyOffline） */
+async function fetchDevicesResponse() {
+  return (await fetch(`${SERVER}/api/devices`)).json()
+}
+
 async function waitForDevice(timeoutMs = 10000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
-      const devices = await (await fetch(`${SERVER}/api/devices`)).json()
+      const devices = await fetchDevices()
       if (devices.length > 0) return devices[0]
     } catch {}
     await new Promise((r) => setTimeout(r, 300))
@@ -117,7 +128,7 @@ async function main() {
     /** 2.2 SPA 路由变化上报 —— pushState 后 server 端 url 应更新 */
     await testPage.evaluate(() => history.pushState({}, '', '/spa-route-xyz'))
     await new Promise((r) => setTimeout(r, 800))
-    const devAfter = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === device.id)
+    const devAfter = (await fetchDevices()).find((d) => d.id === device.id)
     if (devAfter?.url?.includes('/spa-route-xyz')) {
       ok(`SPA 路由变化上报成功: url → ${devAfter.url.slice(-25)}`)
     } else {
@@ -424,7 +435,7 @@ async function main() {
     /** 8.5 资源加载失败不应计入 errorCount（避免 404 图片误导诊断） */
     {
       /** 记录触发前的 errorCount */
-      const beforeDeviceInfo = await (await fetch(`${SERVER}/api/devices`)).json()
+      const beforeDeviceInfo = await fetchDevices()
       const errCountBefore = beforeDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
       const errsBefore = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
 
@@ -444,7 +455,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 1200))
 
       /** 验证 errorCount 和 errors 数量都没增长 */
-      const afterDeviceInfo = await (await fetch(`${SERVER}/api/devices`)).json()
+      const afterDeviceInfo = await fetchDevices()
       const errCountAfter = afterDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
       const errsAfter = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
 
@@ -516,7 +527,7 @@ async function main() {
     const testPage2 = await browser.newPage()
     await testPage2.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
     await new Promise((r) => setTimeout(r, 1000))
-    const devicesList = await (await fetch(`${SERVER}/api/devices`)).json()
+    const devicesList = await fetchDevices()
     if (devicesList.length >= 2) {
       ok(`多设备并发成功（${devicesList.length} 个设备在线）`)
     } else {
@@ -573,7 +584,7 @@ async function main() {
     }
 
     /** 12. bookmarklet 注入 —— 拉取 bookmarklet，在真实页面执行，验证新设备上线 */
-    const beforeCount = (await (await fetch(`${SERVER}/api/devices`)).json()).length
+    const beforeCount = (await fetchDevices()).length
     const bookmarklet = await (await fetch(`${SERVER}/inject/bookmarklet`)).text()
     /** bookmarklet 形如 javascript:<encoded>，解码后在目标页面执行 */
     const bmCode = decodeURIComponent(bookmarklet.replace(/^javascript:/, ''))
@@ -585,7 +596,7 @@ async function main() {
     await bmPage.goto(`${SERVER}/inject-test`, { waitUntil: 'domcontentloaded' })
     await bmPage.evaluate(bmCode)
     await new Promise((r) => setTimeout(r, 2000))
-    const afterCount = (await (await fetch(`${SERVER}/api/devices`)).json()).length
+    const afterCount = (await fetchDevices()).length
     if (afterCount > beforeCount) {
       ok(`bookmarklet 注入成功（设备数 ${beforeCount} → ${afterCount}）`)
     } else {
@@ -607,7 +618,7 @@ async function main() {
         offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
       })
       await new Promise((r) => setTimeout(r, 6000))
-      const reconDevices = await (await fetch(`${SERVER}/api/devices`)).json()
+      const reconDevices = await fetchDevices()
       const reconMatch = reconDevices.find((d) => d.id === reconDev.id)
       if (reconMatch) {
         const logsAfterRecon = await (await fetch(`${SERVER}/api/devices/${reconDev.id}/logs`)).json()
@@ -657,6 +668,33 @@ async function main() {
       }
     }
 
+    /**
+     * 13.6 最近下线设备历史 —— AI 判断"接入过但掉了" vs "从未接入"
+     *
+     * 设备下线后从 devices 删除，但保留摘要到 recentlyOffline（上限 10），
+     * AI 调 /api/devices 能看到"X 分钟前有设备掉过线"，不误判为"用户没接入"。
+     * 设备重连后从 recentlyOffline 移除。
+     */
+    {
+      /** 开一个独立 page 作为待下线设备 */
+      const offlinePage = await browser.newPage()
+      await offlinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+      await new Promise((r) => setTimeout(r, 1500))
+      const offlineDevs = await fetchDevices()
+      const offlineDev = offlineDevs[offlineDevs.length - 1]
+      /** close page 触发 WS 断开 → server 检测下线（3s 等 close 事件传播） */
+      await offlinePage.close()
+      await new Promise((r) => setTimeout(r, 3000))
+      const { devices: onlineNow, recentlyOffline: offlineHist } = await fetchDevicesResponse()
+      const inOnline = onlineNow.some((d) => d.id === offlineDev.id)
+      const inOffline = offlineHist.find((o) => o.id === offlineDev.id)
+      if (!inOnline && inOffline && typeof inOffline.offlineAt === 'number') {
+        ok(`最近下线设备历史生效（${inOffline.title}，offlineAt 已记录）`)
+      } else {
+        fail(`下线历史异常：online=${inOnline} offline=${!!inOffline}`)
+      }
+    }
+
     /** 14. 设备标签/备注 —— POST /tags 设置，GET /devices 反映，再触发 SPA 路由确认不被覆盖 */
     const tagDev = await waitForDevice()
     if (tagDev) {
@@ -677,7 +715,7 @@ async function main() {
       }
 
       /** GET /devices 应反映新标签 */
-      const devWithTags = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === tagDev.id)
+      const devWithTags = (await fetchDevices()).find((d) => d.id === tagDev.id)
       if (devWithTags?.tags?.length === 2 && devWithTags?.note === 'iPhone 15 测试机') {
         ok(`GET /devices 正确反映标签/备注`)
       } else {
@@ -687,7 +725,7 @@ async function main() {
       /** 触发 SPA 路由上报（update-info），验证 tags/note 不被 SDK 上报覆盖 */
       await testPage.evaluate(() => history.pushState({}, '', '/tag-persistence-check'))
       await new Promise((r) => setTimeout(r, 800))
-      const devAfterRoute = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === tagDev.id)
+      const devAfterRoute = (await fetchDevices()).find((d) => d.id === tagDev.id)
       if (devAfterRoute?.tags?.length === 2 && devAfterRoute?.note === 'iPhone 15 测试机') {
         ok(`SPA 路由变化后标签/备注保留（未被 update-info 覆盖）`)
       } else {

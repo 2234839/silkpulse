@@ -52,7 +52,7 @@ async function resolveDeviceId(idOrPrefix) {
     process.exit(1)
   }
   /** 完整 id 直接返回 */
-  const devices = await getJson('/api/devices')
+  const { devices } = await getJson('/api/devices')
   if (devices.some((d) => d.id === idOrPrefix)) return idOrPrefix
   /** 前缀匹配 */
   const matched = devices.filter((d) => d.id.startsWith(idOrPrefix))
@@ -84,9 +84,18 @@ function readStdin() {
 async function main() {
   switch (cmd) {
     case 'devices': {
-      const devices = await getJson('/api/devices')
+      const { devices, recentlyOffline } = await getJson('/api/devices')
       if (devices.length === 0) {
         console.log('（暂无在线设备。接入方式：在目标页面注入 <script src="' + SERVER + '/sdk.js"></script>）')
+        /** 无在线设备时，提示最近下线的设备 —— AI 据此区分"从未接入"和"接入过但掉了" */
+        if (recentlyOffline.length > 0) {
+          console.log('\n最近下线设备（接入过但已掉线，可能需等待重连）：')
+          for (const o of recentlyOffline) {
+            const mins = Math.round((Date.now() - o.offlineAt) / 60000)
+            console.log(`  · [${o.id}] ${o.title}（${mins} 分钟前下线，${o.errorCount} 个错误）`)
+            console.log(`        URL: ${o.url}`)
+          }
+        }
         return
       }
       /** 按错误数降序排序：有错误的设备优先展示，AI 能快速定位问题设备 */
@@ -224,13 +233,13 @@ async function main() {
        * 与控制台"AI 诊断上下文"按钮对齐，输出 token 友好的结构化文本。
        */
       const id = await resolveDeviceId(args[0])
-      const [devices, errors, network, snapshotRes] = await Promise.all([
+      const [devicesResp, errors, network, snapshotRes] = await Promise.all([
         getJson('/api/devices'),
         getJson(`/api/devices/${id}/errors`),
         getJson(`/api/devices/${id}/network`),
         get(`/api/devices/${id}/snapshot`),
       ])
-      const device = devices.find((d) => d.id === id)
+      const device = devicesResp.devices.find((d) => d.id === id)
       const snapshot = await snapshotRes.text()
 
       console.log('# clarosight 设备诊断聚合')

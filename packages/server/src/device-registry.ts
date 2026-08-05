@@ -10,6 +10,7 @@
 import type { WebSocket } from 'ws'
 import type {
   DeviceInfo,
+  OfflineDeviceSummary,
   LogEntry,
   NetworkEntry,
   ErrorEntry,
@@ -114,6 +115,14 @@ export interface Device {
  */
 export class DeviceRegistry {
   private devices = new Map<string, Device>()
+  /**
+   * 最近下线设备摘要（环形缓冲，上限 10 个）
+   *
+   * 设备下线后从 devices 删除，但保留一份摘要在此，让 AI 能区分
+   * "从未接入"和"接入过但掉了"。设备重连时移除其旧摘要（已恢复在线）。
+   */
+  private offlineHistory: OfflineDeviceSummary[] = []
+  private static readonly MAX_OFFLINE_HISTORY = 10
   /** 设备上线/下线时的监听器（供 ws-relay 推送给控制台） */
   private listeners: Array<(event: DeviceListEvent) => void> = []
 
@@ -132,6 +141,8 @@ export class DeviceRegistry {
 
   /** 设备上线（含重连：同 id 复用缓冲区，只更新 ws，不丢历史数据） */
   register(info: DeviceInfo, ws: WebSocket): Device {
+    /** 设备恢复在线，从下线历史移除（不再算"最近下线"） */
+    this.offlineHistory = this.offlineHistory.filter((o) => o.id !== info.id)
     const existing = this.devices.get(info.id)
     if (existing) {
       /** 重连：保留 logs/network/errors 历史，只换连接和元信息。
@@ -176,6 +187,20 @@ export class DeviceRegistry {
       })
     }
     device.pendingExecs.clear()
+    /** 记录下线摘要（供 AI 判断"接入过但掉了"），环形缓冲防膨胀 */
+    this.offlineHistory.push({
+      id: device.info.id,
+      url: device.info.url,
+      title: device.info.title,
+      deviceType: device.info.deviceType,
+      offlineAt: Date.now(),
+      onlineAt: device.info.onlineAt,
+      errorCount: device.info.errorCount,
+      tags: device.info.tags,
+    })
+    if (this.offlineHistory.length > DeviceRegistry.MAX_OFFLINE_HISTORY) {
+      this.offlineHistory.shift()
+    }
     this.devices.delete(deviceId)
     this.emit({ type: 'offline', deviceId })
   }
@@ -188,6 +213,11 @@ export class DeviceRegistry {
   /** 所有在线设备信息（用于 HTTP API /api/devices） */
   list(): DeviceInfo[] {
     return Array.from(this.devices.values()).map((d) => d.info)
+  }
+
+  /** 最近下线设备摘要（用于 AI 判断"接入过但掉了"） */
+  listOffline(): OfflineDeviceSummary[] {
+    return [...this.offlineHistory]
   }
 
   /** 更新设备元信息（页面导航、错误数变化时） */

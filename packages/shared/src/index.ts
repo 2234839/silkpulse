@@ -61,6 +61,31 @@ export interface DeviceInfo {
   note?: string
 }
 
+/**
+ * 最近下线设备摘要（供 AI 判断"设备接入过但掉了" vs "从未接入"）
+ *
+ * 诊断间歇性问题时，AI 连上 server 发现无在线设备，若无此历史，
+ * 无法区分"用户没接入"和"接入过但刚掉线"，导致诊断方向错误。
+ */
+export interface OfflineDeviceSummary {
+  /** 设备 id */
+  id: string
+  /** 最后的页面 URL */
+  url: string
+  /** 最后的页面标题 */
+  title: string
+  /** 设备类型 */
+  deviceType: 'mobile' | 'tablet' | 'desktop'
+  /** 下线时刻的时间戳（ms） */
+  offlineAt: number
+  /** 上线时刻的时间戳（ms） */
+  onlineAt: number
+  /** 累计错误数（下线时的快照） */
+  errorCount: number
+  /** 标签 */
+  tags: string[]
+}
+
 /** console 日志条目 */
 export interface LogEntry {
   /** ISO 时间戳 */

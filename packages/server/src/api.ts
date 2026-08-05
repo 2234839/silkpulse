@@ -101,9 +101,12 @@ export async function handleApiRoute(
     return true
   }
 
-  /** /api/devices —— 列出所有在线设备 */
+  /** /api/devices —— 列出所有在线设备 + 最近下线设备（供 AI 判断接入状态） */
   if (pathname === '/api/devices' && req.method === 'GET') {
-    sendJson(res, registry.list())
+    sendJson(res, {
+      devices: registry.list(),
+      recentlyOffline: registry.listOffline(),
+    })
     return true
   }
 
