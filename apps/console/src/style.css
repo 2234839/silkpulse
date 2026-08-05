@@ -1,1 +1,78 @@
 @import "tailwindcss";
+
+/**
+ * clarosight 控制台主题 —— 语义化 CSS 变量驱动的双主题（亮/暗）
+ *
+ * 不用 Tailwind 的 dark: 变体（152 处颜色逐个加 dark: 易遗漏且繁琐），
+ * 改用语义 utility class（bg-base / bg-surface / text-primary 等），
+ * 在 :root 定义亮色变量，.dark 下覆盖为暗色，模板切换零成本。
+ */
+
+/** 亮色主题（默认） */
+:root {
+  --cs-bg: #f9fafb;          /** 页面底色 gray-50 */
+  --cs-surface: #ffffff;      /** 卡片/面板/工具栏 */
+  --cs-elevated: #f3f4f6;     /** 悬浮/header/按钮底 gray-100 */
+  --cs-elevated-hover: #e5e7eb; /** hover 态 gray-200 */
+  --cs-text: #1f2937;         /** 主文字 gray-800 */
+  --cs-text-secondary: #4b5563; /** 次要文字 gray-600 */
+  --cs-text-muted: #6b7280;   /** 弱文字 gray-500 */
+  --cs-text-faint: #9ca3af;   /** 更弱 gray-400 */
+  --cs-border: #e5e7eb;       /** 分隔线 gray-200 */
+  --cs-border-light: #f3f4f6; /** 浅分隔 gray-100 */
+  --cs-input-bg: #ffffff;     /** 输入框底色 */
+  --cs-input-border: #d1d5db; /** 输入框边框 gray-300 */
+  /** 状态色（双主题通用，仅微调透明背景） */
+  --cs-blue-soft: #eff6ff;    /** blue-50 */
+  --cs-blue-text: #1d4ed8;    /** blue-700 */
+  --cs-red-soft: #fef2f2;     /** red-50 */
+  --cs-red-border: #fecaca;   /** red-200 */
+  --cs-red-text: #991b1b;     /** red-800 */
+}
+
+/** 暗色主题 */
+.dark {
+  --cs-bg: #0f1419;           /** 深底色（偏冷） */
+  --cs-surface: #1a1f29;      /** 卡片/面板 */
+  --cs-elevated: #252b36;     /** 悬浮/header */
+  --cs-elevated-hover: #2d3441; /** hover 态 */
+  --cs-text: #e5e7eb;         /** 主文字 gray-200 */
+  --cs-text-secondary: #9ca3af; /** 次要文字 gray-400 */
+  --cs-text-muted: #8b95a5;   /** 弱文字 */
+  --cs-text-faint: #6b7280;   /** 更弱 */
+  --cs-border: #2d3441;       /** 分隔线 */
+  --cs-border-light: #252b36; /** 浅分隔 */
+  --cs-input-bg: #0f1419;     /** 输入框底色 */
+  --cs-input-border: #3a4150; /** 输入框边框 */
+  /** 状态色暗色版（降低饱和度，提高可读性） */
+  --cs-blue-soft: #1e293b;
+  --cs-blue-text: #93c5fd;
+  --cs-red-soft: #2d1517;
+  --cs-red-border: #7f1d1d;
+  --cs-red-text: #fca5a5;
+}
+
+/** 语义 utility class —— 映射到 CSS 变量，双主题自动切换 */
+@layer utilities {
+  .bg-base { background-color: var(--cs-bg); }
+  .bg-surface { background-color: var(--cs-surface); }
+  .bg-elevated { background-color: var(--cs-elevated); }
+  .bg-elevated-hover:hover { background-color: var(--cs-elevated-hover); }
+  .bg-input { background-color: var(--cs-input-bg); }
+  .bg-blue-soft { background-color: var(--cs-blue-soft); }
+  .bg-red-soft { background-color: var(--cs-red-soft); }
+
+  .text-primary { color: var(--cs-text); }
+  .text-secondary { color: var(--cs-text-secondary); }
+  .text-muted { color: var(--cs-text-muted); }
+  .text-faint { color: var(--cs-text-faint); }
+  .text-blue-key { color: var(--cs-blue-text); }
+  .text-red-key { color: var(--cs-red-text); }
+
+  .border-base { border-color: var(--cs-border); }
+  .border-light { border-color: var(--cs-border-light); }
+  .border-input { border-color: var(--cs-input-border); }
+  .border-red-soft { border-color: var(--cs-red-border); }
+
+  .focus-border-blue:focus { border-color: #3b82f6; }
+}

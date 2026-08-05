@@ -9,6 +9,9 @@ import type { NetworkEntry } from '@clarosight/shared'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
+import { useTheme } from './composables/useTheme'
+
+const { theme, toggleTheme } = useTheme()
 
 const {
   devices,
@@ -120,8 +123,8 @@ const activeTab = ref<'console' | 'network' | 'errors' | 'snapshot' | 'exec'>('c
 const logColor = (type: string): string => {
   if (type === 'error') return 'text-red-600'
   if (type === 'warn') return 'text-amber-600'
-  if (type === 'debug') return 'text-gray-400'
-  return 'text-gray-700'
+  if (type === 'debug') return 'text-faint'
+  return 'text-primary'
 }
 
 /** Console 面板：级别筛选 + 搜索 */
@@ -211,6 +214,12 @@ onMounted(() => connect())
         />
         {{ connected ? '已连接' : '断开中' }}
       </span>
+      <!-- 主题切换 -->
+      <button
+        @click="toggleTheme"
+        class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
+        :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+      >{{ theme === 'dark' ? '☀️' : '🌙' }}</button>
       <button
         v-if="selectedDevice"
         @click="openAiContext"
@@ -224,16 +233,16 @@ onMounted(() => connect())
 
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧：设备列表 -->
-      <aside class="w-72 border-r border-gray-200 bg-white overflow-y-auto flex flex-col">
-        <div class="px-4 py-3 border-b border-gray-200">
-          <h2 class="text-sm font-semibold text-gray-700">
+      <aside class="w-72 border-r border-base bg-surface overflow-y-auto flex flex-col">
+        <div class="px-4 py-3 border-b border-base">
+          <h2 class="text-sm font-semibold text-secondary">
             在线设备
-            <span class="text-gray-400 font-normal">({{ devices.length }})</span>
+            <span class="text-faint font-normal">({{ devices.length }})</span>
           </h2>
           <input
             v-model="deviceSearch"
             placeholder="搜索设备（标题/URL/类型）..."
-            class="mt-2 w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-400"
+            class="mt-2 w-full px-2 py-1 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
           />
         </div>
         <ul>
@@ -241,64 +250,64 @@ onMounted(() => connect())
             v-for="d in filteredDevices"
             :key="d.id"
             @click="selectDevice(d.id)"
-            class="px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 relative"
-            :class="selectedDeviceId === d.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''"
+            class="px-4 py-3 border-b border-light cursor-pointer hover:bg-base relative"
+            :class="selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : ''"
           >
             <!-- 有错误时左侧红条 -->
             <span
               v-if="d.errorCount > 0"
               class="absolute left-0 top-0 bottom-0 w-1 bg-red-400"
             />
-            <div class="text-sm font-medium text-gray-800 truncate">
+            <div class="text-sm font-medium text-primary truncate">
               <span class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
               <!-- 编辑标签按钮（仅选中时显示） -->
               <button
                 v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
                 @click.stop="startEditTags(d.id)"
-                class="ml-1 text-gray-300 hover:text-blue-500 text-xs align-middle"
+                class="ml-1 text-faint hover:text-blue-500 text-xs align-middle"
                 title="编辑标签/备注"
               >🏷️</button>
             </div>
-            <div class="text-xs text-gray-500 truncate">{{ d.url }}</div>
+            <div class="text-xs text-muted truncate">{{ d.url }}</div>
             <!-- tags 徽章 + 备注 -->
             <div v-if="(d.tags?.length || d.note) && editingTagDeviceId !== d.id" class="flex flex-wrap items-center gap-1 mt-1">
               <span
                 v-for="tag in (d.tags ?? [])"
                 :key="tag"
-                class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700"
+                class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-soft text-blue-key"
               >{{ tag }}</span>
-              <span v-if="d.note" class="text-[10px] text-gray-400 italic truncate max-w-[140px]" :title="d.note">{{ d.note }}</span>
+              <span v-if="d.note" class="text-[10px] text-faint italic truncate max-w-[140px]" :title="d.note">{{ d.note }}</span>
             </div>
             <!-- 内联编辑态 -->
             <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
               <input
                 v-model="tagDraft"
                 placeholder="标签（逗号分隔）"
-                class="w-full px-2 py-0.5 text-xs border border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
                 @keydown.enter="saveTags"
                 @keydown.escape="cancelEditTags"
               />
               <input
                 v-model="noteDraft"
                 placeholder="备注（可选）"
-                class="w-full px-2 py-0.5 text-xs border border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
                 @keydown.enter="saveTags"
                 @keydown.escape="cancelEditTags"
               />
               <div class="flex gap-1">
                 <button @click="saveTags" class="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700">保存</button>
-                <button @click="cancelEditTags" class="px-2 py-0.5 text-[10px] bg-gray-200 text-gray-600 rounded hover:bg-gray-300">取消</button>
+                <button @click="cancelEditTags" class="px-2 py-0.5 text-[10px] bg-elevated text-secondary rounded bg-elevated-hover">取消</button>
               </div>
             </div>
             <div class="flex items-center gap-2 mt-1">
-              <span class="text-xs text-gray-400">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
+              <span class="text-xs text-faint">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
               <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium">{{ d.errorCount }} 错误</span>
             </div>
           </li>
-          <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
+          <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
             暂无在线设备
           </li>
-          <li v-else-if="filteredDevices.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
+          <li v-else-if="filteredDevices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
             无匹配设备
           </li>
         </ul>
@@ -308,7 +317,7 @@ onMounted(() => connect())
       <main class="flex-1 flex flex-col overflow-hidden">
         <template v-if="selectedDeviceId">
           <!-- Tab 栏 -->
-          <nav class="flex border-b border-gray-200 bg-white">
+          <nav class="flex border-b border-base bg-surface">
             <button
               v-for="tab in (['console', 'network', 'errors', 'snapshot', 'exec'] as const)"
               :key="tab"
@@ -316,23 +325,23 @@ onMounted(() => connect())
               class="px-4 py-2 text-sm font-medium border-b-2"
               :class="activeTab === tab
                 ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'"
+                : 'border-transparent text-muted hover:text-primary'"
             >
               {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : 'Exec' }}
             </button>
             <button
               v-if="activeTab === 'snapshot'"
               @click="refreshSnapshot"
-              class="ml-auto px-4 py-2 text-xs text-gray-500 hover:text-gray-700"
+              class="ml-auto px-4 py-2 text-xs text-muted hover:text-primary"
             >
               刷新
             </button>
           </nav>
 
           <!-- Console 面板（含级别筛选 + 搜索） -->
-          <div v-if="activeTab === 'console'" class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+          <div v-if="activeTab === 'console'" class="flex-1 flex flex-col overflow-hidden bg-base">
             <!-- 工具栏 -->
-            <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white">
+            <div class="flex items-center gap-2 px-4 py-2 border-b border-base bg-surface">
               <div class="flex gap-1">
                 <button
                   v-for="lvl in (['all', 'error', 'warn', 'info', 'debug'] as const)"
@@ -341,7 +350,7 @@ onMounted(() => connect())
                   class="px-2 py-0.5 text-xs rounded font-medium"
                   :class="logLevelFilter === lvl
                     ? 'bg-gray-800 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                    : 'bg-elevated text-secondary bg-elevated-hover'"
                 >
                   {{ lvl === 'all' ? '全部' : lvl.toUpperCase() }}
                 </button>
@@ -349,29 +358,29 @@ onMounted(() => connect())
               <input
                 v-model="logSearch"
                 placeholder="搜索日志..."
-                class="ml-auto px-2 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-400 w-48"
+                class="ml-auto px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 w-48"
               />
-              <span class="text-xs text-gray-400">{{ filteredLogs.length }}/{{ logs.length }}</span>
+              <span class="text-xs text-faint">{{ filteredLogs.length }}/{{ logs.length }}</span>
             </div>
             <!-- 日志列表 -->
             <div class="flex-1 overflow-y-auto p-4 font-mono text-sm">
-              <div v-for="(log, i) in filteredLogs" :key="i" class="py-0.5 border-b border-gray-100">
-                <span class="text-gray-400 text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
-                <span class="text-gray-400 text-xs mr-2 uppercase">{{ log.type }}</span>
+              <div v-for="(log, i) in filteredLogs" :key="i" class="py-0.5 border-b border-light">
+                <span class="text-faint text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+                <span class="text-faint text-xs mr-2 uppercase">{{ log.type }}</span>
                 <span :class="logColor(log.type)">{{ log.message }}</span>
               </div>
-              <div v-if="filteredLogs.length === 0" class="text-gray-400 text-center py-8">
+              <div v-if="filteredLogs.length === 0" class="text-faint text-center py-8">
                 {{ logs.length === 0 ? '暂无日志' : '无匹配日志' }}
               </div>
             </div>
           </div>
 
           <!-- Network 面板（主从布局：请求列表 + 详情） -->
-          <div v-else-if="activeTab === 'network'" class="flex-1 flex overflow-hidden bg-gray-50">
+          <div v-else-if="activeTab === 'network'" class="flex-1 flex overflow-hidden bg-base">
             <!-- 请求列表 -->
-            <div class="w-2/5 overflow-y-auto border-r border-gray-200">
+            <div class="w-2/5 overflow-y-auto border-r border-base">
               <table class="w-full text-sm">
-                <thead class="bg-gray-100 text-gray-600 text-xs uppercase sticky top-0">
+                <thead class="bg-elevated text-secondary text-xs uppercase sticky top-0">
                   <tr>
                     <th class="text-left px-3 py-2">方法</th>
                     <th class="text-left px-3 py-2">状态</th>
@@ -384,19 +393,19 @@ onMounted(() => connect())
                     v-for="(n, i) in network"
                     :key="i"
                     @click="selectedNetwork = n"
-                    class="border-b border-gray-100 cursor-pointer hover:bg-blue-50"
-                    :class="selectedNetwork === n ? 'bg-blue-50' : ''"
+                    class="border-b border-light cursor-pointer hover:bg-blue-soft"
+                    :class="selectedNetwork === n ? 'bg-blue-soft' : ''"
                   >
-                    <td class="px-3 py-2 text-gray-600 font-mono text-xs">{{ n.method }}</td>
-                    <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-gray-400'">
+                    <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
+                    <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
                       {{ n.status || '—' }}
                     </td>
-                    <td class="px-3 py-2 text-gray-700 truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
-                    <td class="px-3 py-2 text-right text-gray-500 text-xs font-mono">{{ n.duration }}ms</td>
+                    <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
+                    <td class="px-3 py-2 text-right text-muted text-xs font-mono">{{ n.duration }}ms</td>
                   </tr>
                 </tbody>
               </table>
-              <div v-if="network.length === 0" class="text-gray-400 text-center py-8 text-sm">暂无网络请求</div>
+              <div v-if="network.length === 0" class="text-faint text-center py-8 text-sm">暂无网络请求</div>
             </div>
 
             <!-- 详情面板 -->
@@ -405,78 +414,78 @@ onMounted(() => connect())
                 <div class="space-y-4">
                   <!-- 基本信息 -->
                   <div>
-                    <div class="text-xs text-gray-400 mb-1">URL</div>
-                    <div class="text-sm font-mono text-gray-800 break-all bg-white p-2 rounded border border-gray-200">{{ selectedNetwork.url }}</div>
+                    <div class="text-xs text-faint mb-1">URL</div>
+                    <div class="text-sm font-mono text-primary break-all bg-surface p-2 rounded border border-base">{{ selectedNetwork.url }}</div>
                   </div>
                   <div class="flex gap-6 text-sm">
-                    <div><span class="text-gray-400">方法：</span><span class="font-mono text-gray-800">{{ selectedNetwork.method }}</span></div>
+                    <div><span class="text-faint">方法：</span><span class="font-mono text-primary">{{ selectedNetwork.method }}</span></div>
                     <div>
-                      <span class="text-gray-400">状态：</span>
+                      <span class="text-faint">状态：</span>
                       <span class="font-mono" :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'">{{ selectedNetwork.status || '—' }}</span>
                     </div>
-                    <div><span class="text-gray-400">耗时：</span><span class="font-mono text-gray-800">{{ selectedNetwork.duration }}ms</span></div>
+                    <div><span class="text-faint">耗时：</span><span class="font-mono text-primary">{{ selectedNetwork.duration }}ms</span></div>
                   </div>
 
                   <!-- 错误 -->
-                  <div v-if="selectedNetwork.error" class="bg-red-50 border border-red-200 rounded p-3">
+                  <div v-if="selectedNetwork.error" class="bg-red-soft border border-red-soft rounded p-3">
                     <div class="text-xs text-red-400 mb-1">错误</div>
-                    <div class="text-sm text-red-700 font-mono">{{ selectedNetwork.error }}</div>
+                    <div class="text-sm text-red-key font-mono">{{ selectedNetwork.error }}</div>
                   </div>
 
                   <!-- 请求体 -->
                   <div v-if="selectedNetwork.reqBody">
-                    <div class="text-xs text-gray-400 mb-1">请求体</div>
-                    <pre class="text-xs font-mono text-gray-700 bg-white p-3 rounded border border-gray-200 whitespace-pre-wrap break-all">{{ selectedNetwork.reqBody }}</pre>
+                    <div class="text-xs text-faint mb-1">请求体</div>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ selectedNetwork.reqBody }}</pre>
                   </div>
 
                   <!-- 响应体 -->
                   <div v-if="selectedNetwork.resBody">
-                    <div class="text-xs text-gray-400 mb-1">响应体</div>
-                    <pre class="text-xs font-mono text-gray-700 bg-white p-3 rounded border border-gray-200 whitespace-pre-wrap break-all">{{ selectedNetwork.resBody }}</pre>
+                    <div class="text-xs text-faint mb-1">响应体</div>
+                    <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ selectedNetwork.resBody }}</pre>
                   </div>
 
                   <!-- 无 body 提示 -->
-                  <div v-if="!selectedNetwork.reqBody && !selectedNetwork.resBody && !selectedNetwork.error" class="text-xs text-gray-400">
+                  <div v-if="!selectedNetwork.reqBody && !selectedNetwork.resBody && !selectedNetwork.error" class="text-xs text-faint">
                     此请求无请求体/响应体（可能是 GET 请求或响应未完成）
                   </div>
                 </div>
               </template>
-              <div v-else class="text-gray-400 text-center py-8 text-sm">点击左侧请求查看详情</div>
+              <div v-else class="text-faint text-center py-8 text-sm">点击左侧请求查看详情</div>
             </div>
           </div>
 
           <!-- Errors 面板 -->
-          <div v-else-if="activeTab === 'errors'" class="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3">
-            <div v-for="(e, i) in errors" :key="i" class="bg-red-50 border border-red-200 rounded p-3">
-              <div class="text-sm text-red-800 font-medium">{{ e.message }}</div>
-              <div class="text-xs text-gray-400 mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
+          <div v-else-if="activeTab === 'errors'" class="flex-1 overflow-y-auto p-4 bg-base space-y-3">
+            <div v-for="(e, i) in errors" :key="i" class="bg-red-soft border border-red-soft rounded p-3">
+              <div class="text-sm text-red-key font-medium">{{ e.message }}</div>
+              <div class="text-xs text-faint mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
               <!-- source map 解析后的原始位置（AI 诊断关键信息） -->
-              <div v-if="e.mapped" class="mt-1 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 font-mono">
-                ↳ {{ e.mapped.source }}:{{ e.mapped.line }}:{{ e.mapped.column }}<span v-if="e.mapped.name" class="text-blue-500"> ({{ e.mapped.name }})</span>
+              <div v-if="e.mapped" class="mt-1 text-xs text-blue-key bg-blue-soft border border-blue-soft rounded px-2 py-1 font-mono">
+                ↳ {{ e.mapped.source }}:{{ e.mapped.line }}:{{ e.mapped.column }}<span v-if="e.mapped.name" class="text-blue-400"> ({{ e.mapped.name }})</span>
               </div>
-              <div v-else-if="e.source" class="mt-1 text-xs text-gray-400 font-mono">
+              <div v-else-if="e.source" class="mt-1 text-xs text-faint font-mono">
                 ↳ {{ e.source }}:{{ e.line }}:{{ e.col }}
               </div>
-              <pre v-if="e.stack" class="text-xs text-red-600 mt-2 whitespace-pre-wrap">{{ e.stack }}</pre>
+              <pre v-if="e.stack" class="text-xs text-red-500 mt-2 whitespace-pre-wrap">{{ e.stack }}</pre>
             </div>
-            <div v-if="errors.length === 0" class="text-gray-400 text-center py-8">暂无错误</div>
+            <div v-if="errors.length === 0" class="text-faint text-center py-8">暂无错误</div>
           </div>
 
           <!-- Snapshot 面板 -->
-          <div v-else-if="activeTab === 'snapshot'" class="flex-1 overflow-y-auto p-4 bg-gray-50">
-            <div v-if="snapLoading" class="text-gray-400 text-center py-8">加载中...</div>
-            <pre v-else class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ snapshotText }}</pre>
+          <div v-else-if="activeTab === 'snapshot'" class="flex-1 overflow-y-auto p-4 bg-base">
+            <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
+            <pre v-else class="text-xs font-mono text-primary whitespace-pre-wrap">{{ snapshotText }}</pre>
           </div>
 
           <!-- Exec 面板（在控制台直接执行诊断代码） -->
-          <div v-else-if="activeTab === 'exec'" class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+          <div v-else-if="activeTab === 'exec'" class="flex-1 flex flex-col overflow-hidden bg-base">
             <!-- 代码编辑区 -->
-            <div class="p-3 border-b border-gray-200 bg-white">
+            <div class="p-3 border-b border-base bg-surface">
               <textarea
                 v-model="execCode"
                 rows="4"
                 placeholder="输入诊断代码，如：return document.title"
-                class="w-full text-xs font-mono p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-400 resize-y"
+                class="w-full text-xs font-mono p-2 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                 @keydown.ctrl.enter="runExec"
                 @keydown.meta.enter="runExec"
               />
@@ -488,22 +497,22 @@ onMounted(() => connect())
                 >
                   {{ execRunning ? '执行中...' : '执行 (Ctrl+↵)' }}
                 </button>
-                <span class="text-xs text-gray-400">辅助函数：__clarosight_click / setValue / type / wait / snapshot</span>
+                <span class="text-xs text-faint">辅助函数：__clarosight_click / setValue / type / wait / snapshot</span>
               </div>
             </div>
             <!-- 结果展示区 -->
             <div class="flex-1 overflow-y-auto p-3">
-              <pre v-if="execResult" class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ execResult }}</pre>
-              <div v-else class="text-gray-400 text-center py-8 text-sm">输入代码后点击执行</div>
+              <pre v-if="execResult" class="text-xs font-mono text-primary whitespace-pre-wrap">{{ execResult }}</pre>
+              <div v-else class="text-faint text-center py-8 text-sm">输入代码后点击执行</div>
             </div>
           </div>
         </template>
 
         <!-- 未选中设备时的占位 -->
-        <div v-else class="flex-1 flex items-center justify-center text-gray-400">
+        <div v-else class="flex-1 flex items-center justify-center text-faint">
           <div class="text-center">
             <p class="text-sm">从左侧选择一个设备查看详情</p>
-            <p class="text-xs mt-2">接入新设备：在目标页面注入 <code class="bg-gray-100 px-1 rounded">&lt;script src="/sdk.js"&gt;&lt;/script&gt;</code></p>
+            <p class="text-xs mt-2">接入新设备：在目标页面注入 <code class="bg-elevated px-1 rounded">&lt;script src="/sdk.js"&gt;&lt;/script&gt;</code></p>
           </div>
         </div>
       </main>
@@ -515,9 +524,9 @@ onMounted(() => connect())
       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
       @click.self="showAiModal = false"
     >
-      <div class="bg-white rounded-lg shadow-xl w-[720px] max-h-[80vh] flex flex-col">
-        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-          <h3 class="text-sm font-semibold text-gray-800">AI 诊断上下文</h3>
+      <div class="bg-surface rounded-lg shadow-xl w-[720px] max-h-[80vh] flex flex-col">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-base">
+          <h3 class="text-sm font-semibold text-primary">AI 诊断上下文</h3>
           <div class="flex items-center gap-2">
             <button
               @click="copyToClipboard"
@@ -526,21 +535,21 @@ onMounted(() => connect())
                 ? 'bg-green-100 text-green-700'
                 : copyState === 'error'
                 ? 'bg-red-100 text-red-700'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+                : 'bg-elevated text-secondary bg-elevated-hover'"
             >
               {{ copyState === 'copied' ? '✓ 已复制' : copyState === 'error' ? '复制失败' : '复制全部' }}
             </button>
             <button
               @click="showAiModal = false"
-              class="px-3 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+              class="px-3 py-1 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
             >
               关闭
             </button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto p-5">
-          <pre v-if="generating" class="text-sm text-gray-400">正在拉取设备快照...</pre>
-          <pre v-else class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ contextText }}</pre>
+          <pre v-if="generating" class="text-sm text-faint">正在拉取设备快照...</pre>
+          <pre v-else class="text-xs font-mono text-primary whitespace-pre-wrap">{{ contextText }}</pre>
         </div>
       </div>
     </div>

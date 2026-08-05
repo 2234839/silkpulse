@@ -455,6 +455,58 @@ async function main() {
       fail('iframe 测试前置失败：无在线设备')
     }
 
+    /** 19. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
+    {
+      /** 默认应无 .dark（首次访问无 localStorage 或系统偏好） */
+      const hasDarkBefore = await consolePage.evaluate(() => document.documentElement.classList.contains('dark'))
+      /** 点击主题切换按钮（🌙 或 ☀️） */
+      const toggled = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('header button'))
+        const themeBtn = btns.find((b) => b.textContent.includes('🌙') || b.textContent.includes('☀️'))
+        if (!themeBtn) return false
+        themeBtn.click()
+        return true
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      const hasDarkAfter = await consolePage.evaluate(() => document.documentElement.classList.contains('dark'))
+      /** 验证 CSS 变量 --cs-bg 在亮/暗下值不同 */
+      const bgVar = await consolePage.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--cs-bg').trim())
+
+      if (toggled && hasDarkAfter && bgVar) {
+        ok(`深色模式切换成功（.dark=${hasDarkAfter}，--cs-bg="${bgVar}"）`)
+        /** 再切回亮色，验证可逆 */
+        await consolePage.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('header button'))
+          btns.find((b) => b.textContent.includes('🌙') || b.textContent.includes('☀️'))?.click()
+        })
+        await new Promise((r) => setTimeout(r, 200))
+        const hasDarkFinal = await consolePage.evaluate(() => document.documentElement.classList.contains('dark'))
+        if (!hasDarkFinal) ok(`主题切换可逆（切回亮色）`)
+        else fail(`主题切换不可逆：仍为 dark`)
+      } else {
+        fail(`深色模式切换失败：toggled=${toggled} hasDark=${hasDarkAfter}（切换前=${hasDarkBefore}）bgVar=${bgVar}`)
+      }
+
+      /** 验证深色模式下语义 class 实际生效（bg-surface 元素背景 != 纯白） */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('header button'))
+        const tb = btns.find((b) => b.textContent.includes('🌙') || b.textContent.includes('☀️'))
+        if (tb && !document.documentElement.classList.contains('dark')) tb.click()
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      const surfaceBg = await consolePage.evaluate(() => {
+        const el = document.querySelector('.bg-surface')
+        if (!el) return null
+        return getComputedStyle(el).backgroundColor
+      })
+      /** 深色模式 --cs-surface = #1a1f29 → rgb(26, 31, 41)，不应是纯白 rgb(255,255,255) */
+      if (surfaceBg && !surfaceBg.includes('255, 255, 255')) {
+        ok(`深色模式语义 class 生效（.bg-surface 背景色 = ${surfaceBg}）`)
+      } else {
+        fail(`深色模式语义 class 未生效：.bg-surface = ${surfaceBg}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)
