@@ -149,6 +149,20 @@ export function init(options: InitOptions): void {
   }
   window.addEventListener('popstate', reportUrlChange)
 
+  /**
+   * 视口尺寸变化（窗口缩放 / 移动端旋转）时上报新尺寸 + 重新推断设备类型
+   *
+   * 诊断移动端布局错乱时，AI 需知道当前真实视口（如横屏旋转后宽高互换、
+   * 缩放后触发断点变化）。不加这个监听，server/AI 看到的永远是接入时的尺寸，
+   * 旋转后的布局问题无法关联到正确的视口。
+   * resize 防抖 300ms：拖拽缩放期间连续触发，避免刷爆 server。
+   */
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined
+  window.addEventListener('resize', () => {
+    if (resizeTimer) clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(reportUrlChange, 300)
+  })
+
   /** 7. 页面卸载断开 */
   if (options.disconnectOnUnload !== false) {
     window.addEventListener('beforeunload', () => disconnect())

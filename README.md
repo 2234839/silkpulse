@@ -51,6 +51,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **断线重连**：指数退避（1s/2s/4s...30s），重连后历史缓冲区完整保留
 - **SDK 离线缓冲**：启动期间（采集器装好到 WS 连上）和断线期间产生的日志/错误/网络请求，暂存 SDK 内存队列（上限 200 条），重连后 flush，不丢失早期错误
 - **SPA 路由感知**：pushState/replaceState/popstate 上报 URL 变化
+- **视口变化感知**：窗口缩放/移动端旋转时上报新 viewport + 重新推断设备类型（防抖 300ms），诊断横屏布局错乱时 AI 能看到真实视口
 - **环形缓冲区**：server 内存保留最近 500 条日志 / 100 条网络 / 50 条错误
 - **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304
 - **WS 背压保护**：broadcast 检查 `bufferedAmount`，慢客户端（VPN/弱网）积压超 1MB 时自动关闭该连接，防止单个慢消费者拖垮 server 内存；send 带回调避免竞态抛异常
@@ -146,7 +147,7 @@ node tools/skill/scripts/clarosight.mjs inject bookmarklet
 - **Console 面板**：级别筛选（全部/ERROR/WARN/INFO/DEBUG）+ 关键词搜索 + **自动滚动到最新**（智能：向上翻看历史时不强制拉回）+ **清空视图**（🚫 隐藏当前日志专注新产生，server 缓冲不变）
 - **Network 面板**：主从布局，**时间戳列**（与 console 日志交叉对比时序），点击请求查看请求体/响应体详情，**一键复制为 cURL**（远程请求本地/AI 复现），URL/方法/状态码搜索过滤，**状态筛选**（全部/成功/失败，快速隔离 4xx/5xx 异常请求）
 - **Errors 面板**：含堆栈展示（可折叠）+ source map 解析后的原始源码位置，message/堆栈/源码位置搜索过滤
-- **Snapshot 面板**：compact 文本格式
+- **Snapshot 面板**：compact 文本格式，**行级搜索过滤**（输入元素名/idx/状态 token 只显示匹配行，快速定位），**一键复制**（粘贴给 AI/存档），带刷新按钮
 - **Exec 面板**：直接执行诊断 JS（Ctrl+↵，Tab 缩进），**执行结果分块展示**（返回值 + 执行期间日志分开，失败红色高亮），**执行后快照默认折叠**（点击展开，不挤占返回值视线），**执行历史侧栏**（点击回填，localStorage 持久化）
 - **✨ AI 诊断上下文**：一键聚合错误+快照+网络+日志为 markdown，复制给任意 AI agent
 - **🌙/☀️ 深色模式**：跟随系统偏好，localStorage 持久化
@@ -166,7 +167,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（61 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（63 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -199,9 +200,9 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 61 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 63 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-61 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集（含当前聚焦元素）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）。
+63 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集（含当前聚焦元素）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制。
 
 ## License
 

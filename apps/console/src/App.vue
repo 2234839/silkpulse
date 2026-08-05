@@ -355,6 +355,28 @@ function refreshSnapshot() {
   if (selectedDeviceId.value) fetchSnapshot(selectedDeviceId.value)
 }
 
+/**
+ * Snapshot 面板：行级搜索过滤
+ *
+ * 快照几百字符压缩整页结构，诊断"某个按钮在哪""表单有没有 disabled"时，
+ * 用户输入关键词（如 "button" "disabled" "idx=12"）只显示匹配行，快速定位元素。
+ * 空搜索展示全部。按行分割而非按字符——compact 快照每行一个元素，行是天然边界。
+ */
+const snapshotSearch = ref('')
+const filteredSnapshotLines = computed(() => {
+  const q = snapshotSearch.value.trim().toLowerCase()
+  if (!q) return null /** null 表示无搜索，直接展示原文 */
+  return snapshotText.value.split('\n').filter((line) => line.toLowerCase().includes(q))
+})
+
+/** Snapshot 复制状态（按钮反馈） */
+const snapCopyState = ref<'idle' | 'copied'>('idle')
+async function copySnapshot() {
+  await copyText(snapshotText.value)
+  snapCopyState.value = 'copied'
+  setTimeout(() => { snapCopyState.value = 'idle' }, 1500)
+}
+
 onMounted(() => connect())
 </script>
 
@@ -502,13 +524,6 @@ onMounted(() => connect())
                 class="text-xs px-1.5 py-0.5 rounded font-medium"
                 :class="activeTab === 'errors' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-600'"
               >{{ errors.length }}</span>
-            </button>
-            <button
-              v-if="activeTab === 'snapshot'"
-              @click="refreshSnapshot"
-              class="ml-auto px-4 py-2 text-xs text-muted hover:text-primary"
-            >
-              刷新
             </button>
           </nav>
 
@@ -711,10 +726,36 @@ onMounted(() => connect())
             </div>
           </div>
 
-          <!-- Snapshot 面板 -->
-          <div v-else-if="activeTab === 'snapshot'" class="flex-1 overflow-y-auto p-4 bg-base">
-            <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
-            <pre v-else class="text-xs font-mono text-primary whitespace-pre-wrap">{{ snapshotText }}</pre>
+          <!-- Snapshot 面板（搜索过滤 + 复制） -->
+          <div v-else-if="activeTab === 'snapshot'" class="flex-1 flex flex-col overflow-hidden bg-base">
+            <!-- 工具栏：搜索 + 复制 + 刷新 -->
+            <div class="flex items-center gap-2 px-4 py-2 border-b border-base bg-surface">
+              <input
+                v-model="snapshotSearch"
+                placeholder="搜索快照（元素名 / idx / 状态 token）"
+                class="flex-1 px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+              />
+              <span v-if="filteredSnapshotLines" class="text-xs text-faint whitespace-nowrap">{{ filteredSnapshotLines.length }} 行</span>
+              <button
+                @click="copySnapshot"
+                class="px-2 py-0.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
+              >{{ snapCopyState === 'copied' ? '✓ 已复制' : '复制' }}</button>
+              <button
+                @click="refreshSnapshot"
+                class="px-2 py-0.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
+              >刷新</button>
+            </div>
+            <!-- 快照内容 -->
+            <div class="flex-1 overflow-y-auto p-4">
+              <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
+              <template v-else>
+                <!-- 搜索模式：只展示匹配行 -->
+                <pre v-if="filteredSnapshotLines" class="text-xs font-mono text-primary whitespace-pre-wrap">{{ filteredSnapshotLines.join('\n') }}</pre>
+                <!-- 无搜索：展示完整快照 -->
+                <pre v-else class="text-xs font-mono text-primary whitespace-pre-wrap">{{ snapshotText }}</pre>
+              </template>
+              <div v-if="filteredSnapshotLines && filteredSnapshotLines.length === 0" class="text-faint text-center py-8 text-sm">无匹配行</div>
+            </div>
           </div>
 
           <!-- Exec 面板（在控制台直接执行诊断代码） -->

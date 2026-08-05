@@ -1393,6 +1393,108 @@ async function main() {
       }
     }
 
+    /**
+     * 24. SDK 视口尺寸变化上报 —— resize/旋转后 server 收到新 viewport
+     *
+     * 诊断移动端布局错乱时，AI 需知道旋转/缩放后的真实视口。
+     * 不加 resize 监听，server 永远只记接入时的尺寸，旋转后的布局问题无法关联正确视口。
+     *
+     * 注意：puppeteer setViewport 通过 CDP Emulation.setDeviceMetricsOverride 改变
+     * window.innerWidth，但不触发 DOM resize 事件（CDP 绕过事件层）。
+     * 因此手动 dispatch resize 事件模拟真实用户旋转/缩放。
+     */
+    {
+      const before = await (await fetch(`${SERVER}/api/devices/${device.id}`)).json()
+      const beforeW = before.viewportWidth
+      /** setViewport 改变 innerWidth（CDP 层），再手动 dispatch resize 事件触发 SDK 监听 */
+      await testPage.setViewport({ width: beforeW + 200, height: 600 })
+      await testPage.evaluate(() => window.dispatchEvent(new Event('resize')))
+      /** 等 SDK 防抖（300ms）+ WS 上报 + server 处理 */
+      await new Promise((r) => setTimeout(r, 1200))
+      const after = await (await fetch(`${SERVER}/api/devices/${device.id}`)).json()
+
+      if (after.viewportWidth === beforeW + 200) {
+        ok(`SDK resize 上报新视口（${beforeW}×${before.viewportHeight} → ${after.viewportWidth}×${after.viewportHeight}）`)
+      } else {
+        fail(`SDK resize 上报异常：期望 ${beforeW + 200}，实际 ${after.viewportWidth}`)
+      }
+      /** 还原视口（不影响后续测试） */
+      await testPage.setViewport({ width: beforeW, height: before.viewportHeight })
+      await testPage.evaluate(() => window.dispatchEvent(new Event('resize')))
+      await new Promise((r) => setTimeout(r, 600))
+    }
+
+    /**
+     * 25. Snapshot 面板搜索过滤 + 复制按钮
+     *
+     * 快照几百字符，用户需搜索定位特定元素（如 button/disabled/idx），
+     * 并一键复制快照给 AI。验证：搜索过滤行数减少、复制按钮可点击。
+     */
+    {
+      /** 切到 snapshot 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const snapTab = tabs.find((t) => t.textContent.trim().startsWith('Snapshot'))
+        if (snapTab) snapTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 800))
+
+      /** 验证快照内容已加载（pre 有内容） */
+      const snapLen = await consolePage.evaluate(() => {
+        const pre = document.querySelector('.flex-1.overflow-y-auto.p-4 pre')
+        return pre ? pre.textContent.length : 0
+      })
+
+      /** 输入搜索词（button 几乎一定存在于测试页快照中） */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索快照"]')
+        if (input) {
+          input.value = 'button'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 搜索后行数统计应显示 */
+      const searchState = await consolePage.evaluate(() => {
+        const lineBadge = document.querySelector('.text-faint.whitespace-nowrap')
+        const pre = document.querySelector('.flex-1.overflow-y-auto.p-4 pre')
+        return {
+          lineText: lineBadge ? lineBadge.textContent.trim() : '',
+          contentLen: pre ? pre.textContent.length : 0,
+        }
+      })
+      /** 清空搜索还原 */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索快照"]')
+        if (input) {
+          input.value = ''
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      /** 复制按钮可点击并反馈 */
+      const copyOk = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const copyBtn = btns.find((b) => b.textContent.trim() === '复制')
+        if (!copyBtn) return false
+        copyBtn.click()
+        return true
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      const copyFeedback = await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const copyBtn = btns.find((b) => b.textContent.includes('已复制'))
+        return !!copyBtn
+      })
+
+      if (snapLen > 50 && searchState.lineText.includes('行') && copyOk && copyFeedback) {
+        ok(`Snapshot 搜索+复制生效（快照 ${snapLen} 字符，搜索 button → ${searchState.lineText}，复制 ✓）`)
+      } else {
+        fail(`Snapshot 面板异常：snapLen=${snapLen} search=${JSON.stringify(searchState)} copy=${copyOk} feedback=${copyFeedback}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)
