@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>clarosight 测试页</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; }
+    .demo { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 16px 0; }
+    button { padding: 8px 16px; margin: 4px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
+    button:hover { background: #f3f4f6; }
+    input { padding: 8px; margin: 4px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
+    #log { background: #f9fafb; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 13px; min-height: 60px; }
+  </style>
+</head>
+<body>
+  <h1>clarosight 测试页</h1>
+  <p>这个页面注入了 clarosight SDK，用来验证远程调试能力。</p>
+
+  <div class="demo">
+    <h3>交互元素</h3>
+    <input id="name-input" placeholder="输入你的名字" />
+    <button id="greet-btn">打招呼</button>
+  </div>
+
+  <div class="demo">
+    <h3>表单</h3>
+    <select id="city-select">
+      <option value="bj">北京</option>
+      <option value="sh">上海</option>
+      <option value="gz">广州</option>
+    </select>
+    <label><input type="checkbox" id="agree" /> 同意条款</label>
+  </div>
+
+  <div class="demo">
+    <h3>网络请求（验证 network 采集）</h3>
+    <button id="fetch-ok">fetch 成功请求</button>
+    <button id="fetch-404">fetch 404 请求</button>
+    <button id="xhr-btn">XHR 请求</button>
+  </div>
+
+  <div class="demo">
+    <h3>错误触发（验证 error 采集）</h3>
+    <button id="runtime-error-btn">触发运行时错误</button>
+    <button id="promise-error-btn">触发 Promise 错误</button>
+  </div>
+
+  <div class="demo">
+    <h3>输出</h3>
+    <div id="log">（点击按钮试试）</div>
+  </div>
+
+  <!-- clarosight SDK 注入：data-server 指定 server 地址 -->
+  <script src="http://localhost:8080/sdk.js" data-server="http://localhost:8080"></script>
+  <script>
+    const logEl = document.getElementById('log')
+    const show = (msg) => { logEl.textContent = msg }
+
+    document.getElementById('greet-btn').addEventListener('click', () => {
+      const name = document.getElementById('name-input').value || '匿名'
+      console.log('打招呼:', name)
+      show(`你好，${name}！`)
+    })
+
+    document.getElementById('city-select').addEventListener('change', (e) => {
+      console.log('选择城市:', e.target.value)
+    })
+
+    /** network：fetch 成功（用 httpbin 的延迟接口，或本地 /api/devices） */
+    document.getElementById('fetch-ok').addEventListener('click', async () => {
+      console.log('fetch 发起: /api/devices')
+      try {
+        const res = await fetch('/api/devices')
+        const data = await res.json()
+        console.log('fetch 完成: 设备数', data.length)
+        show(`fetch 成功，设备数 ${data.length}`)
+      } catch (e) {
+        show('fetch 失败: ' + e.message)
+      }
+    })
+
+    /** network：fetch 404 */
+    document.getElementById('fetch-404').addEventListener('click', async () => {
+      console.log('fetch 发起: /api/not-exist')
+      const res = await fetch('/api/not-exist')
+      show(`fetch 完成，状态码 ${res.status}`)
+    })
+
+    /** network：XHR */
+    document.getElementById('xhr-btn').addEventListener('click', () => {
+      console.log('XHR 发起: /api/devices')
+      const xhr = new XMLHttpRequest()
+      xhr.open('GET', '/api/devices')
+      xhr.onload = () => {
+        console.log('XHR 完成:', xhr.status)
+        show(`XHR 完成，状态码 ${xhr.status}`)
+      }
+      xhr.send()
+    })
+
+    /** error：运行时错误（同步抛出，触发 window error 事件） */
+    document.getElementById('runtime-error-btn').addEventListener('click', () => {
+      show('已触发运行时错误')
+      setTimeout(() => { throw new Error('clarosight 测试：同步运行时错误') }, 0)
+    })
+
+    /** error：未处理的 Promise rejection */
+    document.getElementById('promise-error-btn').addEventListener('click', () => {
+      show('已触发 Promise 错误')
+      Promise.reject(new Error('clarosight 测试：未处理的 Promise 错误'))
+    })
+
+    console.info('clarosight 测试页已加载')
+  </script>
+</body>
+</html>

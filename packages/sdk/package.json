@@ -1,0 +1,21 @@
+{
+  "name": "@clarosight/sdk",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vp pack src/index.ts --format iife --minify --global-name ClarosightSDK --out-dir dist",
+    "dev": "vp pack src/index.ts --format iife --global-name ClarosightSDK --out-dir dist --watch",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@clarosight/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

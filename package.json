@@ -1,0 +1,30 @@
+{
+  "name": "clarosight",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vp run -r build && pnpm run copy:assets",
+    "copy:assets": "cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js && cp -r apps/console/dist/* packages/server/public/",
+    "dev:server": "vp run @clarosight/server#dev",
+    "dev:sdk": "vp run @clarosight/sdk#dev",
+    "dev:console": "vp run @clarosight/console#dev",
+    "start": "vp run @clarosight/server#start",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "puppeteer-core": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.20.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
