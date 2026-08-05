@@ -54,11 +54,49 @@ const filteredDevices = computed(() => {
     d.title.toLowerCase().includes(q)
     || d.url.toLowerCase().includes(q)
     || (d.deviceType ?? '').toLowerCase().includes(q)
+    || (d.tags ?? []).some((t) => t.toLowerCase().includes(q))
+    || (d.note ?? '').toLowerCase().includes(q)
   )
 })
 
 /** AI 诊断弹窗 */
 const showAiModal = ref(false)
+
+/** 标签编辑：editingTagDeviceId 标记正在编辑哪台设备的标签 */
+const editingTagDeviceId = ref<string | null>(null)
+const tagDraft = ref('')
+const noteDraft = ref('')
+
+/** 进入标签编辑模式（预填当前 tags/note） */
+function startEditTags(deviceId: string) {
+  const d = devices.value.find((x) => x.id === deviceId)
+  editingTagDeviceId.value = deviceId
+  tagDraft.value = d?.tags?.join(', ') ?? ''
+  noteDraft.value = d?.note ?? ''
+}
+
+/** 保存标签到 server（POST /api/devices/:id/tags） */
+async function saveTags() {
+  const id = editingTagDeviceId.value
+  if (!id) return
+  const tags = tagDraft.value.split(',').map((t) => t.trim()).filter(Boolean)
+  const note = noteDraft.value.trim() || undefined
+  try {
+    await fetch(`/api/devices/${id}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags, note }),
+    })
+  } catch {
+    /** server 会广播 device-list 更新；失败也关闭编辑态 */
+  }
+  editingTagDeviceId.value = null
+}
+
+/** 取消编辑 */
+function cancelEditTags() {
+  editingTagDeviceId.value = null
+}
 
 /** 生成 AI 诊断上下文并弹窗展示 */
 async function openAiContext() {
@@ -213,8 +251,45 @@ onMounted(() => connect())
             />
             <div class="text-sm font-medium text-gray-800 truncate">
               <span class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
+              <!-- 编辑标签按钮（仅选中时显示） -->
+              <button
+                v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
+                @click.stop="startEditTags(d.id)"
+                class="ml-1 text-gray-300 hover:text-blue-500 text-xs align-middle"
+                title="编辑标签/备注"
+              >🏷️</button>
             </div>
             <div class="text-xs text-gray-500 truncate">{{ d.url }}</div>
+            <!-- tags 徽章 + 备注 -->
+            <div v-if="(d.tags?.length || d.note) && editingTagDeviceId !== d.id" class="flex flex-wrap items-center gap-1 mt-1">
+              <span
+                v-for="tag in (d.tags ?? [])"
+                :key="tag"
+                class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700"
+              >{{ tag }}</span>
+              <span v-if="d.note" class="text-[10px] text-gray-400 italic truncate max-w-[140px]" :title="d.note">{{ d.note }}</span>
+            </div>
+            <!-- 内联编辑态 -->
+            <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
+              <input
+                v-model="tagDraft"
+                placeholder="标签（逗号分隔）"
+                class="w-full px-2 py-0.5 text-xs border border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                @keydown.enter="saveTags"
+                @keydown.escape="cancelEditTags"
+              />
+              <input
+                v-model="noteDraft"
+                placeholder="备注（可选）"
+                class="w-full px-2 py-0.5 text-xs border border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                @keydown.enter="saveTags"
+                @keydown.escape="cancelEditTags"
+              />
+              <div class="flex gap-1">
+                <button @click="saveTags" class="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700">保存</button>
+                <button @click="cancelEditTags" class="px-2 py-0.5 text-[10px] bg-gray-200 text-gray-600 rounded hover:bg-gray-300">取消</button>
+              </div>
+            </div>
             <div class="flex items-center gap-2 mt-1">
               <span class="text-xs text-gray-400">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
               <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium">{{ d.errorCount }} 错误</span>

@@ -40,7 +40,7 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
 
   const server = http.createServer(async (req, res) => {
     /** 1. 先交给 API 路由 */
-    if (await handleApiRoute(req, res, registry)) return
+    if (await handleApiRoute(req, res, registry, notifyDeviceListChanged)) return
 
     const url = new URL(req.url ?? '/', 'http://localhost')
     const pathname = url.pathname
@@ -123,7 +123,7 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       socket.destroy()
     }
   })
-  setupWebSocket(wss, registry)
+  const { notifyDeviceListChanged } = setupWebSocket(wss, registry)
 
   server.listen(port, () => {
     console.log(`\n  clarosight 服务已启动 → http://localhost:${port}`)

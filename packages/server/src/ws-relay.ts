@@ -28,12 +28,12 @@ function generateDeviceId(): string {
 
 /**
  * 创建并挂载 WebSocket 服务到 HTTP server
- * 返回一个函数，用于向指定设备的控制台广播消息
+ * 返回 notifyDeviceListChanged，供 HTTP API（如 tags 修改）触发控制台刷新
  */
 export function setupWebSocket(
   wss: WebSocketServer,
   registry: DeviceRegistry
-): void {
+): { notifyDeviceListChanged: () => void } {
   /** 每个 WS 连接对应的设备 ID（设备端）或订阅集合（控制台端） */
   const deviceSockets = new Map<WebSocket, Device>()
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
@@ -89,13 +89,16 @@ export function setupWebSocket(
               ...msg.device,
               id: deviceId,
               onlineAt: Date.now(),
+              /** 兼容未上报 tags 的旧 SDK */
+              tags: msg.device.tags ?? [],
+              note: msg.device.note,
             }
             device = registry.register(info, ws)
             deviceSockets.set(ws, device)
-            /** 广播设备列表更新给所有控制台 */
+            /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
             broadcast(deviceId, {
               type: 'device-online',
-              device: info,
+              device: device.info,
             })
             notifyDeviceListChanged()
             break
@@ -263,4 +266,6 @@ export function setupWebSocket(
 
   /** server 关闭时清理心跳定时器 */
   wss.on('close', () => clearInterval(interval))
+
+  return { notifyDeviceListChanged }
 }

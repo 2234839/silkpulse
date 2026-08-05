@@ -42,11 +42,13 @@ const EXEC_TIMEOUT = 10000
 /**
  * 处理 /api/* 路由
  * 返回 true 表示已处理，false 表示非 API 路径
+ * onDeviceListChanged：修改 tags/note 后通知控制台刷新设备列表
  */
 export async function handleApiRoute(
   req: IncomingMessage,
   res: ServerResponse,
-  registry: DeviceRegistry
+  registry: DeviceRegistry,
+  onDeviceListChanged?: () => void
 ): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const pathname = url.pathname
@@ -153,6 +155,31 @@ export async function handleApiRoute(
     /** /api/devices/:id/errors —— 最近错误 */
     case 'errors': {
       sendJson(res, device.errors.all())
+      return true
+    }
+
+    /** /api/devices/:id/tags —— 修改标签/备注（控制台 & AI 都可调用） */
+    case 'tags': {
+      if (req.method !== 'POST') {
+        sendJson(res, { error: '需要 POST' }, 405)
+        return true
+      }
+      const body = await readBody(req)
+      let parsed: { tags?: string[]; note?: string }
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        sendJson(res, { error: 'body 必须是 JSON' }, 400)
+        return true
+      }
+      /** tags 去重 + 去空白；note 允许清空（传空串或 undefined） */
+      const tags = Array.isArray(parsed.tags)
+        ? Array.from(new Set(parsed.tags.map((t) => String(t).trim()).filter(Boolean)))
+        : device.info.tags
+      const note = parsed.note !== undefined ? String(parsed.note).trim() || undefined : device.info.note
+      registry.updateInfo(deviceId, { tags, note })
+      onDeviceListChanged?.()
+      sendJson(res, { ok: true, device: registry.get(deviceId)?.info })
       return true
     }
   }

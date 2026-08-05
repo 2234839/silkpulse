@@ -134,9 +134,20 @@ export class DeviceRegistry {
   register(info: DeviceInfo, ws: WebSocket): Device {
     const existing = this.devices.get(info.id)
     if (existing) {
-      /** 重连：保留 logs/network/errors 历史，只换连接和元信息 */
+      /** 重连：保留 logs/network/errors 历史，只换连接和元信息。
+       *  tags/note 以 server 侧为准（可能被控制台/API 修改过），不被 SDK 上报覆盖。
+       *  仅当 SDK 上报了非空 tags/note 且 server 侧为空时才采纳（首次带标签接入） */
+      const mergedTags = existing.info.tags.length > 0
+        ? existing.info.tags
+        : (info.tags ?? [])
+      const mergedNote = existing.info.note || info.note
       existing.ws = ws
-      existing.info = { ...info, onlineAt: existing.info.onlineAt }
+      existing.info = {
+        ...info,
+        onlineAt: existing.info.onlineAt,
+        tags: mergedTags,
+        note: mergedNote,
+      }
       this.emit({ type: 'online', device: existing.info })
       return existing
     }

@@ -9,6 +9,7 @@
  *   node clarosight.mjs logs <deviceId> [since]          拉取设备 console 日志
  *   node clarosight.mjs network <deviceId> [since]       拉取设备 network 记录
  *   node clarosight.mjs errors <deviceId>                拉取设备错误
+ *   node clarosight.mjs tag <deviceId> <tags> [note]     设置设备标签/备注
  *
  * 环境变量：
  *   CLAROSIGHT_SERVER  server 地址，默认 http://localhost:8080
@@ -103,6 +104,8 @@ async function main() {
         console.log(`       URL:  ${d.url}`)
         console.log(`       类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}`)
         console.log(`       UA:   ${d.userAgent.slice(0, 80)}`)
+        if (d.tags?.length) console.log(`       标签: ${d.tags.join(', ')}`)
+        if (d.note) console.log(`       备注: ${d.note}`)
         if (d.errorCount > 0) console.log(`       错误数: ${d.errorCount}`)
         console.log('')
       }
@@ -195,6 +198,25 @@ async function main() {
       break
     }
 
+    case 'tag':
+    case 'tags': {
+      /** tag <id> <comma-separated-tags> [note...] —— AI/人工为设备打标签区分身份 */
+      const id = await resolveDeviceId(args[0])
+      const tagsArg = args[1] ?? ''
+      const noteArg = args.slice(2).join(' ') || undefined
+      if (!tagsArg && !noteArg) {
+        /** 不带值时仅展示当前标签 */
+        const device = await getJson(`/api/devices/${id}`)
+        console.log(`标签: ${(device.tags ?? []).join(', ') || '（无）'}`)
+        if (device.note) console.log(`备注: ${device.note}`)
+        return
+      }
+      const tags = tagsArg.split(',').map((t) => t.trim()).filter(Boolean)
+      const result = await postJson(`/api/devices/${id}/tags`, { tags, note: noteArg })
+      console.log(`✓ 已更新 [${id}] 标签：${(result.device.tags ?? []).join(', ') || '（无）'}${result.device.note ? '，备注：' + result.device.note : ''}`)
+      break
+    }
+
     case 'inject': {
       const form = args[0] ?? 'snippet'
       if (form === 'bookmarklet') {
@@ -230,6 +252,7 @@ async function main() {
   clarosight logs <id> [since]             拉取设备 console 日志
   clarosight network <id> [since]          拉取设备 network 记录
   clarosight errors <id>                   拉取设备错误
+  clarosight tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）
   clarosight inject [bookmarklet|userscript]  生成接入片段
 
 exec 的 code 也可通过 stdin 传入（适合复杂多行代码）：

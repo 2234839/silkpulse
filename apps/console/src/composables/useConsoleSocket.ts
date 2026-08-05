@@ -87,11 +87,18 @@ export function useConsoleSocket() {
       case 'device-list':
         devices.value = msg.devices
         break
-      case 'device-online':
-        if (!devices.value.some((d) => d.id === msg.device.id)) {
+      case 'device-online': {
+        /** 新设备 → 追加；已存在 → 更新元信息（SPA 路由变化、tags 修改都会触发） */
+        const idx = devices.value.findIndex((d) => d.id === msg.device.id)
+        if (idx === -1) {
           devices.value = [...devices.value, msg.device]
+        } else {
+          const next = devices.value.slice()
+          next[idx] = msg.device
+          devices.value = next
         }
         break
+      }
       case 'device-offline':
         devices.value = devices.value.filter((d) => d.id !== msg.deviceId)
         if (selectedDeviceId.value === msg.deviceId) {

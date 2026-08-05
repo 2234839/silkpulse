@@ -304,6 +304,46 @@ async function main() {
       fail('重连测试前置失败：无在线设备')
     }
 
+    /** 14. 设备标签/备注 —— POST /tags 设置，GET /devices 反映，再触发 SPA 路由确认不被覆盖 */
+    const tagDev = await waitForDevice()
+    if (tagDev) {
+      /** 初始应为空标签 */
+      if ((tagDev.tags ?? []).length === 0) ok(`设备初始无标签（符合预期）`)
+      else fail(`设备初始不应有标签，实际: ${JSON.stringify(tagDev.tags)}`)
+
+      /** 设置标签 + 备注 */
+      const setRes = await fetch(`${SERVER}/api/devices/${tagDev.id}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: ['生产环境', '用户A'], note: 'iPhone 15 测试机' }),
+      }).then((r) => r.json())
+      if (setRes.ok && setRes.device.tags.length === 2 && setRes.device.note === 'iPhone 15 测试机') {
+        ok(`POST /tags 设置成功：tags=[${setRes.device.tags.join(',')}] note="${setRes.device.note}"`)
+      } else {
+        fail(`POST /tags 设置异常: ${JSON.stringify(setRes)}`)
+      }
+
+      /** GET /devices 应反映新标签 */
+      const devWithTags = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === tagDev.id)
+      if (devWithTags?.tags?.length === 2 && devWithTags?.note === 'iPhone 15 测试机') {
+        ok(`GET /devices 正确反映标签/备注`)
+      } else {
+        fail(`GET /devices 未反映标签: ${JSON.stringify(devWithTags?.tags)}`)
+      }
+
+      /** 触发 SPA 路由上报（update-info），验证 tags/note 不被 SDK 上报覆盖 */
+      await testPage.evaluate(() => history.pushState({}, '', '/tag-persistence-check'))
+      await new Promise((r) => setTimeout(r, 800))
+      const devAfterRoute = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === tagDev.id)
+      if (devAfterRoute?.tags?.length === 2 && devAfterRoute?.note === 'iPhone 15 测试机') {
+        ok(`SPA 路由变化后标签/备注保留（未被 update-info 覆盖）`)
+      } else {
+        fail(`SPA 路由后标签丢失: tags=${JSON.stringify(devAfterRoute?.tags)} note=${JSON.stringify(devAfterRoute?.note)}`)
+      }
+    } else {
+      fail('标签测试前置失败：无在线设备')
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

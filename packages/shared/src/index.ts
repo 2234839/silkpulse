@@ -55,6 +55,10 @@ export interface DeviceInfo {
   errorCount: number
   /** 上线时间戳（ms） */
   onlineAt: number
+  /** 自定义标签（多设备场景区分用，如 "生产环境" / "用户A"） */
+  tags: string[]
+  /** 自定义备注（一句话描述这台设备的身份） */
+  note?: string
 }
 
 /** console 日志条目 */

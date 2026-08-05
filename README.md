@@ -38,6 +38,13 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **bookmarklet**：线上站不便改源码时，拖到书签栏点击即接入
 - **userscript**：Tampermonkey/Greasemonkey，自动匹配所有页面
 
+### 设备标签 / 备注
+多设备场景下区分"哪台是哪台"：
+- **接入时预设**：`<script src=".../sdk.js" data-tags="生产,用户A" data-note="iPhone 15"></script>`
+- **运行时修改**：控制台 UI 内联编辑（选中设备点 🏷️），或 `POST /api/devices/:id/tags`
+- **AI 可用**：`clarosight tag <id> "标签1,标签2" 备注内容`
+- **持久保留**：SPA 路由变化、断线重连都不覆盖 server 侧标签
+
 ### 可靠性
 - **断线重连**：指数退避（1s/2s/4s...30s），重连后历史缓冲区完整保留
 - **SPA 路由感知**：pushState/replaceState/popstate 上报 URL 变化
@@ -146,7 +153,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（20 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（24 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -161,6 +168,7 @@ clarosight/
 | GET | `/api/devices/:id/logs?since=N` | console 日志（游标分页） |
 | GET | `/api/devices/:id/network?since=N` | network 记录（HAR 风格，游标分页） |
 | GET | `/api/devices/:id/errors` | 错误记录 |
+| POST | `/api/devices/:id/tags` | 修改设备标签/备注（`{tags?: string[], note?: string}`） |
 | GET | `/inject/bookmarklet` | 生成 bookmarklet 注入片段 |
 | GET | `/inject/userscript` | 生成 userscript 注入片段 |
 | POST | `/api/echo` | 回显端点（测试 POST body 采集） |
@@ -175,7 +183,7 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 node scripts/headless-test.mjs
 ```
 
-20 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）。
+20 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、设备标签/备注（设置/查询/SPA 路由后保留）。
 
 ## License
 

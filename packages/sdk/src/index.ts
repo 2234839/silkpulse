@@ -26,6 +26,10 @@ export interface InitOptions {
   server: string
   /** 是否在页面卸载时断开，默认 true */
   disconnectOnUnload?: boolean
+  /** 预设标签（区分多设备，如 "生产环境"） */
+  tags?: string[]
+  /** 预设备注（一句话描述设备身份） */
+  note?: string
 }
 
 /**
@@ -46,7 +50,7 @@ function getDeviceId(): string {
 }
 
 /** 收集当前设备元信息 */
-function collectDeviceInfo(id: string): DeviceInfo {
+function collectDeviceInfo(id: string, tags: string[] = [], note?: string): DeviceInfo {
   return {
     id,
     url: location.href,
@@ -57,6 +61,8 @@ function collectDeviceInfo(id: string): DeviceInfo {
     deviceType: detectDeviceType(navigator.userAgent, window.innerWidth),
     errorCount: getErrorCount(),
     onlineAt: Date.now(),
+    tags,
+    note,
   }
 }
 
@@ -83,7 +89,7 @@ export function init(options: InitOptions): void {
   initialized = true
 
   const deviceId = getDeviceId()
-  const info = collectDeviceInfo(deviceId)
+  const info = collectDeviceInfo(deviceId, options.tags, options.note)
 
   /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port */
   const wsBase = options.server.replace(/^http/, 'ws')
@@ -131,8 +137,8 @@ export function init(options: InitOptions): void {
     })
   }
   for (const method of ['pushState', 'replaceState'] as const) {
-    const original = history[method].bind(history)
-    history[method] = function (...args: Parameters<typeof original>) {
+    const original = history[method].bind(history) as (...args: unknown[]) => void
+    history[method] = function (...args: unknown[]) {
       const ret = original(...args)
       setTimeout(reportUrlChange, 0)
       return ret
@@ -156,7 +162,12 @@ function autoInit(): void {
   const server = script?.dataset.server
   if (!server) return
 
-  const start = () => init({ server })
+  /** data-tags 用逗号分隔，data-note 为单行备注 */
+  const tagsRaw = script?.dataset.tags ?? ''
+  const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
+  const note = script?.dataset.note || undefined
+
+  const start = () => init({ server, tags, note })
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start)
   } else {
