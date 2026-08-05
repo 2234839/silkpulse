@@ -1589,6 +1589,56 @@ async function main() {
     }
 
     /**
+     * 23.1 Console 日志点击复制 —— 点击日志条目复制单条（含时间+级别+message）
+     *
+     * Console 之前是唯一交互最弱的面板（日志只能看不能复制），Network/Errors/Snapshot
+     * 都有复制能力。现在点击日志行复制完整一条，hover 显示"复制"提示，复制后"✓"。
+     */
+    {
+      /** 确保在 Console 面板且有日志（前面清空测试打了一条"清空后新日志测试"） */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith('Console'))
+        if (cTab) cTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 点击第一条日志行 */
+      const clickResult = await consolePage.evaluate(() => {
+        /** Console 日志行：在 .font-mono.text-sm 容器内的 .border-b.border-light */
+        const container = document.querySelector('.font-mono.text-sm')
+        if (!container) return { error: 'no log container' }
+        const rows = container.querySelectorAll('.border-b.border-light')
+        if (rows.length === 0) return { error: 'no log rows' }
+        const firstRow = rows[0]
+        const titleBefore = firstRow.getAttribute('title') || ''
+        firstRow.click()
+        return { clicked: true, titleBefore }
+      })
+      if (clickResult.error) {
+        fail(`Console 日志复制前置失败：${clickResult.error}`)
+      } else {
+        /** 等 Vue 更新 + 剪贴板写入 */
+        await new Promise((r) => setTimeout(r, 300))
+        /** 验证：title 应变为"✓ 已复制"，或行内有"✓"文本 */
+        const feedback = await consolePage.evaluate(() => {
+          const container = document.querySelector('.font-mono.text-sm')
+          if (!container) return { error: 'no container' }
+          const rows = container.querySelectorAll('.border-b.border-light')
+          if (rows.length === 0) return { error: 'no rows' }
+          const firstRow = rows[0]
+          const title = firstRow.getAttribute('title') || ''
+          const hasCheck = Array.from(firstRow.querySelectorAll('span')).some((s) => s.textContent.trim() === '✓')
+          return { title, hasCheck }
+        })
+        if (feedback.title.includes('已复制') || feedback.hasCheck) {
+          ok(`Console 日志点击复制生效（点击后 → ✓ 已复制）`)
+        } else {
+          fail(`Console 日志复制反馈异常：${JSON.stringify(feedback)}`)
+        }
+      }
+    }
+
+    /**
      * 24. SDK 视口尺寸变化上报 —— resize/旋转后 server 收到新 viewport
      *
      * 诊断移动端布局错乱时，AI 需知道旋转/缩放后的真实视口。

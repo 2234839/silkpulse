@@ -5,7 +5,7 @@
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  */
 import { ref, computed, watch, onMounted, useTemplateRef, nextTick } from 'vue'
-import type { NetworkEntry, ErrorEntry } from '@clarosight/shared'
+import type { NetworkEntry, ErrorEntry, LogEntry } from '@clarosight/shared'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
@@ -168,6 +168,24 @@ const logColor = (type: string): string => {
   if (type === 'warn') return 'text-amber-600'
   if (type === 'debug') return 'text-faint'
   return 'text-primary'
+}
+
+/**
+ * 正在复制的日志 timestamp（标识哪条显示"✓ 已复制"反馈）
+ *
+ * 日志可能极多，用 timestamp 标识单条（比用数组索引稳定，过滤后索引会漂移）。
+ * 复制完整一条：[时间] LEVEL message —— 粘贴给 AI/同事时保留上下文。
+ */
+const copyingLogTs = ref<string | null>(null)
+async function copyLog(log: LogEntry) {
+  const text = `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.type.toUpperCase()} ${log.message}`
+  const ok = await copyText(text)
+  if (ok) {
+    copyingLogTs.value = log.timestamp
+    setTimeout(() => {
+      if (copyingLogTs.value === log.timestamp) copyingLogTs.value = null
+    }, 1500)
+  }
 }
 
 /**
@@ -655,10 +673,18 @@ onMounted(() => connect())
             </div>
             <!-- 日志列表 -->
             <div ref="logListEl" class="flex-1 overflow-y-auto p-4 font-mono text-sm">
-              <div v-for="(log, i) in filteredLogs" :key="i" class="py-0.5 border-b border-light">
+              <div
+                v-for="(log, i) in filteredLogs"
+                :key="i"
+                @click="copyLog(log)"
+                class="py-0.5 border-b border-light cursor-pointer hover:bg-blue-soft px-1 -mx-1 rounded transition-colors group"
+                :class="copyingLogTs === log.timestamp ? 'bg-blue-soft' : ''"
+                :title="copyingLogTs === log.timestamp ? '✓ 已复制' : '点击复制'"
+              >
                 <span class="text-faint text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
                 <span class="text-faint text-xs mr-2 uppercase">{{ log.type }}</span>
-                <span :class="logColor(log.type)">{{ log.message }}</span>
+                <span :class="logColor(log.type)" class="break-all">{{ log.message }}</span>
+                <span class="text-[10px] text-blue-key opacity-0 group-hover:opacity-60 ml-1">{{ copyingLogTs === log.timestamp ? '✓' : '复制' }}</span>
               </div>
               <div v-if="filteredLogs.length === 0" class="text-faint text-center py-8">
                 {{ logs.length === 0 ? '暂无日志' : '无匹配日志' }}
