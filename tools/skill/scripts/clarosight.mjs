@@ -332,6 +332,8 @@ async function main() {
         for (const n of failed.slice(-10)) {
           console.log(`- ${n.method} ${n.status} ${n.url} (${n.duration}ms)`)
           if (n.error) console.log(`  ⚠ ${n.error}`)
+          /** 失败请求的响应体通常含错误原因（如 {"error":"permission denied"}），诊断失败请求的关键 */
+          if (n.resBody) console.log(`  响应体: ${n.resBody}`)
         }
       }
       console.log('')

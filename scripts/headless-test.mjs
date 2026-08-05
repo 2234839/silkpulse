@@ -1832,16 +1832,18 @@ async function main() {
         && inspectOut.includes('ms')
         && inspectOut.includes('## 最近日志')
         && inspectOut.includes('## 页面快照')
+        /** 失败请求段应含响应体（{"error":"Not found"}），诊断失败请求的关键信息 */
+      const inspectHasResBody = inspectOut.includes('响应体:')
 
       if (netHasHeaders) {
         ok(`skill network 命令展示 headers ✓`)
       } else {
         fail(`skill network 命令未展示 headers：${netOut.slice(0, 200)}`)
       }
-      if (inspectOk) {
-        ok(`skill inspect 聚合命令正常（含错误/异常网络/慢请求Top/日志/快照五段）`)
+      if (inspectOk && inspectHasResBody) {
+        ok(`skill inspect 聚合命令正常（含错误/异常网络+响应体/慢请求Top/日志/快照五段）`)
       } else {
-        fail(`skill inspect 命令异常：${inspectOut.slice(0, 300)}`)
+        fail(`skill inspect 命令异常（inspectOk=${inspectOk} resBody=${inspectHasResBody}）：${inspectOut.slice(0, 300)}`)
       }
 
       /**
