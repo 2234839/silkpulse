@@ -351,6 +351,28 @@ async function main() {
       fail(`POST body 采集异常: ${JSON.stringify({ method: postEntry?.method, hasReq: !!postEntry?.reqBody, hasRes: !!postEntry?.resBody })}`)
     }
 
+    /** 7.15 POST body 大小上限保护 —— 超大 body 返回 413，不撑爆内存 */
+    {
+      /** 3MB body，超过 2MB 上限 */
+      const hugeCode = 'x'.repeat(3 * 1024 * 1024)
+      const hugeRes = await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: hugeCode }),
+      })
+      /** 正常小 body 仍工作（exec 成功） */
+      const normalRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'return 1 + 1' }),
+      })).json()
+      if (hugeRes.status === 413 && normalRes.success && normalRes.result === '2') {
+        ok(`POST body 上限保护生效（3MB → 413，正常 exec 仍成功）`)
+      } else {
+        fail(`body 上限异常：huge=${hugeRes.status} normal=${normalRes.success}`)
+      }
+    }
+
     /** 7.2 请求头/响应头采集 —— fetch 带自定义头 + xhr setRequestHeader */
     {
       /** fetch 带 content-type + 自定义 x- 头 */

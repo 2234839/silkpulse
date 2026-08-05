@@ -9,12 +9,40 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
 import { sendSnapshot } from './snapshot-text.js'
 
-/** 读取 POST body */
-function readBody(req: IncomingMessage): Promise<string> {
+/**
+ * POST body 最大字节数
+ *
+ * exec 诊断代码实际几 KB，2MB 上限给 AI 生成脚本留充足余量。
+ * 超限直接 413 终止读取，防止超大/恶意 POST 撑爆 server 内存。
+ */
+const MAX_BODY = 2 * 1024 * 1024
+
+/**
+ * 读取 POST body，带大小上限 + 错误/中断保护
+ *
+ * 返回 { body, oversize }：
+ * - oversize=true 表示超 MAX_BODY，调用方应回 413
+ * - 客户端中断（aborted/error）时 resolve 空串，不让 promise 泄漏
+ */
+function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boolean }> {
   return new Promise((resolve) => {
     let body = ''
-    req.on('data', (chunk) => (body += chunk))
-    req.on('end', () => resolve(body))
+    let oversized = false
+    req.on('data', (chunk) => {
+      if (oversized) return
+      body += chunk
+      if (body.length > MAX_BODY) {
+        /** 超限：停止累加，resolve oversize 让调用方回 413。
+         * 不用 req.destroy()——它会 RST 连接导致客户端 fetch 报 ECONNRESET，
+         * 而是停止读取，让调用方正常 sendJson(413) 结束响应。 */
+        oversized = true
+        resolve({ body: '', oversize: true })
+      }
+    })
+    req.on('end', () => resolve({ body, oversize: false }))
+    /** 客户端中断或连接错误：resolve 空串，避免 promise 永久挂起泄漏 */
+    req.on('aborted', () => resolve({ body: '', oversize: false }))
+    req.on('error', () => resolve({ body: '', oversize: false }))
   })
 }
 
@@ -67,7 +95,8 @@ export async function handleApiRoute(
 
   /** /api/echo —— 回显端点（测试 POST body 采集，返回接收到的 body） */
   if (pathname === '/api/echo') {
-    const body = await readBody(req)
+    const { body, oversize } = await readBody(req)
+    if (oversize) { sendJson(res, { error: 'body 超过 2MB 上限' }, 413); return true }
     sendJson(res, { ok: true, received: body ? JSON.parse(body) : null, time: Date.now() })
     return true
   }
@@ -117,7 +146,8 @@ export async function handleApiRoute(
         sendJson(res, { error: '需要 POST' }, 405)
         return true
       }
-      const body = await readBody(req)
+      const { body, oversize } = await readBody(req)
+      if (oversize) { sendJson(res, { error: 'exec body 超过 2MB 上限' }, 413); return true }
       let parsed: { code?: string }
       try {
         parsed = JSON.parse(body)
@@ -164,7 +194,8 @@ export async function handleApiRoute(
         sendJson(res, { error: '需要 POST' }, 405)
         return true
       }
-      const body = await readBody(req)
+      const { body, oversize } = await readBody(req)
+      if (oversize) { sendJson(res, { error: 'tags body 超过 2MB 上限' }, 413); return true }
       let parsed: { tags?: string[]; note?: string }
       try {
         parsed = JSON.parse(body)
