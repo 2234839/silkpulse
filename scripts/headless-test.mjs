@@ -524,6 +524,65 @@ async function main() {
       }
     }
 
+    /**
+     * 8.6 错误风暴去重（防循环错误打爆 WS/server）
+     *
+     * 页面连发 20 次相同 error 事件 + 1 个不同 error，验证：
+     * - 相同错误被聚合（errors 增量远少于派发次数）
+     * - 含"重复 N 次"汇总标注
+     * - 不同错误独立上报，不被去重
+     */
+    {
+      const errsBefore = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+
+      /**
+       * 循环触发同一个 error 事件 20 次 + 1 个不同错误
+       *
+       * 用 dispatchEvent(new ErrorEvent) 直接派发，绕过浏览器对同一 location 重复
+       * throw 的自动限流（chromium 会丢弃大部分重复 throw，导致测试无法验证去重）。
+       * ErrorEvent 带 filename/lineno/colno，window.onerror 正常接收。
+       */
+      await testPage.evaluate(() => {
+        const fireError = (msg, line) => {
+          window.dispatchEvent(new ErrorEvent('error', {
+            message: msg,
+            filename: 'storm-test.js',
+            lineno: line,
+            colno: 1,
+            error: new Error(msg),
+          }))
+        }
+        /** 同一错误（同 message + 同 lineno=10）连发 20 次 */
+        for (let i = 0; i < 20; i++) {
+          fireError('storm-same-error', 10)
+        }
+        /** 不同错误（不同 message + 不同 lineno）验证不被去重 */
+        fireError('storm-different-error', 99)
+      })
+      /** 等待 dedup 窗口（2s）flush 重复汇总 */
+      await new Promise((r) => setTimeout(r, 3000))
+
+      const errorsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()
+
+      /**
+       * 去重核心效果（不依赖精确 errorCount——浏览器对 dispatchEvent 的 ErrorEvent
+       * 有自身节流，收到的原始事件数不确定，但去重行为可验证）：
+       * - errors 增量很小（≤ 5），远少于派发的 21 次
+       * - 含"重复"汇总标注（相同错误被聚合）
+       * - 含不同错误（不同错误独立上报，不被去重）
+       */
+      const errsDelta = errorsAfter.length - errsBefore
+      const stormErrors = errorsAfter.slice(-errsDelta)
+      const hasRepeatAnnotation = stormErrors.some((e) => e.message.includes('重复'))
+      const hasDifferentError = stormErrors.some((e) => e.message.includes('storm-different-error'))
+
+      if (errsDelta <= 5 && hasRepeatAnnotation && hasDifferentError) {
+        ok(`错误风暴去重生效（errors ${errsBefore}→${errorsAfter.length} 增 ${errsDelta} 条，远少于派发次数，含"重复"汇总 ✓ 含不同错误 ✓）`)
+      } else {
+        fail(`错误风暴去重异常：errors 增 ${errsDelta}(期望≤5)，重复标注=${hasRepeatAnnotation}，不同错误=${hasDifferentError}`)
+      }
+    }
+
     /** 9. 控制台 WS 实时推送（选中设备后能看到日志） */
     const seen = await consolePage.evaluate(async (deviceId) => {
       const ws = new WebSocket(`ws://${location.host}/ws/console`)
