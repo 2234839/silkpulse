@@ -154,6 +154,39 @@ async function main() {
     if (logs.some((l) => l.message.includes('打招呼'))) ok(`console 采集成功（${logs.length} 条）`)
     else fail(`console 采集异常: ${logs.slice(-2).map((l) => l.message).join(' | ')}`)
 
+    /** 6.5 日志限流 —— 防止远程页面 log 爆炸打爆 WS/server */
+    {
+      const beforeTs = Date.now()
+      /** 1 秒内狂刷 200 条 info + 5 条 error（error 不应被限流） */
+      await testPage.evaluate(() => {
+        for (let i = 0; i < 200; i++) console.log(`限流测试-${i}`)
+        for (let i = 0; i < 5; i++) console.error(`限流error-${i}`)
+      })
+      /** 等 2.5s：让限流窗口滚动 + 汇总上报（每秒检查一次） */
+      await new Promise((r) => setTimeout(r, 2500))
+      const allLogs = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      /** 只看本次触发产生的日志（按时间戳过滤） */
+      const recent = allLogs.filter((l) => new Date(l.timestamp).getTime() > beforeTs)
+      const infoCount = recent.filter((l) => l.type === 'info' && l.message.includes('限流测试-')).length
+      const errorCount = recent.filter((l) => l.type === 'error' && l.message.includes('限流error-')).length
+      const hasThrottleNotice = recent.some((l) => l.type === 'warn' && l.message.includes('日志限流'))
+
+      /** info 应远少于 200（限流窗口 50 条/秒），error 应 5 条全在，应有限流提示 */
+      if (infoCount < 200 && infoCount > 0) {
+        if (errorCount === 5) {
+          if (hasThrottleNotice) {
+            ok(`日志限流生效（info 200→${infoCount}，error 5 条全保留，有限流提示）`)
+          } else {
+            fail(`日志限流提示缺失：info=${infoCount} error=${errorCount} 但无限流 warn`)
+          }
+        } else {
+          fail(`error 不应被限流：期望 5 条，实际 ${errorCount} 条`)
+        }
+      } else {
+        fail(`日志限流异常：info=${infoCount}（应 <200 且 >0）`)
+      }
+    }
+
     /** 7. network 采集 —— fetch + xhr + POST body */
     await testPage.evaluate(() => document.getElementById('fetch-ok')?.click())
     await testPage.evaluate(() => document.getElementById('fetch-404')?.click())
