@@ -21,7 +21,7 @@ description: 远程设备调试器 —— 查看、诊断、操作用户在远�
 # 1. 先看有哪些在线设备
 node tools/skill/scripts/clarosight.mjs devices
 
-# 2. 一键诊断聚合（错误 + 失败网络 + 快照，AI 诊断最高效的入口）
+# 2. 一键诊断聚合（错误 + 失败网络 + 慢请求 Top + 快照，AI 诊断最高效的入口）
 node tools/skill/scripts/clarosight.mjs inspect <deviceId>
 
 # 3. 取页面快照（AI 友好的 compact 文本，一眼读懂页面结构）

@@ -903,7 +903,7 @@ async function main() {
       )
       const netHasHeaders = netOut.includes('请求头') || netOut.includes('content-type')
 
-      /** inspect 命令：应聚合 错误 + 异常网络 + 快照 */
+      /** inspect 命令：应聚合 错误 + 异常网络 + 慢请求 Top + 快照 */
       const inspectOut = execSync(
         `node ${skillScript} inspect ${device.id}`,
         { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
@@ -911,6 +911,8 @@ async function main() {
       const inspectOk = inspectOut.includes('clarosight 设备诊断聚合')
         && inspectOut.includes('## 错误')
         && inspectOut.includes('## 异常网络请求')
+        && inspectOut.includes('## 慢请求 Top')
+        && inspectOut.includes('ms')
         && inspectOut.includes('## 页面快照')
 
       if (netHasHeaders) {
@@ -919,9 +921,9 @@ async function main() {
         fail(`skill network 命令未展示 headers：${netOut.slice(0, 200)}`)
       }
       if (inspectOk) {
-        ok(`skill inspect 聚合命令正常（含错误/网络/快照三段）`)
+        ok(`skill inspect 聚合命令正常（含错误/异常网络/慢请求Top/快照四段）`)
       } else {
-        fail(`skill inspect 命令异常：${inspectOut.slice(0, 200)}`)
+        fail(`skill inspect 命令异常：${inspectOut.slice(0, 300)}`)
       }
     }
 

@@ -269,6 +269,27 @@ async function main() {
       }
       console.log('')
 
+      /**
+       * 慢请求 Top 5 —— 按耗时降序，>500ms 标记 ⚠
+       *
+       * 诊断"页面慢/卡"时，失败的请求（上面那段）往往不是根因——
+       * 真正的瓶颈是那些 status 200 但耗时 2-3s 的慢请求。
+       * duration 数据 SDK 已采集，这里给 AI 排好序直接用，省得 AI 自己算。
+       */
+      const SLOW_THRESHOLD = 500
+      const byDuration = [...network].sort((a, b) => b.duration - a.duration)
+      const slowTop = byDuration.slice(0, 5).filter((n) => n.duration > 0)
+      console.log(`## 慢请求 Top ${slowTop.length}（> ${SLOW_THRESHOLD}ms 标记 ⚠）`)
+      if (slowTop.length === 0) {
+        console.log('（无网络请求）')
+      } else {
+        for (const n of slowTop) {
+          const mark = n.duration > SLOW_THRESHOLD ? ' ⚠' : ''
+          console.log(`- ${n.duration}ms${mark} ${n.method} ${n.status} ${n.url}`)
+        }
+      }
+      console.log('')
+
       console.log('## 页面快照')
       console.log('```')
       console.log(snapshot)
