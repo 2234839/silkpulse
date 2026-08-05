@@ -1376,6 +1376,102 @@ async function main() {
       }
     }
 
+    /** 20.5 exec 编辑器 Tab/Shift+Tab —— 单行缩进/反缩进 + 多行选区批量缩进/反缩进 */
+    {
+      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.reload({ waitUntil: 'networkidle0' })
+      await new Promise((r) => setTimeout(r, 500))
+      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await new Promise((r) => setTimeout(r, 400))
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const execTab = tabs.find((t) => t.textContent.trim().startsWith('Exec'))
+        if (execTab) execTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      /**
+       * 用 page.keyboard 派发真实 Tab/Shift+Tab，触发 handleExecKeydown
+       *
+       * page.keyboard 会正确传递 shiftKey 修饰键状态给 keydown 事件。
+       * 每步先在 evaluate 内设好 value + 选区 + focus，再 await page.keyboard。
+       * handleExecKeydown 用 requestAnimationFrame 更新光标，所以每步后等一帧。
+       */
+      const setup = (val, selStart, selEnd) => consolePage.evaluate(({ val, selStart, selEnd }) => {
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          ta.focus()
+          ta.value = val
+          ta.dispatchEvent(new Event('input', { bubbles: true }))
+          ta.selectionStart = selStart
+          ta.selectionEnd = selEnd
+        }
+      }, { val, selStart, selEnd })
+
+      const read = () => consolePage.evaluate(() => {
+        const ta = document.querySelector('textarea')
+        return { v: ta?.value ?? '', pos: ta?.selectionStart ?? -1, end: ta?.selectionEnd ?? -1 }
+      })
+
+      /** 1. 单行 Tab：光标在行尾，插入 2 空格 */
+      await setup('return 1', 8, 8)
+      await consolePage.keyboard.press('Tab')
+      await new Promise((r) => setTimeout(r, 120))
+      const r1 = await read()
+
+      /** 2. 单行 Shift+Tab：行首 2 空格的反缩进 */
+      await setup('  return 1', 4, 4)
+      await consolePage.keyboard.down('Shift')
+      await consolePage.keyboard.press('Tab')
+      await consolePage.keyboard.up('Shift')
+      await new Promise((r) => setTimeout(r, 150))
+      const r2 = await read()
+
+      /** 3. 多行选区 Tab：选中两行（start=0 end=11），批量缩进 */
+      await setup('line1\nline2', 0, 11)
+      await consolePage.keyboard.press('Tab')
+      await new Promise((r) => setTimeout(r, 120))
+      const r3 = await read()
+
+      /** 4. 多行选区 Shift+Tab：选中刚缩进的两行，批量反缩进 */
+      /** 上一步 value = '  line1\n  line2'，选区覆盖全段 */
+      await consolePage.evaluate(() => {
+        const ta = document.querySelector('textarea')
+        if (ta) { ta.selectionStart = 0; ta.selectionEnd = ta.value.length }
+      })
+      await consolePage.keyboard.down('Shift')
+      await consolePage.keyboard.press('Tab')
+      await consolePage.keyboard.up('Shift')
+      await new Promise((r) => setTimeout(r, 120))
+      const r4 = await read()
+
+      /** 5. 行首无空格的 Shift+Tab：安全无操作（value 不变，不报错） */
+      await setup('return 1', 4, 4)
+      await consolePage.keyboard.down('Shift')
+      await consolePage.keyboard.press('Tab')
+      await consolePage.keyboard.up('Shift')
+      await new Promise((r) => setTimeout(r, 120))
+      const r5 = await read()
+
+      const t1 = r1.v === 'return 1  ' && r1.pos === 10
+      const t2 = r2.v === 'return 1' && r2.pos === 2
+      const t3 = r3.v === '  line1\n  line2' && r3.pos === 0 && r3.end === 15
+      const t4 = r4.v === 'line1\nline2'
+      const t5 = r5.v === 'return 1'
+
+      t1 ? ok(`exec 编辑器单行 Tab 缩进（return 1  ，光标@${r1.pos}）`)
+         : fail(`exec 编辑器单行 Tab 异常：${JSON.stringify(r1)}`)
+
+      t2 ? ok(`exec 编辑器单行 Shift+Tab 反缩进（return 1，光标@${r2.pos}）`)
+         : fail(`exec 编辑器单行 Shift+Tab 异常：${JSON.stringify(r2)}`)
+      t3 ? ok(`exec 编辑器多行选区 Tab 批量缩进（两行各加 2 空格，选区保持）`)
+         : fail(`exec 编辑器多行 Tab 异常：${JSON.stringify(r3)}`)
+      t4 ? ok(`exec 编辑器多行选区 Shift+Tab 批量反缩进（两行各移除 2 空格）`)
+         : fail(`exec 编辑器多行 Shift+Tab 异常：value="${r4.v}"`)
+      t5 ? ok(`exec 编辑器行首无空格 Shift+Tab 安全无操作（value 不变）`)
+         : fail(`exec 编辑器无空格 Shift+Tab 异常：${JSON.stringify(r5)}`)
+    }
+
     /** 21. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
     {
       /** 先清空 localStorage 历史，确保干净起点 */
