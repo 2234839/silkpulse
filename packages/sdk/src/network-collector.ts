@@ -113,7 +113,22 @@ function installFetchHook(sink: NetworkSink): void {
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     const method = (init?.method ?? (typeof input !== 'string' && !(input instanceof URL) ? input.method : 'GET')).toUpperCase()
-    const reqBody = init?.body ? stringifyBody(init.body, MAX_REQ_BODY) : undefined
+    /**
+     * 请求体读取：优先 init.body；init 为空但 input 是 Request 对象时，
+     * 从 Request 上读（clone 副本读取，不消费原始 body）。
+     * fetch(new Request(url, {body})) 场景若不处理，body 会丢失。
+     */
+    let reqBody: string | undefined
+    if (init?.body) {
+      reqBody = stringifyBody(init.body, MAX_REQ_BODY)
+    } else if (typeof input !== 'string' && !(input instanceof URL) && input.method !== 'GET' && input.method !== 'HEAD') {
+      /** Request 对象带 body（非 GET/HEAD）：clone 后读文本，不消费原始 stream */
+      try {
+        reqBody = await readRequestBodyClone(input, MAX_REQ_BODY)
+      } catch {
+        /** clone 或读取失败（stream 已消费/locked）忽略，不影响请求 */
+      }
+    }
     /** 请求头：合并 input（若是 Request 对象）与 init 的 headers */
     const reqHeaders = pickKeyHeaders(mergeReqHeaders(input, init), KEY_REQ_HEADERS, { isRequest: true })
     const start = Date.now()
@@ -307,6 +322,18 @@ function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | 
   } catch {
     return '[body 不可读]'
   }
+}
+
+/**
+ * 克隆 Request 并读取 body 文本（不消费原始 body stream）
+ *
+ * Request 的 body 是 ReadableStream，直接读会消费它，导致后续 fetch 拿不到 body。
+ * clone() 创建副本，读副本不影响原始请求。
+ */
+async function readRequestBodyClone(req: Request, maxLen: number): Promise<string | undefined> {
+  const cloned = req.clone()
+  const text = await cloned.text()
+  return truncate(text, maxLen)
 }
 
 /** 克隆响应并异步读取 body（不消费原始 body） */

@@ -58,6 +58,7 @@
     <button id="xhr-btn">XHR 请求</button>
     <button id="xhr-json-btn">XHR responseType=json</button>
     <button id="post-btn">POST 请求（带 body）</button>
+    <button id="request-btn">POST（Request 对象）</button>
   </div>
 
   <div class="demo">
@@ -159,6 +160,25 @@
         show(`POST 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
       } catch (e) {
         show('POST 失败: ' + e.message)
+      }
+    })
+
+    /** network：用 Request 对象发 POST（验证 body 在 Request 上时 reqBody 采集） */
+    document.getElementById('request-btn').addEventListener('click', async () => {
+      const payload = { source: 'request-object', msg: 'hello from Request' }
+      console.log('POST(Request) 发起: /api/echo', payload)
+      try {
+        /** body 在 Request 对象上，不在 fetch init 里——验证 SDK 从 Request 读取 reqBody */
+        const req = new Request('/api/echo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const res = await fetch(req)
+        const text = await res.text()
+        show(`POST(Request) 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
+      } catch (e) {
+        show('POST(Request) 失败: ' + e.message)
       }
     })
 

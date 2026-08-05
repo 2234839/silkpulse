@@ -440,6 +440,23 @@ async function main() {
       fail(`XHR responseType=json 响应体丢失: resBody=${xhrJsonEntry?.resBody ?? 'undefined'}（responseText 在 json 模式抛 InvalidStateError，需用 response 读取）`)
     }
 
+    /**
+     * 7.3 Request 对象 body 采集
+     *
+     * fetch(new Request(url, {body})) 时 body 在 Request 对象上，不在 fetch init 里。
+     * 若只读 init.body，reqBody 会丢失。验证 SDK 从 Request.clone() 读取 body。
+     */
+    await testPage.evaluate(() => document.getElementById('request-btn')?.click())
+    await new Promise((r) => setTimeout(r, 1500))
+    const network3 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    /** 找 request-object 那条 POST（resBody 会回显，含 source: request-object） */
+    const reqObjEntry = network3.find((n) => n.method === 'POST' && n.url.includes('/api/echo') && n.reqBody?.includes('request-object'))
+    if (reqObjEntry && reqObjEntry.reqBody && reqObjEntry.reqBody.includes('request-object')) {
+      ok(`Request 对象 body 采集成功（reqBody ${reqObjEntry.reqBody.length} 字符，含 "request-object" ✓）`)
+    } else {
+      fail(`Request 对象 body 丢失: reqBody=${reqObjEntry?.reqBody ?? 'undefined'}（body 在 Request 上不在 init，需 clone 后读取）`)
+    }
+
     /** 7.15 POST body 大小上限保护 —— 超大 body 返回 413，不撑爆内存 */
     {
       /** 3MB body，超过 2MB 上限 */
