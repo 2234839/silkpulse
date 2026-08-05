@@ -86,6 +86,7 @@ export function sendSnapshot(rawResult: string | undefined): string {
   const header = [
     `# url: ${data.url}`,
     `# title: ${data.title}`,
+    `# viewport: ${data.viewportWidth}×${data.viewportHeight}`,
     `# errors: ${data.errors}`,
   ].join('\n')
   const errorSuffix =

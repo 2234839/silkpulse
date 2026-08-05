@@ -174,6 +174,10 @@ export interface SnapshotData {
   url: string
   /** 页面标题 */
   title: string
+  /** 视口宽度（px），诊断响应式/布局问题时让 AI 知道当前可视区域尺寸 */
+  viewportWidth: number
+  /** 视口高度（px） */
+  viewportHeight: number
   /** 采集到的可见元素列表（已压缩） */
   els: SnapshotElement[]
   /** 当前错误数 */

@@ -101,6 +101,7 @@ snapshot 是 token 高效的 compact 文本，每行一个元素：
 ```
 # url: https://example.com/shop
 # title: 商品页
+# viewport: 375×667
 button #5 text=打招呼            ← 可点击的按钮，idx=5
 input #4 #name-input ph:输入名字  ← 输入框，idx=4，有 placeholder
 select #9 #city-select val:北京 <北京|上海|广州>  ← 下拉框

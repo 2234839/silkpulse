@@ -156,9 +156,11 @@ async function main() {
     const snapRes = await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)
     if (snapRes.ok) {
       const snapText = await snapRes.text()
-      if (snapText.includes('url:') && snapText.toLowerCase().includes('button')) {
-        ok(`snapshot API 返回 compact 文本（${snapText.length} 字符）`)
-      } else fail(`snapshot 内容异常: ${snapText.slice(0, 150)}`)
+      /** 同时验证 viewport 头部（诊断响应式/布局问题的关键线索） */
+      const viewportMatch = snapText.match(/# viewport: (\d+)×(\d+)/)
+      if (snapText.includes('url:') && snapText.toLowerCase().includes('button') && viewportMatch) {
+        ok(`snapshot API 返回 compact 文本（${snapText.length} 字符，含 viewport ${viewportMatch[1]}×${viewportMatch[2]}）`)
+      } else fail(`snapshot 内容异常: ${snapText.slice(0, 200)}`)
     } else fail(`snapshot HTTP ${snapRes.status}`)
     const snapText2 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
     const btnMatch = snapText2.match(/button #(\d+)/)

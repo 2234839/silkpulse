@@ -302,6 +302,9 @@ export function takeSnapshot(): SnapshotData {
     t: new Date().toISOString(),
     url: location.href,
     title: document.title,
+    /** 视口尺寸：诊断响应式/布局错乱时让 AI 知道当前可视区域（手机/平板/桌面） */
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
     els,
     errors: totalErrorCount,
     lastErrors: recentErrors.length > 0 ? [...recentErrors] : undefined,
