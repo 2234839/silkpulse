@@ -128,6 +128,10 @@ export async function handleApiRoute(
         return true
       }
       const result = await execOnDevice(registry, deviceId, parsed.code)
+      /** exec 后的快照统一转成 compact 文本（与 snapshot API 格式一致，AI 直接读） */
+      if (result.success && result.snapshotText) {
+        result.snapshotText = sendSnapshot(result.snapshotText)
+      }
       sendJson(res, result)
       return true
     }

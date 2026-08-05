@@ -135,13 +135,9 @@ async function main() {
         for (const l of result.logs) console.log(l)
       }
       if (result.snapshotText) {
-        console.log('\n=== 执行后页面快照 ===')
-        try {
-          const snap = JSON.parse(result.snapshotText)
-          console.log(`url: ${snap.url} | 标题: ${snap.title} | 元素: ${snap.els.length}`)
-        } catch {
-          console.log(result.snapshotText.slice(0, 200))
-        }
+        console.log('\n=== 执行后页面快照（compact 文本）===')
+        /** snapshotText 已是 server 转换好的 compact 文本，AI 直接读 */
+        console.log(result.snapshotText)
       }
       break
     }

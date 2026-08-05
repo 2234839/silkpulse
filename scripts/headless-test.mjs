@@ -83,6 +83,13 @@ async function main() {
     if (execData.success) ok(`exec 成功，title → ${execData.result}`)
     else fail(`exec 失败: ${JSON.stringify(execData)}`)
 
+    /** 3.1 exec 后的 snapshotText 应为 compact 文本（含 url: 和 #idx），非 JSON */
+    if (execData.snapshotText && execData.snapshotText.includes('# url:') && execData.snapshotText.includes('#')) {
+      ok(`exec snapshotText 为 compact 文本格式（${execData.snapshotText.length} 字符）`)
+    } else {
+      fail(`exec snapshotText 格式异常: ${String(execData.snapshotText).slice(0, 100)}`)
+    }
+
     /** 5. snapshot API（修复 return 后应成功）+ 取 button idx */
     const snapRes = await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)
     if (snapRes.ok) {
