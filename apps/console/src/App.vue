@@ -334,6 +334,20 @@ const networkSearch = ref('')
  * 用户需要快速过滤出"哪些请求挂了"。status=0（请求未完成/网络中断）归入失败。
  */
 const networkStatusFilter = ref<'all' | 'success' | 'error'>('all')
+/**
+ * 耗时排序：time（默认时间正序）/ desc（耗时降序，慢请求在最上）/ asc（耗时升序）
+ *
+ * 诊断"页面慢/卡"时，失败请求往往不是根因——真正的瓶颈是那些 status 200
+ * 但耗时 2-3s 的慢请求。点"耗时"表头切到降序即可一眼定位，与 inspect CLI 的慢请求 Top 对齐。
+ */
+const networkDurationSort = ref<'time' | 'desc' | 'asc'>('time')
+/** 慢请求阈值（ms），与 skill CLI inspect 的 SLOW_THRESHOLD 保持一致 */
+const SLOW_THRESHOLD = 500
+function toggleDurationSort() {
+  if (networkDurationSort.value === 'time') networkDurationSort.value = 'desc'
+  else if (networkDurationSort.value === 'desc') networkDurationSort.value = 'asc'
+  else networkDurationSort.value = 'time'
+}
 const filteredNetwork = computed(() => {
   let result = network.value
   if (networkStatusFilter.value === 'success') {
@@ -349,6 +363,12 @@ const filteredNetwork = computed(() => {
       n.method.toLowerCase().includes(q) ||
       String(n.status).includes(q),
     )
+  }
+  /** 耗时排序：默认 time 不排（保持时间正序），desc/asc 按 duration 排 */
+  if (networkDurationSort.value === 'desc') {
+    result = [...result].sort((a, b) => b.duration - a.duration)
+  } else if (networkDurationSort.value === 'asc') {
+    result = [...result].sort((a, b) => a.duration - b.duration)
   }
   return result
 })
@@ -645,7 +665,14 @@ onMounted(() => connect())
                       <th class="text-left px-3 py-2">方法</th>
                       <th class="text-left px-3 py-2">状态</th>
                       <th class="text-left px-3 py-2">URL</th>
-                      <th class="text-right px-3 py-2">耗时</th>
+                      <th class="text-right px-3 py-2">
+                        <button
+                          @click="toggleDurationSort"
+                          class="inline-flex items-center gap-0.5 hover:text-primary transition-colors"
+                          :class="networkDurationSort !== 'time' ? 'text-primary' : ''"
+                          :title="networkDurationSort === 'time' ? '点击按耗时降序' : networkDurationSort === 'desc' ? '当前：耗时降序（慢请求在上）' : '当前：耗时升序'"
+                        >耗时<span class="text-[10px]">{{ networkDurationSort === 'desc' ? '▼' : networkDurationSort === 'asc' ? '▲' : '↕' }}</span></button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -662,7 +689,11 @@ onMounted(() => connect())
                         {{ n.status || '—' }}
                       </td>
                       <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
-                      <td class="px-3 py-2 text-right text-muted text-xs font-mono">{{ n.duration }}ms</td>
+                      <td
+                        class="px-3 py-2 text-right text-xs font-mono"
+                        :class="n.duration > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'"
+                        :title="n.duration > SLOW_THRESHOLD ? `慢请求（> ${SLOW_THRESHOLD}ms）` : ''"
+                      >{{ n.duration }}ms</td>
                     </tr>
                   </tbody>
                 </table>

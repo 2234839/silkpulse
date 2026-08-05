@@ -1636,6 +1636,104 @@ async function main() {
       }
     }
 
+    /** 65. Network 耗时排序 —— 点击"耗时"表头切换降序/升序，验证 DOM 顺序与方向一致 */
+    {
+      /**
+       * 先在测试页触发若干网络请求，保证列表有多条 + duration 有差异。
+       * 用 exec 在页面上下文发起 5 个连续 fetch（/api/devices + /api/echo），
+       * 浏览器并发限制 + JS 执行节奏会让各请求 duration 出现可测差异。
+       */
+      await testPage.evaluate(async () => {
+        for (const url of ['/api/devices', '/api/echo', '/api/devices', '/api/devices', '/api/echo']) {
+          try {
+            await fetch(url, url.includes('echo') ? { method: 'POST', body: '{}' } : {}).catch(() => {})
+          } catch {}
+        }
+      })
+      await new Promise((r) => setTimeout(r, 1500))
+
+      /** 切到控制台 Network 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
+        if (netTab) netTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 500))
+
+      /**
+       * 读 Network 表格所有数据行的耗时列文本。
+       * 耗时单元格 class 含 'font-mono'，文本形如 "12ms"。
+       */
+      async function readDurationColumn() {
+        return consolePage.evaluate(() => {
+          const rows = Array.from(document.querySelectorAll('table tbody tr'))
+          return rows.map((tr) => {
+            const cells = tr.querySelectorAll('td')
+            const last = cells[cells.length - 1]?.textContent?.trim() ?? ''
+            const ms = Number(last.replace('ms', ''))
+            return Number.isFinite(ms) ? ms : -1
+          })
+        })
+      }
+
+      /** 点"耗时"表头按钮（在 thead 内，文本含"耗时"） */
+      async function clickDurationHeader() {
+        await consolePage.evaluate(() => {
+          const ths = Array.from(document.querySelectorAll('table thead th'))
+          const th = ths.find((t) => t.textContent.includes('耗时'))
+          th?.querySelector('button')?.click()
+        })
+        await new Promise((r) => setTimeout(r, 250))
+      }
+
+      /** 读当前排序指示箭头 */
+      async function readSortArrow() {
+        return consolePage.evaluate(() => {
+          const ths = Array.from(document.querySelectorAll('table thead th'))
+          const th = ths.find((t) => t.textContent.includes('耗时'))
+          const t = th?.textContent?.trim() ?? ''
+          if (t.includes('▼')) return 'desc'
+          if (t.includes('▲')) return 'asc'
+          return 'time'
+        })
+      }
+
+      /** 默认 time 序（不排） */
+      const beforeArrow = await readSortArrow()
+      const beforeDurations = await readDurationColumn()
+
+      /** 点击 → 降序（慢请求在上） */
+      await clickDurationHeader()
+      const descArrow = await readSortArrow()
+      const descDurations = await readDurationColumn()
+
+      /** 再点击 → 升序 */
+      await clickDurationHeader()
+      const ascArrow = await readSortArrow()
+      const ascDurations = await readDurationColumn()
+
+      /** 还原到默认（第三次点击） */
+      await clickDurationHeader()
+
+      /**
+       * 验证：
+       * (1) 箭头按 ↕→▼→▲ 切换
+       * (2) 降序时首行 duration >= 末行 duration（多条请求时严格成立）
+       * (3) 升序时首行 <= 末行
+       * (4) 列表项数不变（排序不应丢条目）
+       */
+      const arrowOk = beforeArrow === 'time' && descArrow === 'desc' && ascArrow === 'asc'
+      const countOk = beforeDurations.length === descDurations.length && descDurations.length === ascDurations.length && descDurations.length >= 3
+      const descOrdered = descDurations.length >= 2 && descDurations[0] >= descDurations[descDurations.length - 1]
+      const ascOrdered = ascDurations.length >= 2 && ascDurations[0] <= ascDurations[ascDurations.length - 1]
+
+      if (arrowOk && countOk && descOrdered && ascOrdered) {
+        ok(`Network 耗时排序生效（${descDurations.length} 条，↕→▼→▲ 切换 ✓ 降序 ✓ 升序 ✓）`)
+      } else {
+        fail(`Network 耗时排序异常：arrow=${arrowOk}(${beforeArrow}→${descArrow}→${ascArrow}) count=${countOk}(${beforeDurations.length}/${descDurations.length}/${ascDurations.length}) desc=${descOrdered} asc=${ascOrdered}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)
