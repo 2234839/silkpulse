@@ -100,6 +100,22 @@ export function setupWebSocket(
             notifyDeviceListChanged()
             break
           }
+          case 'update-info': {
+            /** SPA 路由变化：SDK 上报新 url/title，server 更新元信息并通知控制台 */
+            if (!device) return
+            registry.updateInfo(deviceId, {
+              url: msg.device.url,
+              title: msg.device.title,
+              viewportWidth: msg.device.viewportWidth,
+              viewportHeight: msg.device.viewportHeight,
+              deviceType: msg.device.deviceType,
+            })
+            broadcast(deviceId, {
+              type: 'device-online',
+              device: device.info,
+            })
+            break
+          }
           case 'log': {
             if (!device) return
             device.logs.push(msg.log)

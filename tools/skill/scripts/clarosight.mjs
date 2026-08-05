@@ -93,7 +93,7 @@ async function main() {
         console.log(`  [${d.id}]`)
         console.log(`    标题: ${d.title}`)
         console.log(`    URL:  ${d.url}`)
-        console.log(`    视口: ${d.viewportWidth}×${d.viewportHeight}`)
+        console.log(`    类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}`)
         console.log(`    UA:   ${d.userAgent.slice(0, 80)}`)
         if (d.errorCount > 0) console.log(`    ⚠ 错误数: ${d.errorCount}`)
         console.log('')

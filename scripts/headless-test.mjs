@@ -59,6 +59,20 @@ async function main() {
     if (device) ok(`SDK 连接成功，设备上线: title="${device.title}", url=${device.url.slice(0, 40)}`)
     else { fail('SDK 未连接，设备未出现'); throw new Error('abort') }
 
+    /** 2.1 设备类型识别（desktop/tablet/mobile） */
+    if (device.deviceType === 'desktop') ok(`设备类型识别正确: ${device.deviceType}`)
+    else fail(`设备类型异常: 期望 desktop，实际 ${device.deviceType}`)
+
+    /** 2.2 SPA 路由变化上报 —— pushState 后 server 端 url 应更新 */
+    await testPage.evaluate(() => history.pushState({}, '', '/spa-route-xyz'))
+    await new Promise((r) => setTimeout(r, 800))
+    const devAfter = (await (await fetch(`${SERVER}/api/devices`)).json()).find((d) => d.id === device.id)
+    if (devAfter?.url?.includes('/spa-route-xyz')) {
+      ok(`SPA 路由变化上报成功: url → ${devAfter.url.slice(-25)}`)
+    } else {
+      fail(`SPA 路由变化未上报: url=${devAfter?.url}`)
+    }
+
     /** 3. exec API —— 在真实 DOM 执行 */
     const execRes = await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
       method: 'POST',

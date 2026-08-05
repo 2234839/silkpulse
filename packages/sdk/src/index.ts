@@ -54,9 +54,23 @@ function collectDeviceInfo(id: string): DeviceInfo {
     userAgent: navigator.userAgent,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
+    deviceType: detectDeviceType(navigator.userAgent, window.innerWidth),
     errorCount: getErrorCount(),
     onlineAt: Date.now(),
   }
+}
+
+/**
+ * 推断设备类型：mobile / tablet / desktop
+ * 结合 UA 关键词与视口宽度
+ */
+function detectDeviceType(ua: string, viewportWidth: number): 'mobile' | 'tablet' | 'desktop' {
+  const lower = ua.toLowerCase()
+  if (/ipad|tablet|playbook|silk/.test(lower)) return 'tablet'
+  if (/mobi|iphone|ipod|android.*mobile|windows phone/.test(lower)) return 'mobile'
+  /** 大屏 Android 不匹配上面的 mobile 关键词 */
+  if (/android/.test(lower) && viewportWidth >= 768) return 'tablet'
+  return 'desktop'
 }
 
 let initialized = false
@@ -101,13 +115,30 @@ export function init(options: InitOptions): void {
   /** 5. 连接 server */
   connect({ url: wsUrl, info })
 
-  /** 6. 页面导航/SPA 路由变化时更新 url（只更新不上报，保持单连接） */
-  let lastUrl = location.href
-  setInterval(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href
+  /** 6. SPA 路由变化时上报新 url/title（让 server/AI 看到正确的页面位置） */
+  /** 劫持 pushState/replaceState 捕获 SPA 路由跳转，popstate 捕获浏览器前进后退 */
+  const reportUrlChange = () => {
+    send({
+      type: 'update-info',
+      device: {
+        id: deviceId,
+        url: location.href,
+        title: document.title,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        deviceType: detectDeviceType(navigator.userAgent, window.innerWidth),
+      },
+    })
+  }
+  for (const method of ['pushState', 'replaceState'] as const) {
+    const original = history[method].bind(history)
+    history[method] = function (...args: Parameters<typeof original>) {
+      const ret = original(...args)
+      setTimeout(reportUrlChange, 0)
+      return ret
     }
-  }, 1000)
+  }
+  window.addEventListener('popstate', reportUrlChange)
 
   /** 7. 页面卸载断开 */
   if (options.disconnectOnUnload !== false) {

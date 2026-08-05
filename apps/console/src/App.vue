@@ -34,6 +34,13 @@ const selectedDevice = computed(() =>
   devices.value.find((d) => d.id === selectedDeviceId.value) ?? null
 )
 
+/** 设备类型 → emoji 图标 */
+const deviceTypeIcon = (t: string): string => {
+  if (t === 'mobile') return '📱'
+  if (t === 'tablet') return '📲'
+  return '🖥️'
+}
+
 /** AI 诊断弹窗 */
 const showAiModal = ref(false)
 
@@ -128,10 +135,12 @@ onMounted(() => connect())
             class="px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50"
             :class="selectedDeviceId === d.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''"
           >
-            <div class="text-sm font-medium text-gray-800 truncate">{{ d.title }}</div>
+            <div class="text-sm font-medium text-gray-800 truncate">
+              <span class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
+            </div>
             <div class="text-xs text-gray-500 truncate">{{ d.url }}</div>
             <div class="flex items-center gap-2 mt-1">
-              <span class="text-xs text-gray-400">{{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
+              <span class="text-xs text-gray-400">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
               <span v-if="d.errorCount > 0" class="text-xs text-red-500">{{ d.errorCount }} 错误</span>
             </div>
           </li>

@@ -10,6 +10,7 @@
 /** 设备 → server 的消息类型 */
 export type DeviceMessage =
   | { type: 'register'; device: DeviceInfo }
+  | { type: 'update-info'; device: Partial<DeviceInfo> & Pick<DeviceInfo, 'id'> }
   | { type: 'log'; log: LogEntry }
   | { type: 'network'; entry: NetworkEntry }
   | { type: 'error'; error: ErrorEntry }
@@ -48,6 +49,8 @@ export interface DeviceInfo {
   viewportWidth: number
   /** 视口高度 */
   viewportHeight: number
+  /** 设备类型（mobile/tablet/desktop，基于 UA + 视口推断） */
+  deviceType: 'mobile' | 'tablet' | 'desktop'
   /** 最近一次上报的错误数 */
   errorCount: number
   /** 上线时间戳（ms） */
