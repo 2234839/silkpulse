@@ -31,6 +31,19 @@ let reconnectAttempts = 0
 /** 是否已主动断开（页面卸载时） */
 let manualClose = false
 
+/**
+ * 离线消息缓冲队列
+ *
+ * 解决两个丢数据场景：
+ * 1. 启动期间：采集器安装到 WS 连上之间，页面的早期错误/日志/网络请求
+ * 2. 断线期间：WS 断开到重连成功之间，数据暂存，重连后 flush
+ *
+ * 上限 200 条防膨胀（日志已有限流，error/network 量小，正常不会触顶）。
+ * 满了之后新增的丢弃旧的（FIFO 覆盖），优先保留新数据。
+ */
+const MAX_QUEUE = 200
+const sendQueue: string[] = []
+
 /** 消息处理器（exec-runner 注册） */
 let messageHandler: ((msg: ServerToDeviceMessage) => void) | null = null
 
@@ -52,7 +65,17 @@ function doConnect(options: WsClientOptions): void {
 
   ws.onopen = () => {
     reconnectAttempts = 0
-    send({ type: 'register', device: options.info })
+    const sock = ws
+    if (!sock) return
+    sock.send(JSON.stringify({ type: 'register', device: options.info }))
+
+    /** flush 离线期间缓冲的消息（register 先发，确保 server 建好设备上下文） */
+    if (sendQueue.length > 0) {
+      for (const raw of sendQueue) {
+        sock.send(raw)
+      }
+      sendQueue.length = 0
+    }
   }
 
   ws.onmessage = (ev) => {
@@ -79,12 +102,25 @@ function doConnect(options: WsClientOptions): void {
 }
 
 /**
- * 发送消息到 server（连接未就绪时静默丢弃，等重连）
+ * 发送消息到 server
+ *
+ * 连接就绪时立即发；未就绪时入缓冲队列，连上后 flush。
+ * 不再静默丢弃——启动期间和断线期间的数据都不该丢。
  */
 export function send(message: DeviceMessage): void {
+  const raw = JSON.stringify(message)
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message))
+    ws.send(raw)
+  } else {
+    /** 入队：满了丢弃最旧的（FIFO 覆盖），优先保留新数据 */
+    if (sendQueue.length >= MAX_QUEUE) sendQueue.shift()
+    sendQueue.push(raw)
   }
+}
+
+/** 当前缓冲队列长度（测试/诊断用） */
+export function getQueueLength(): number {
+  return sendQueue.length
 }
 
 /** 主动断开（页面卸载） */

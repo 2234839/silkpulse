@@ -427,6 +427,39 @@ async function main() {
       fail('重连测试前置失败：无在线设备')
     }
 
+    /** 13.5 SDK 离线缓冲 —— 断线期间产生的数据，重连后不丢失 */
+    {
+      const bufDev = await waitForDevice()
+      if (!bufDev) { fail('SDK 缓冲测试前置失败：无在线设备'); }
+      else {
+        /** 用唯一标记区分本次测试的日志 */
+        const marker = `buffer-test-${Date.now()}`
+        const cdp = await testPage.target().createCDPSession()
+        await cdp.send('Network.enable')
+        /** 断网 */
+        await cdp.send('Network.emulateNetworkConditions', {
+          offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+        })
+        await new Promise((r) => setTimeout(r, 1500))
+        /** 断网期间触发日志（SDK WS 已断，应入缓冲队列） */
+        await testPage.evaluate((m) => console.log(m), marker)
+        await new Promise((r) => setTimeout(r, 500))
+        /** 恢复网络，等 SDK 重连 + flush */
+        await cdp.send('Network.emulateNetworkConditions', {
+          offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+        })
+        await new Promise((r) => setTimeout(r, 7000))
+        /** 验证带标记的日志到达 server（若无缓冲，断网期间的日志会丢） */
+        const logsAfter = await (await fetch(`${SERVER}/api/devices/${bufDev.id}/logs`)).json()
+        const arrived = logsAfter.some((l) => l.message.includes(marker))
+        if (arrived) {
+          ok(`SDK 离线缓冲生效（断线期间日志"${marker}"重连后到达 server）`)
+        } else {
+          fail(`SDK 离线缓冲失败：断线期间的日志 "${marker}" 丢失`)
+        }
+      }
+    }
+
     /** 14. 设备标签/备注 —— POST /tags 设置，GET /devices 反映，再触发 SPA 路由确认不被覆盖 */
     const tagDev = await waitForDevice()
     if (tagDev) {
