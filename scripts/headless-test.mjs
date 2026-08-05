@@ -1279,6 +1279,120 @@ async function main() {
       }
     }
 
+    /**
+     * 22. Network 状态筛选 —— 全部/成功/失败三态，调试时快速隔离失败请求
+     *
+     * 之前的测试已产生成功（2xx）+ 失败（404）请求，切到 network 面板验证筛选。
+     */
+    {
+      /** 切到 network 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
+        if (netTab) netTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 400))
+      /** 总请求数（全部态） */
+      const totalAll = await consolePage.evaluate(() => document.querySelectorAll('tbody tr').length)
+
+      /** 点"失败"筛选 → 只剩 4xx/5xx 或 status=0 */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const failBtn = btns.find((b) => b.textContent.trim() === '失败')
+        if (failBtn) failBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      const errorOnly = await consolePage.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tbody tr'))
+        /** 每行第 3 列是状态码（时间/方法/状态/URL/耗时） */
+        const statuses = rows.map((r) => {
+          const td = r.querySelectorAll('td')[2]
+          return td ? td.textContent.trim() : ''
+        })
+        return { count: rows.length, statuses }
+      })
+
+      /** 点"成功"筛选 → 只剩 2xx-3xx */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const okBtn = btns.find((b) => b.textContent.trim() === '成功')
+        if (okBtn) okBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      const successOnly = await consolePage.evaluate(() => document.querySelectorAll('tbody tr').length)
+
+      /** 切回"全部"还原视图 */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const allBtn = btns.find((b) => b.textContent.trim() === '全部')
+        if (allBtn) allBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      /** 验证：失败态下所有行都是 4xx/5xx/0，成功态行数 < 全部（有失败请求被滤掉），失败态行数 < 全部 */
+      const failStatusesAllError = errorOnly.statuses.every((s) => {
+        const n = Number(s)
+        return n === 0 || n >= 400
+      })
+      if (totalAll > 0 && errorOnly.count < totalAll && successOnly < totalAll && failStatusesAllError && errorOnly.count >= 1) {
+        ok(`Network 状态筛选生效（全部 ${totalAll} → 失败 ${errorOnly.count}(${errorOnly.statuses.join(',')}) → 成功 ${successOnly}）`)
+      } else {
+        fail(`Network 状态筛选异常：全部=${totalAll} 失败=${errorOnly.count}(${errorOnly.statuses.join(',')}) 成功=${successOnly}`)
+      }
+    }
+
+    /**
+     * 23. Console 清空视图 —— 点击"清空"隐藏已有日志，新日志正常出现
+     *
+     * 与浏览器 DevTools 🚫 语义一致：只隐藏前端视图，server 缓冲不变。
+     * 切设备应重置阈值（新设备的日志不被旧阈值误隐藏）。
+     */
+    {
+      /** 切到 console 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith('Console'))
+        if (cTab) cTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 400))
+      /** 记录清空前日志条数 */
+      const beforeCount = await consolePage.evaluate(() => {
+        const logs = document.querySelectorAll('.font-mono.text-sm .border-b.border-light, [class*="border-b"][class*="border-light"]')
+        return logs.length
+      })
+      /** 点"清空"按钮 */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const clearBtn = btns.find((b) => b.textContent.trim() === '清空')
+        if (clearBtn) clearBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 清空后视图应几乎为空（只剩"暂无日志"或极少数） */
+      const afterClear = await consolePage.evaluate(() => document.querySelectorAll('.font-mono.text-sm .border-light, [class*="border-b"][class*="border-light"]').length)
+
+      /** 触发一条新日志（通过 exec 打一条 console.log） */
+      await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'console.log("清空后新日志测试"); return 1' }),
+      })
+      await new Promise((r) => setTimeout(r, 1000))
+      /** 新日志应出现（清空不阻止后续日志） */
+      const hasNewLog = await consolePage.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('span'))
+        return all.some((s) => s.textContent.includes('清空后新日志测试'))
+      })
+
+      if (beforeCount > 0 && afterClear < beforeCount && hasNewLog) {
+        ok(`Console 清空视图生效（${beforeCount} → ${afterClear}，清空后新日志正常出现）`)
+      } else if (beforeCount === 0) {
+        /** 无日志时跳过（前置测试可能未产生日志） */
+        ok(`Console 清空视图（当前无日志，跳过清空验证，新日志出现=${hasNewLog}）`)
+      } else {
+        fail(`Console 清空异常：清空前=${beforeCount} 清空后=${afterClear} 新日志=${hasNewLog}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

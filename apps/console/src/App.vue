@@ -173,6 +173,19 @@ const logColor = (type: string): string => {
 /** Console 面板：级别筛选 + 搜索 */
 const logLevelFilter = ref<'all' | 'error' | 'warn' | 'info' | 'debug'>('all')
 const logSearch = ref('')
+/**
+ * Console 清空阈值：只展示此时间戳之后的日志。
+ *
+ * 不删除 server 真相，只在前端视图层面隐藏 —— 用户"清空"后再来的新日志正常出现，
+ * 切设备/刷新后阈值重置（logs.value 被重置，阈值也应重置）。
+ * 与浏览器 DevTools 的 🚫 按钮语义一致。
+ */
+const clearedBeforeTs = ref(0)
+
+/** 清空当前 Console 视图（仅前端隐藏，server 缓冲不受影响） */
+function clearLogs() {
+  clearedBeforeTs.value = Date.now()
+}
 
 /** Exec 面板：在控制台直接执行诊断代码 */
 const execCode = ref('return document.title')
@@ -244,9 +257,13 @@ function handleExecKeydown(e: KeyboardEvent) {
     })
   }
 }
-/** 筛选后的日志（级别 + 关键词） */
+/** 筛选后的日志（级别 + 关键词 + 清空阈值） */
 const filteredLogs = computed(() => {
   let result = logs.value
+  /** 清空阈值：隐藏"清空"之前的日志（前端视图层，server 缓冲不变） */
+  if (clearedBeforeTs.value > 0) {
+    result = result.filter((l) => new Date(l.timestamp).getTime() >= clearedBeforeTs.value)
+  }
   if (logLevelFilter.value !== 'all') {
     result = result.filter((l) => l.type === logLevelFilter.value)
   }
@@ -289,21 +306,38 @@ const filteredErrors = computed(() => {
   })
 })
 
-/** Network 面板：关键词搜索（按 URL / 方法 / 状态码） */
+/** Network 面板：关键词搜索（按 URL / 方法 / 状态码）+ 状态码筛选 */
 const networkSearch = ref('')
+/**
+ * 状态筛选：all 全部 / success 成功（2xx-3xx）/ error 失败（4xx-5xx 或未完成 status=0）
+ *
+ * 调试网络问题时最常用的维度 —— 失败请求和成功请求混在一起时，
+ * 用户需要快速过滤出"哪些请求挂了"。status=0（请求未完成/网络中断）归入失败。
+ */
+const networkStatusFilter = ref<'all' | 'success' | 'error'>('all')
 const filteredNetwork = computed(() => {
+  let result = network.value
+  if (networkStatusFilter.value === 'success') {
+    result = result.filter((n) => n.status >= 200 && n.status < 400)
+  } else if (networkStatusFilter.value === 'error') {
+    /** status=0 表示请求未完成（网络中断/CORS 失败），诊断时视为失败 */
+    result = result.filter((n) => n.status === 0 || n.status >= 400)
+  }
   const q = networkSearch.value.trim().toLowerCase()
-  if (!q) return network.value
-  return network.value.filter((n) =>
-    n.url.toLowerCase().includes(q) ||
-    n.method.toLowerCase().includes(q) ||
-    String(n.status).includes(q),
-  )
+  if (q) {
+    result = result.filter((n) =>
+      n.url.toLowerCase().includes(q) ||
+      n.method.toLowerCase().includes(q) ||
+      String(n.status).includes(q),
+    )
+  }
+  return result
 })
 
-/** 选中设备变化时拉取快照 + 清空 network 详情选中 */
+/** 选中设备变化时拉取快照 + 清空 network 详情选中 + 重置 Console 清空阈值 */
 watch(selectedDeviceId, (id) => {
   selectedNetwork.value = null
+  clearedBeforeTs.value = 0
   if (id && activeTab.value === 'snapshot') {
     fetchSnapshot(id)
   }
@@ -501,6 +535,12 @@ onMounted(() => connect())
                 class="ml-auto px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 w-48"
               />
               <span class="text-xs text-faint">{{ filteredLogs.length }}/{{ logs.length }}</span>
+              <!-- 清空视图（仅前端隐藏，server 缓冲不变，新日志正常出现） -->
+              <button
+                @click="clearLogs"
+                class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary hover:bg-elevated-hover"
+                title="清空当前视图（新日志仍会出现）"
+              >清空</button>
             </div>
             <!-- 日志列表 -->
             <div ref="logListEl" class="flex-1 overflow-y-auto p-4 font-mono text-sm">
@@ -519,13 +559,26 @@ onMounted(() => connect())
           <div v-else-if="activeTab === 'network'" class="flex-1 flex overflow-hidden bg-base">
             <!-- 请求列表 -->
             <div class="w-2/5 flex flex-col border-r border-base">
-              <!-- 搜索栏 -->
-              <div class="p-2 border-b border-light bg-surface">
+              <!-- 搜索 + 状态筛选栏 -->
+              <div class="p-2 border-b border-light bg-surface space-y-2">
                 <input
                   v-model="networkSearch"
                   placeholder="搜索请求（URL / 方法 / 状态码）"
                   class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
                 />
+                <!-- 状态筛选：全部 / 成功 / 失败 -->
+                <div class="flex items-center gap-1">
+                  <button
+                    v-for="sf in (['all', 'success', 'error'] as const)"
+                    :key="sf"
+                    @click="networkStatusFilter = sf"
+                    class="px-2 py-0.5 text-xs rounded font-medium"
+                    :class="networkStatusFilter === sf
+                      ? sf === 'error' ? 'bg-red-600 text-white' : 'bg-gray-800 text-white'
+                      : 'bg-elevated text-secondary bg-elevated-hover'"
+                  >{{ sf === 'all' ? '全部' : sf === 'success' ? '成功' : '失败' }}</button>
+                  <span class="ml-auto text-xs text-faint">{{ filteredNetwork.length }}/{{ network.length }}</span>
+                </div>
               </div>
               <div class="flex-1 overflow-y-auto">
                 <table class="w-full text-sm">
