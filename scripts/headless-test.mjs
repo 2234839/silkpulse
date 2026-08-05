@@ -455,7 +455,96 @@ async function main() {
       fail('iframe 测试前置失败：无在线设备')
     }
 
-    /** 19. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
+    /** 19. Errors 搜索 + 堆栈折叠 —— 控制台 UI 错误面板的关键词过滤与堆栈展开 */
+    {
+      /** 选中第一个设备（首次在 UI 选设备） */
+      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await new Promise((r) => setTimeout(r, 600))
+      /** 切到 errors 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const errTab = tabs.find((t) => t.textContent.trim() === 'Errors')
+        if (errTab) errTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 400))
+      /** 验证堆栈默认收起（<details> 无 open 属性） */
+      const stackCollapsed = await consolePage.evaluate(() => {
+        const details = document.querySelector('details')
+        if (!details) return null
+        return !details.hasAttribute('open')
+      })
+      /** 验证搜索过滤生效 */
+      const totalErrors = await consolePage.evaluate(() => document.querySelectorAll('.bg-red-soft.border.border-red-soft.rounded.p-3').length)
+      /** 输入搜索词过滤（之前的测试已触发 source map 错误，message 含"source map 测试错误"） */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索错误"]')
+        if (input) {
+          input.value = 'source map'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      const filteredErrCount = await consolePage.evaluate(() => document.querySelectorAll('.bg-red-soft.border.border-red-soft.rounded.p-3').length)
+      /** 清空搜索 */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索错误"]')
+        if (input) {
+          input.value = ''
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      if (stackCollapsed === true) {
+        ok(`错误堆栈默认收起（<details> 折叠）`)
+      } else {
+        fail(`错误堆栈折叠异常：stackCollapsed=${stackCollapsed}`)
+      }
+      if (totalErrors > 0 && filteredErrCount < totalErrors) {
+        ok(`错误搜索过滤生效（${totalErrors} → ${filteredErrCount} 条）`)
+      } else {
+        fail(`错误搜索过滤异常：总数=${totalErrors} 过滤后=${filteredErrCount}`)
+      }
+    }
+
+    /** 20. Network 搜索 —— 控制台 UI 网络面板的关键词过滤 */
+    {
+      /** 切到 network 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const netTab = tabs.find((t) => t.textContent.trim() === 'Network')
+        if (netTab) netTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 400))
+      const totalNet = await consolePage.evaluate(() => document.querySelectorAll('tbody tr').length)
+      /** 输入搜索词过滤（之前的测试产生了 /api/echo 等 POST 请求） */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索请求"]')
+        if (input) {
+          input.value = 'echo'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      const filteredNetCount = await consolePage.evaluate(() => document.querySelectorAll('tbody tr').length)
+      /** 清空搜索（不影响后续测试） */
+      await consolePage.evaluate(() => {
+        const input = document.querySelector('input[placeholder*="搜索请求"]')
+        if (input) {
+          input.value = ''
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      if (totalNet > 0 && filteredNetCount < totalNet && filteredNetCount >= 1) {
+        ok(`网络搜索过滤生效（${totalNet} → ${filteredNetCount} 条）`)
+      } else {
+        fail(`网络搜索过滤异常：总数=${totalNet} 过滤后=${filteredNetCount}`)
+      }
+    }
+
+    /** 21. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
     {
       /** 先清空 localStorage 历史，确保干净起点 */
       await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))

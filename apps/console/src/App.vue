@@ -244,6 +244,31 @@ const filteredLogs = computed(() => {
   return result
 })
 
+/** Errors 面板：关键词搜索（按 message / stack / mapped.source） */
+const errorSearch = ref('')
+const filteredErrors = computed(() => {
+  const q = errorSearch.value.trim().toLowerCase()
+  if (!q) return errors.value
+  return errors.value.filter((e) => {
+    if (e.message.toLowerCase().includes(q)) return true
+    if (e.stack && e.stack.toLowerCase().includes(q)) return true
+    if (e.mapped && e.mapped.source.toLowerCase().includes(q)) return true
+    return false
+  })
+})
+
+/** Network 面板：关键词搜索（按 URL / 方法 / 状态码） */
+const networkSearch = ref('')
+const filteredNetwork = computed(() => {
+  const q = networkSearch.value.trim().toLowerCase()
+  if (!q) return network.value
+  return network.value.filter((n) =>
+    n.url.toLowerCase().includes(q) ||
+    n.method.toLowerCase().includes(q) ||
+    String(n.status).includes(q),
+  )
+})
+
 /** 选中设备变化时拉取快照 + 清空 network 详情选中 */
 watch(selectedDeviceId, (id) => {
   selectedNetwork.value = null
@@ -447,34 +472,44 @@ onMounted(() => connect())
           <!-- Network 面板（主从布局：请求列表 + 详情） -->
           <div v-else-if="activeTab === 'network'" class="flex-1 flex overflow-hidden bg-base">
             <!-- 请求列表 -->
-            <div class="w-2/5 overflow-y-auto border-r border-base">
-              <table class="w-full text-sm">
-                <thead class="bg-elevated text-secondary text-xs uppercase sticky top-0">
-                  <tr>
-                    <th class="text-left px-3 py-2">方法</th>
-                    <th class="text-left px-3 py-2">状态</th>
-                    <th class="text-left px-3 py-2">URL</th>
-                    <th class="text-right px-3 py-2">耗时</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(n, i) in network"
-                    :key="i"
-                    @click="selectedNetwork = n"
-                    class="border-b border-light cursor-pointer hover:bg-blue-soft"
-                    :class="selectedNetwork === n ? 'bg-blue-soft' : ''"
-                  >
-                    <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
-                    <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
-                      {{ n.status || '—' }}
-                    </td>
-                    <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
-                    <td class="px-3 py-2 text-right text-muted text-xs font-mono">{{ n.duration }}ms</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div v-if="network.length === 0" class="text-faint text-center py-8 text-sm">暂无网络请求</div>
+            <div class="w-2/5 flex flex-col border-r border-base">
+              <!-- 搜索栏 -->
+              <div class="p-2 border-b border-light bg-surface">
+                <input
+                  v-model="networkSearch"
+                  placeholder="搜索请求（URL / 方法 / 状态码）"
+                  class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div class="flex-1 overflow-y-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-elevated text-secondary text-xs uppercase sticky top-0">
+                    <tr>
+                      <th class="text-left px-3 py-2">方法</th>
+                      <th class="text-left px-3 py-2">状态</th>
+                      <th class="text-left px-3 py-2">URL</th>
+                      <th class="text-right px-3 py-2">耗时</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(n, i) in filteredNetwork"
+                      :key="i"
+                      @click="selectedNetwork = n"
+                      class="border-b border-light cursor-pointer hover:bg-blue-soft"
+                      :class="selectedNetwork === n ? 'bg-blue-soft' : ''"
+                    >
+                      <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
+                      <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
+                        {{ n.status || '—' }}
+                      </td>
+                      <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
+                      <td class="px-3 py-2 text-right text-muted text-xs font-mono">{{ n.duration }}ms</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div v-if="filteredNetwork.length === 0" class="text-faint text-center py-8 text-sm">{{ network.length === 0 ? '暂无网络请求' : '无匹配请求' }}</div>
+              </div>
             </div>
 
             <!-- 详情面板 -->
@@ -531,9 +566,19 @@ onMounted(() => connect())
           </div>
 
           <!-- Errors 面板 -->
-          <div v-else-if="activeTab === 'errors'" class="flex-1 overflow-y-auto p-4 bg-base space-y-3">
-            <div v-for="(e, i) in errors" :key="i" class="bg-red-soft border border-red-soft rounded p-3">
-              <div class="text-sm text-red-key font-medium">{{ e.message }}</div>
+          <div v-else-if="activeTab === 'errors'" class="flex-1 flex flex-col overflow-hidden bg-base">
+            <!-- 搜索栏 -->
+            <div class="p-2 border-b border-base bg-surface">
+              <input
+                v-model="errorSearch"
+                placeholder="搜索错误（message / 堆栈 / 源码位置）"
+                class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <!-- 错误列表 -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-3">
+              <div v-for="(e, i) in filteredErrors" :key="i" class="bg-red-soft border border-red-soft rounded p-3">
+              <div class="text-sm text-red-key font-medium break-all">{{ e.message }}</div>
               <div class="text-xs text-faint mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
               <!-- source map 解析后的原始位置（AI 诊断关键信息） -->
               <div v-if="e.mapped" class="mt-1 text-xs text-blue-key bg-blue-soft border border-blue-soft rounded px-2 py-1 font-mono">
@@ -542,9 +587,14 @@ onMounted(() => connect())
               <div v-else-if="e.source" class="mt-1 text-xs text-faint font-mono">
                 ↳ {{ e.source }}:{{ e.line }}:{{ e.col }}
               </div>
-              <pre v-if="e.stack" class="text-xs text-red-500 mt-2 whitespace-pre-wrap">{{ e.stack }}</pre>
+              <!-- 堆栈可折叠（<details> 原生组件，默认收起，点击展开） -->
+              <details v-if="e.stack" class="mt-2">
+                <summary class="text-xs text-red-400 cursor-pointer hover:text-red-600 select-none">堆栈</summary>
+                <pre class="text-xs text-red-500 mt-1 whitespace-pre-wrap">{{ e.stack }}</pre>
+              </details>
+              </div>
+              <div v-if="filteredErrors.length === 0" class="text-faint text-center py-8">{{ errors.length === 0 ? '暂无错误' : '无匹配错误' }}</div>
             </div>
-            <div v-if="errors.length === 0" class="text-faint text-center py-8">暂无错误</div>
           </div>
 
           <!-- Snapshot 面板 -->

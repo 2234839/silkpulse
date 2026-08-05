@@ -135,8 +135,8 @@ node tools/skill/scripts/clarosight.mjs inject bookmarklet
 
 - **设备列表**：搜索筛选、设备类型图标（📱手机/📲平板/🖥️桌面）、错误红条高亮
 - **Console 面板**：级别筛选（全部/ERROR/WARN/INFO/DEBUG）+ 关键词搜索
-- **Network 面板**：主从布局，点击请求查看请求体/响应体详情，**一键复制为 cURL**（远程请求本地/AI 复现）
-- **Errors 面板**：含堆栈展示 + source map 解析后的原始源码位置
+- **Network 面板**：主从布局，点击请求查看请求体/响应体详情，**一键复制为 cURL**（远程请求本地/AI 复现），URL/方法/状态码搜索过滤
+- **Errors 面板**：含堆栈展示（可折叠）+ source map 解析后的原始源码位置，message/堆栈/源码位置搜索过滤
 - **Snapshot 面板**：compact 文本格式
 - **Exec 面板**：直接执行诊断 JS（Ctrl+↵，Tab 缩进），**执行历史侧栏**（点击回填，localStorage 持久化）
 - **✨ AI 诊断上下文**：一键聚合错误+快照+网络+日志为 markdown，复制给任意 AI agent
@@ -157,7 +157,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（37 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（40 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -190,9 +190,9 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 37 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 40 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-37 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、设备标签/备注（设置/查询/SPA 路由后保留）、source map 解析（错误自动映射 + exec 辅助函数）、iframe 元素采集（穿透同源 iframe）、exec 执行历史（记录/回填/持久化/清空）、复制为 cURL、深色模式（切换/可逆/语义 class 生效）。
+40 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、设备标签/备注（设置/查询/SPA 路由后保留）、source map 解析（错误自动映射 + exec 辅助函数）、iframe 元素采集（穿透同源 iframe）、错误堆栈折叠 + 错误/网络面板搜索过滤、exec 执行历史（记录/回填/持久化/清空）、复制为 cURL、深色模式（切换/可逆/语义 class 生效）。
 
 ## License
 
