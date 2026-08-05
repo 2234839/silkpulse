@@ -13,24 +13,50 @@ import type { LogEntry } from '@clarosight/shared'
 /** 单条日志的内部收集回调 */
 type LogSink = (entry: LogEntry) => void
 
-/** exec 期间日志队列（exec-runner 设置，执行期间收集，结束后取走） */
-let execQueue: string[] | null = null
+/**
+ * exec 期间日志队列上限
+ *
+ * exec 代码可能产生海量日志（如 for 循环 console.log 10 万次），不限流会
+ * 撑爆 exec 结果的 WS 消息帧 + server 内存。
+ *
+ * 策略：保留头部前 100 条 + 尾部后 100 条，中间丢弃并标注省略数。
+ * 头部是代码执行的早期输出（通常含关键诊断线索），尾部是最新的输出。
+ */
+const MAX_EXEC_HEAD = 100
+const MAX_EXEC_TAIL = 100
 
-/** 进入 exec 模式：此后的 console 输出同时入 execQueue */
+/** exec 期间日志：头部队列（前 100 条） */
+let execHead: string[] | null = null
+/** exec 期间日志：尾部队列（最近 100 条，环形覆盖） */
+let execTail: string[] | null = null
+/** exec 期间日志总数（含被丢弃的，用于计算省略数） */
+let execTotal = 0
+
+/** 进入 exec 模式：此后的 console 输出同时入 exec 队列 */
 export function startExecCapture(): void {
-  execQueue = []
+  execHead = []
+  execTail = []
+  execTotal = 0
 }
 
 /** 结束 exec 模式，返回期间收集的日志（格式：[TYPE] message） */
 export function endExecCapture(): string[] {
-  const q = execQueue ?? []
-  execQueue = null
-  return q
+  const head = execHead ?? []
+  const tail = execTail ?? []
+  const total = execTotal
+  execHead = null
+  execTail = null
+  execTotal = 0
+  /** 未超限：直接拼（head 就是全部） */
+  if (total <= MAX_EXEC_HEAD) return head
+  /** 超限：head + 省略标注 + tail */
+  const dropped = total - head.length - tail.length
+  return [...head, `…（省略 ${dropped} 条日志）`, ...tail]
 }
 
 /** 当前是否处于 exec 捕获模式 */
 export function isCapturingExec(): boolean {
-  return execQueue !== null
+  return execHead !== null
 }
 
 /**
@@ -131,9 +157,20 @@ export function installLogCollector(sink: LogSink): void {
       const message = serialize(args)
       const type: LogEntry['type'] = m === 'log' ? 'info' : m
 
-      /** exec 捕获模式：不限流，直接入队列（诊断代码的日志必须完整） */
-      if (execQueue) {
-        execQueue.push(`[${type.toUpperCase()}] ${message}`)
+      /**
+       * exec 捕获模式：不限流率，但限总量（防海量日志撑爆 WS 消息帧）。
+       * 前 MAX_EXEC_HEAD 条入 head，之后入 tail（固定 MAX_EXEC_TAIL 长度，
+       * 满后 shift 覆盖最旧的），最终拼接 head + 省略标注 + tail。
+       */
+      if (execHead && execTail) {
+        const line = `[${type.toUpperCase()}] ${message}`
+        execTotal++
+        if (execHead.length < MAX_EXEC_HEAD) {
+          execHead.push(line)
+        } else {
+          execTail.push(line)
+          if (execTail.length > MAX_EXEC_TAIL) execTail.shift()
+        }
       }
 
       /** 上报前限流（error 不限流） */

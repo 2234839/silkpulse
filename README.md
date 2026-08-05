@@ -55,7 +55,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **环形缓冲区**：server 内存保留最近 500 条日志 / 100 条网络 / 50 条错误
 - **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304（正确识别 Vite base64url hash，含 `-`/`_` 字符）
 - **WS 背压保护**：broadcast 检查 `bufferedAmount`，慢客户端（VPN/弱网）积压超 1MB 时自动关闭该连接，防止单个慢消费者拖垮 server 内存；send 带回调避免竞态抛异常
-- **exec 异步超时**：永不 resolve 的代码（如 `new Promise(() => {})`）由 SDK 端 9s 超时兜底（早于 server 10s），干净回传 + 释放 exec 日志捕获队列，不靠 server 干等导致 promise 泄漏；**正常完成时 clearTimeout 清理超时定时器**，避免超时 promise reject 触发 unhandledrejection 被 error-catcher 误报为设备错误；**设备掉线时 server 立即 reject 所有 pending exec + clearTimeout**（pendingExecs 存 `{resolve, timer}`，掉线不等 10s 超时，定时器不泄漏）
+- **exec 异步超时**：永不 resolve 的代码（如 `new Promise(() => {})`）由 SDK 端 9s 超时兜底（早于 server 10s），干净回传 + 释放 exec 日志捕获队列，不靠 server 干等导致 promise 泄漏；**正常完成时 clearTimeout 清理超时定时器**，避免超时 promise reject 触发 unhandledrejection 被 error-catcher 误报为设备错误；**设备掉线时 server 立即 reject 所有 pending exec + clearTimeout**（pendingExecs 存 `{resolve, timer}`，掉线不等 10s 超时，定时器不泄漏）；**exec 日志截断**（exec 代码产生海量日志时——如 for 循环 console.log 10 万次——保留头部前 100 条 + 尾部后 100 条 + 中间省略标注，防 WS 消息帧撑爆）
 - **HTTP body 上限**：POST body 超 2MB 返回 413（诊断代码实际几 KB，留充足余量），防止超大/恶意请求撑爆内存；客户端中断时 readBody 正常 resolve 不泄漏 promise
 - **最近下线设备历史**：设备掉线后保留摘要到 `recentlyOffline`（上限 10，含下线时刻/URL/错误数），AI 调 `/api/devices` 能区分"从未接入"和"接入过但掉了"，不误判诊断方向；重连后自动移除
 
@@ -167,7 +167,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（77 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（78 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -200,9 +200,9 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 77 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 78 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__clarosight_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select 元素 + 快照 options value:text 双标注**）、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集**）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
+73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__clarosight_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select 元素 + 快照 options value:text 双标注**）、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集**）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
 
 ## License
 

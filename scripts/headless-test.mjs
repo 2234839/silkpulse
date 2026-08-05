@@ -330,6 +330,31 @@ async function main() {
     }
 
     /**
+     * 5.35 exec 日志截断保护 —— exec 代码产生海量日志时，队列限总量防撑爆 WS
+     *
+     * exec 代码执行 for 循环 console.log 500 次，验证：
+     * - 回传的 logs 条数 ≤ 200（前 100 头部 + 后 100 尾部）
+     * - 含省略标注（"省略 N 条日志"）
+     * - 头部含早期日志（log-000），尾部含最新日志（log-499）
+     */
+    {
+      const floodRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `for (let i = 0; i < 500; i++) { console.log("log-" + String(i).padStart(3, '0')) }; return "done"` }),
+      })).json()
+      const logs = floodRes.logs ?? []
+      const hasEllipsis = logs.some((l) => l.includes('省略'))
+      const hasHead = logs.some((l) => l.includes('log-000'))
+      const hasTail = logs.some((l) => l.includes('log-499'))
+      if (floodRes.success && logs.length <= 202 && hasEllipsis && hasHead && hasTail) {
+        ok(`exec 日志截断保护生效（500 条 → ${logs.length} 条，含省略标注 ✓，头部 log-000 ✓，尾部 log-499 ✓）`)
+      } else {
+        fail(`exec 日志截断异常：logs=${logs.length}条(期望≤202)，省略=${hasEllipsis}，头部=${hasHead}，尾部=${hasTail}`)
+      }
+    }
+
+    /**
      * 5.4 exec 异步超时保护 —— 永不 resolve 的代码由 SDK 端 9s 超时兜底
      *
      * `return new Promise(() => {})` 会无限挂起。之前靠 server 端 10s 超时回"执行超时"，
