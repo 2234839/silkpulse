@@ -89,7 +89,8 @@ async function main() {
 
       /** 找一个带 hash 的构建产物 */
       const htmlText = await (await fetch(`${SERVER}/`)).text()
-      const hashedMatch = htmlText.match(/\/assets\/index-[a-zA-Z0-9]+\.js/)
+      /** Vite 的 hash 是 base64url，可含 - 和 _，字符集要覆盖 */
+      const hashedMatch = htmlText.match(/\/assets\/index-[a-zA-Z0-9_-]+\.js/)
       const hashedPath = hashedMatch?.[0]
       const hashedRes = await fetch(`${SERVER}${hashedPath}`)
       const hashedCache = hashedRes.headers.get('cache-control') ?? ''

@@ -53,7 +53,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **SPA 路由感知**：pushState/replaceState/popstate 上报 URL 变化
 - **视口变化感知**：窗口缩放/移动端旋转时上报新 viewport + 重新推断设备类型（防抖 300ms），诊断横屏布局错乱时 AI 能看到真实视口
 - **环形缓冲区**：server 内存保留最近 500 条日志 / 100 条网络 / 50 条错误
-- **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304
+- **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304（正确识别 Vite base64url hash，含 `-`/`_` 字符）
 - **WS 背压保护**：broadcast 检查 `bufferedAmount`，慢客户端（VPN/弱网）积压超 1MB 时自动关闭该连接，防止单个慢消费者拖垮 server 内存；send 带回调避免竞态抛异常
 - **exec 异步超时**：永不 resolve 的代码（如 `new Promise(() => {})`）由 SDK 端 9s 超时兜底（早于 server 10s），干净回传 + 释放 exec 日志捕获队列，不靠 server 干等导致 promise 泄漏；**正常完成时 clearTimeout 清理超时定时器**，避免超时 promise reject 触发 unhandledrejection 被 error-catcher 误报为设备错误；**设备掉线时 server 立即 reject 所有 pending exec + clearTimeout**（pendingExecs 存 `{resolve, timer}`，掉线不等 10s 超时，定时器不泄漏）
 - **HTTP body 上限**：POST body 超 2MB 返回 413（诊断代码实际几 KB，留充足余量），防止超大/恶意请求撑爆内存；客户端中断时 readBody 正常 resolve 不泄漏 promise

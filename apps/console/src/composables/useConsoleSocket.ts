@@ -29,6 +29,13 @@ export function useConsoleSocket() {
   const connected = ref(false)
 
   let ws: WebSocket | null = null
+  /**
+   * 重连定时器句柄
+   *
+   * 必须跟踪，否则组件卸载后已调度的重连仍会触发，建立幽灵 WS 连接。
+   * 与 SDK ws-client 的同类修复一致：定时器生命周期要显式管理。
+   */
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
   /** 切换选中的设备（订阅实时数据 + 拉取历史缓冲区） */
   async function selectDevice(id: string | null) {
@@ -67,8 +74,11 @@ export function useConsoleSocket() {
 
     ws.onclose = () => {
       connected.value = false
-      /** 断线 2s 重连 */
-      setTimeout(() => connect(), 2000)
+      /** 断线 2s 重连（跟踪句柄，卸载时清理防幽灵连接） */
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined
+        connect()
+      }, 2000)
     }
 
     ws.onmessage = (ev) => {
@@ -127,6 +137,11 @@ export function useConsoleSocket() {
   }
 
   onUnmounted(() => {
+    /** 清理重连定时器，防止卸载后建立幽灵 WS 连接 */
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+    }
     ws?.close()
   })
 

@@ -122,8 +122,12 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      /** Vite 构建产物在 /assets/ 下且文件名带 8 位 hash，可长缓存；其他保守 no-cache */
-      const isHashed = pathname.includes('/assets/') && /-[a-zA-Z0-9]{8}\.\w+$/.test(pathname)
+      /**
+       * Vite 构建产物在 /assets/ 下且文件名带 8+ 位 hash，可长缓存；其他保守 no-cache。
+       * Vite 的 hash 是 base64url（含 - 和 _），字符集要覆盖，否则含 - 的 hash
+       * 会被误判为无 hash → 降级 no-cache，导致长缓存失效。
+       */
+      const isHashed = pathname.includes('/assets/') && /-[a-zA-Z0-9_-]{8,}\.\w+$/.test(pathname)
       serveFile(res, filePath, guessContentType(filePath), isHashed ? 'longCache' : 'noCache')
       return
     }
