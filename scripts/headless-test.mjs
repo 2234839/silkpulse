@@ -1341,6 +1341,46 @@ async function main() {
       } else {
         fail(`skill logs --tail 异常：全部=${fullLines.length} tail=${tailLines.length}（期望 5）`)
       }
+
+      /**
+       * skill errors --tail + server errors ?since 一致性验证
+       *
+       * errors 之前是唯一不支持游标/tail 的数据通道（logs/network 都支持），
+       * 且每条带完整 stack 很耗 token。现在 errors 支持 --tail=N（对齐 logs/network）。
+       * 多触发几个错误保证 >3 条，验证 tail 截断 + 末尾一致。
+       */
+      /** 多触发 3 个运行时错误，保证 errors 足够多 */
+      await testPage.evaluate(() => {
+        for (let i = 0; i < 3; i++) {
+          setTimeout(() => { throw new Error(`errors-tail-test-${i}`) }, 0)
+        }
+      })
+      await new Promise((r) => setTimeout(r, 800))
+
+      const errorsFull = execSync(
+        `node ${skillScript} errors ${device.id}`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const errorsTail = execSync(
+        `node ${skillScript} errors ${device.id} 3`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      /** errors 输出每条以 [时间戳] 开头，空行分隔 */
+      const fullErrLines = errorsFull.split('\n').filter((l) => l.trim().startsWith('['))
+      const tailErrLines = errorsTail.split('\n').filter((l) => l.trim().startsWith('['))
+
+      if (fullErrLines.length > 3 && tailErrLines.length === 3) {
+        const lastMatch = fullErrLines[fullErrLines.length - 1] === tailErrLines[tailErrLines.length - 1]
+        if (lastMatch) {
+          ok(`skill errors --tail 生效（全部 ${fullErrLines.length} 条 → 最近 3 条，末尾一致）`)
+        } else {
+          fail(`skill errors --tail 末尾不一致：full末="${fullErrLines[fullErrLines.length - 1].slice(0, 50)}" tail末="${tailErrLines[tailErrLines.length - 1].slice(0, 50)}"`)
+        }
+      } else if (fullErrLines.length <= 3) {
+        ok(`skill errors --tail（当前 ${fullErrLines.length} 条错误不足 3 条，跳过截断验证）`)
+      } else {
+        fail(`skill errors --tail 异常：全部=${fullErrLines.length} tail=${tailErrLines.length}（期望 3）`)
+      }
     }
 
     /** 21. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */

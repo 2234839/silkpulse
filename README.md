@@ -126,7 +126,7 @@ node tools/skill/scripts/clarosight.mjs snapshot <id>
 echo 'return { title: document.title, url: location.href }' | node tools/skill/scripts/clarosight.mjs exec <id>
 
 # 4. 查看错误 / 日志 / 网络
-node tools/skill/scripts/clarosight.mjs errors <id>
+node tools/skill/scripts/clarosight.mjs errors <id> 5         # 最近 5 条错误（每条带 stack，省 token）
 node tools/skill/scripts/clarosight.mjs logs <id> 20          # 最近 20 条日志（省 token，AI 常用）
 node tools/skill/scripts/clarosight.mjs network <id>   # 含关键请求头/响应头
 
@@ -167,7 +167,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（70 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（71 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -181,7 +181,7 @@ clarosight/
 | POST | `/api/devices/:id/exec` | 在设备页面执行 JS（`{code: "..."}`） |
 | GET | `/api/devices/:id/logs?since=N` | console 日志（游标分页） |
 | GET | `/api/devices/:id/network?since=N` | network 记录（HAR 风格，游标分页） |
-| GET | `/api/devices/:id/errors` | 错误记录 |
+| GET | `/api/devices/:id/errors?since=N` | 错误记录（游标分页） |
 | POST | `/api/devices/:id/tags` | 修改设备标签/备注（`{tags?: string[], note?: string}`） |
 | GET | `/inject/bookmarklet` | 生成 bookmarklet 注入片段 |
 | GET | `/inject/userscript` | 生成 userscript 注入片段 |
@@ -200,9 +200,9 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 70 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 71 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-70 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
+71 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
 
 ## License
 

@@ -28,7 +28,7 @@ node tools/skill/scripts/clarosight.mjs inspect <deviceId>
 node tools/skill/scripts/clarosight.mjs snapshot <deviceId>
 
 # 4. 查看错误和日志
-node tools/skill/scripts/clarosight.mjs errors <deviceId>
+node tools/skill/scripts/clarosight.mjs errors <deviceId> 5         # 最近 5 条错误（每条带 stack，省 token）
 node tools/skill/scripts/clarosight.mjs logs <deviceId> 20          # 最近 20 条日志（AI 常用，省 token）
 node tools/skill/scripts/clarosight.mjs network <deviceId> 10       # 最近 10 条网络请求
 

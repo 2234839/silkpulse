@@ -185,9 +185,10 @@ export async function handleApiRoute(
       return true
     }
 
-    /** /api/devices/:id/errors —— 最近错误 */
+    /** /api/devices/:id/errors —— 错误记录（支持 since 游标，对齐 logs/network） */
     case 'errors': {
-      sendJson(res, device.errors.all())
+      const since = Number(url.searchParams.get('since') ?? 0)
+      sendJson(res, device.errors.since(since))
       return true
     }
 

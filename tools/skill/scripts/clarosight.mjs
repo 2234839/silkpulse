@@ -6,9 +6,9 @@
  *   node clarosight.mjs devices                          列出在线设备
  *   node clarosight.mjs snapshot <deviceId>              取设备页面快照（compact 文本）
  *   node clarosight.mjs exec <deviceId> <code>           在设备页面执行 JS
- *   node clarosight.mjs logs <deviceId> [since]          拉取设备 console 日志
- *   node clarosight.mjs network <deviceId> [since]       拉取设备 network 记录
- *   node clarosight.mjs errors <deviceId>                拉取设备错误
+ *   node clarosight.mjs logs <deviceId> [N|since]        拉取设备 console 日志（N=最近N条）
+ *   node clarosight.mjs network <deviceId> [N|since]     拉取设备 network 记录（N=最近N条）
+ *   node clarosight.mjs errors <deviceId> [N|since]      拉取设备错误（N=最近N条，省 token）
  *   node clarosight.mjs tag <deviceId> <tags> [note]     设置设备标签/备注
  *
  * 环境变量：
@@ -254,12 +254,21 @@ async function main() {
 
     case 'errors': {
       const id = await resolveDeviceId(args[0])
-      const errors = await getJson(`/api/devices/${id}/errors`)
+      /**
+       * 第二参数解析：--since=N / --tail=N 或正整数（只取最近 N 条）
+       *
+       * AI 诊断时最常用 'errors <id> 5' 看最近几个错误（每条带完整 stack 很耗 token，
+       * 全量 50 条 stack 会刷爆 AI 上下文）。对齐 logs/network 的范围参数语义。
+       */
+      const { since, tail } = parseRangeArgs(args.slice(1))
+      const errors = await getJson(`/api/devices/${id}/errors?since=${since}`)
       if (errors.length === 0) {
         console.log('（暂无错误）')
         return
       }
-      for (const e of errors) {
+      /** tail 截断：只展示最近 N 条（已按时间正序，取末尾） */
+      const display = tail ? errors.slice(-tail) : errors
+      for (const e of display) {
         console.log(`[${fmtTime(e.timestamp)}] ${e.message}`)
         /** source map 解析成功时优先展示原始位置（AI 诊断的关键信息） */
         if (e.mapped) {
@@ -411,7 +420,7 @@ async function main() {
   clarosight exec <id> <code>              在设备页面执行 JS（支持 return）
   clarosight logs <id> [N|--tail=N|--since=N]   拉取日志（N=最近N条，--since=游标增量）
   clarosight network <id> [N|--tail=N|--since=N] 拉取网络记录（同上）
-  clarosight errors <id>                   拉取设备错误
+  clarosight errors <id> [N|--tail=N|--since=N] 拉取设备错误（N=最近N条，省 token）
   clarosight inspect <id>                  一键诊断聚合（错误+失败网络+快照，AI 最常用）
   clarosight tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）
   clarosight inject [bookmarklet|userscript]  生成接入片段
