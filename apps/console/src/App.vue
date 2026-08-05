@@ -440,12 +440,26 @@ onMounted(() => connect())
               v-for="tab in (['console', 'network', 'errors', 'snapshot', 'exec'] as const)"
               :key="tab"
               @click="activeTab = tab"
-              class="px-4 py-2 text-sm font-medium border-b-2"
+              class="px-4 py-2 text-sm font-medium border-b-2 flex items-center gap-1.5"
               :class="activeTab === tab
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-muted hover:text-primary'"
             >
               {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : 'Exec' }}
+              <!-- 数量徽标：Console/Network/Errors 显示条数，Errors 有错误时红色高亮 -->
+              <span
+                v-if="tab === 'console' && logs.length > 0"
+                class="text-xs px-1.5 py-0.5 rounded bg-blue-soft text-secondary"
+              >{{ logs.length }}</span>
+              <span
+                v-else-if="tab === 'network' && network.length > 0"
+                class="text-xs px-1.5 py-0.5 rounded bg-blue-soft text-secondary"
+              >{{ network.length }}</span>
+              <span
+                v-else-if="tab === 'errors' && errors.length > 0"
+                class="text-xs px-1.5 py-0.5 rounded font-medium"
+                :class="activeTab === 'errors' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-600'"
+              >{{ errors.length }}</span>
             </button>
             <button
               v-if="activeTab === 'snapshot'"

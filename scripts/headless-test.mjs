@@ -835,7 +835,7 @@ async function main() {
       /** 切到 errors 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('nav button'))
-        const errTab = tabs.find((t) => t.textContent.trim() === 'Errors')
+        const errTab = tabs.find((t) => t.textContent.trim().startsWith('Errors'))
         if (errTab) errTab.click()
       })
       await new Promise((r) => setTimeout(r, 400))
@@ -879,12 +879,37 @@ async function main() {
       }
     }
 
+    /** 19.5 Tab 数量徽标 —— Console/Network/Errors tab 显示条数，Errors 红色高亮 */
+    {
+      const badgeInfo = await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const findBadge = (label) => {
+          const tab = tabs.find((t) => t.textContent.trim().startsWith(label))
+          if (!tab) return { found: false, count: 0, isRed: false }
+          const span = tab.querySelector('span')
+          const count = span ? parseInt(span.textContent.trim(), 10) : 0
+          /** Errors 徽标含 red 类（bg-red-600 或 bg-red-100） */
+          const isRed = span ? (span.className.includes('red-600') || span.className.includes('red-100')) : false
+          return { found: true, count: isNaN(count) ? 0 : count, isRed }
+        }
+        return {
+          errors: findBadge('Errors'),
+          network: findBadge('Network'),
+        }
+      })
+      if (badgeInfo.errors.found && badgeInfo.errors.count > 0 && badgeInfo.errors.isRed) {
+        ok(`Tab 徽标生效（Errors ${badgeInfo.errors.count} 红色高亮，Network ${badgeInfo.network.count}）`)
+      } else {
+        fail(`Tab 徽标异常：errors=${JSON.stringify(badgeInfo.errors)} network=${JSON.stringify(badgeInfo.network)}`)
+      }
+    }
+
     /** 20. Network 搜索 —— 控制台 UI 网络面板的关键词过滤 */
     {
       /** 切到 network 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('nav button'))
-        const netTab = tabs.find((t) => t.textContent.trim() === 'Network')
+        const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
         if (netTab) netTab.click()
       })
       await new Promise((r) => setTimeout(r, 400))
@@ -944,7 +969,7 @@ async function main() {
       /** 切到 exec 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('nav button'))
-        const execTab = tabs.find((t) => t.textContent.trim() === 'Exec')
+        const execTab = tabs.find((t) => t.textContent.trim().startsWith('Exec'))
         if (execTab) execTab.click()
       })
       await new Promise((r) => setTimeout(r, 300))
@@ -1028,7 +1053,7 @@ async function main() {
       /** 切到 network 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('nav button'))
-        const netTab = tabs.find((t) => t.textContent.trim() === 'Network')
+        const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
         if (netTab) netTab.click()
       })
       await new Promise((r) => setTimeout(r, 500))
