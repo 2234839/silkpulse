@@ -157,6 +157,32 @@ async function main() {
       fail(`多设备并发异常（期望 ≥2，实际 ${devicesList.length}）`)
     }
 
+    /** 11. AI 诊断上下文 —— 控制台"复制 AI 诊断上下文"按钮 */
+    /** 先在测试页触发错误和网络请求，制造诊断现场 */
+    await testPage.evaluate(() => document.getElementById('runtime-error-btn')?.click())
+    await testPage.evaluate(() => document.getElementById('fetch-404')?.click())
+    await new Promise((r) => setTimeout(r, 1000))
+
+    const aiContext = await consolePage.evaluate(async (deviceId) => {
+      /** 模拟控制台的"生成 AI 上下文"：拉快照 + 聚合 errors/network/logs */
+      const [snapRes, errsRes, netRes, logsRes] = await Promise.all([
+        fetch(`/api/devices/${deviceId}/snapshot`),
+        fetch(`/api/devices/${deviceId}/errors`),
+        fetch(`/api/devices/${deviceId}/network`),
+        fetch(`/api/devices/${deviceId}/logs`),
+      ])
+      const snapshot = await snapRes.text()
+      const errors = await errsRes.json()
+      const network = await netRes.json()
+      const logs = await logsRes.json()
+      return { snapshotLen: snapshot.length, errorCount: errors.length, networkCount: network.length, logCount: logs.length }
+    }, device.id)
+    if (aiContext.snapshotLen > 100 && aiContext.errorCount >= 1 && aiContext.networkCount >= 1) {
+      ok(`AI 诊断上下文可聚合现场（快照 ${aiContext.snapshotLen} 字符，错误 ${aiContext.errorCount}，网络 ${aiContext.networkCount}，日志 ${aiContext.logCount}）`)
+    } else {
+      fail(`AI 诊断上下文数据不完整: ${JSON.stringify(aiContext)}`)
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

@@ -1,0 +1,134 @@
+/**
+ * useAiContext —— 将当前设备状态打包为 AI 可读诊断上下文
+ *
+ * clarosight 的 AI-native 灵魂：人在控制台看到问题时，一键把设备现场
+ * （错误 + 快照 + 网络 + 日志）压缩成一段 token 友好的文本，
+ * 粘贴给任意 AI agent 即可开始诊断，或直接喂给 clarosight skill。
+ */
+import { ref } from 'vue'
+import type { LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
+
+interface AiContextInput {
+  /** 设备 id */
+  deviceId: string
+  /** 设备展示信息（标题/url） */
+  title: string
+  url: string
+  /** 当前错误列表 */
+  errors: ErrorEntry[]
+  /** 当前网络请求列表 */
+  network: NetworkEntry[]
+  /** 当前日志列表 */
+  logs: LogEntry[]
+}
+
+export function useAiContext() {
+  /** 最近一次生成的上下文（供弹窗展示/复制） */
+  const contextText = ref('')
+  const generating = ref(false)
+  /** 复制状态：idle / copied / error */
+  const copyState = ref<'idle' | 'copied' | 'error'>('idle')
+
+  /**
+   * 拉取最新快照并聚合为 AI 诊断上下文文本
+   * 快照走 HTTP（保证最新），其余数据用控制台已收到的实时缓存
+   */
+  async function generate(input: AiContextInput) {
+    generating.value = true
+    try {
+      const snapRes = await fetch(`/api/devices/${input.deviceId}/snapshot`)
+      const snapshot = snapRes.ok ? await snapRes.text() : '（快照不可用）'
+      contextText.value = buildContext({ ...input, snapshot })
+    } finally {
+      generating.value = false
+    }
+  }
+
+  /** 复制到剪贴板 */
+  async function copyToClipboard() {
+    if (!contextText.value) return
+    try {
+      await navigator.clipboard.writeText(contextText.value)
+      copyState.value = 'copied'
+      setTimeout(() => (copyState.value = 'idle'), 1500)
+    } catch {
+      /** 降级：用临时 textarea + execCommand */
+      const ta = document.createElement('textarea')
+      ta.value = contextText.value
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+        copyState.value = 'copied'
+        setTimeout(() => (copyState.value = 'idle'), 1500)
+      } catch {
+        copyState.value = 'error'
+      } finally {
+        document.body.removeChild(ta)
+      }
+    }
+  }
+
+  return { contextText, generating, copyState, generate, copyToClipboard }
+}
+
+/** 聚合设备现场为一段 AI 可读文本 */
+function buildContext(input: AiContextInput & { snapshot: string }): string {
+  const lines: string[] = []
+  lines.push(`# clarosight 设备诊断上下文`)
+  lines.push(``)
+  lines.push(`- 页面: ${input.title}`)
+  lines.push(`- URL: ${input.url}`)
+  lines.push(`- 时间: ${new Date().toISOString()}`)
+  lines.push(``)
+
+  /** 错误（最多 10 条，AI 诊断最关键输入） */
+  lines.push(`## 错误 (${input.errors.length})`)
+  if (input.errors.length === 0) {
+    lines.push(`（无）`)
+  } else {
+    for (const e of input.errors.slice(-10)) {
+      lines.push(`- ${e.message}`)
+      if (e.stack) lines.push(`  \`\`\``, ...e.stack.split('\n').slice(0, 4).map((l) => `  ${l}`), `  \`\`\``)
+    }
+  }
+  lines.push(``)
+
+  /** 页面快照 */
+  lines.push(`## 页面快照`)
+  lines.push(`\`\`\``)
+  lines.push(input.snapshot)
+  lines.push(`\`\`\``)
+  lines.push(``)
+
+  /** 失败的网络请求（4xx/5xx，AI 诊断常见线索） */
+  const failed = input.network.filter((n) => n.status >= 400 || n.status === 0)
+  lines.push(`## 异常网络请求 (${failed.length})`)
+  if (failed.length === 0) {
+    lines.push(`（无）`)
+  } else {
+    for (const n of failed.slice(-10)) {
+      lines.push(`- ${n.method} ${n.status} ${n.url} (${n.duration}ms)`)
+    }
+  }
+  lines.push(``)
+
+  /** 最近的日志（最多 20 条） */
+  lines.push(`## 最近日志 (${input.logs.length})`)
+  if (input.logs.length === 0) {
+    lines.push(`（无）`)
+  } else {
+    for (const l of input.logs.slice(-20)) {
+      lines.push(`- [${l.type}] ${l.message}`)
+    }
+  }
+
+  lines.push(``)
+  lines.push(`---`)
+  lines.push(`提示：可用 clarosight skill 在该设备执行诊断代码，例如：`)
+  lines.push(`  clarosight exec ${input.deviceId.slice(0, 8)} --code "return __clarosight_snapshot()"`)
+
+  return lines.join('\n')
+}

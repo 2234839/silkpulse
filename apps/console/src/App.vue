@@ -4,9 +4,10 @@
  *
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  */
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
+import { useAiContext } from './composables/useAiContext'
 
 const {
   devices,
@@ -20,6 +21,35 @@ const {
 } = useConsoleSocket()
 
 const { snapshotText, loading: snapLoading, fetchSnapshot } = useSnapshot()
+const {
+  contextText,
+  generating,
+  copyState,
+  generate: generateAiContext,
+  copyToClipboard,
+} = useAiContext()
+
+/** 当前选中的设备对象（供 AI 上下文取 title/url） */
+const selectedDevice = computed(() =>
+  devices.value.find((d) => d.id === selectedDeviceId.value) ?? null
+)
+
+/** AI 诊断弹窗 */
+const showAiModal = ref(false)
+
+/** 生成 AI 诊断上下文并弹窗展示 */
+async function openAiContext() {
+  if (!selectedDevice.value) return
+  showAiModal.value = true
+  await generateAiContext({
+    deviceId: selectedDevice.value.id,
+    title: selectedDevice.value.title,
+    url: selectedDevice.value.url,
+    errors: errors.value,
+    network: network.value,
+    logs: logs.value,
+  })
+}
 
 /** 当前激活的面板 */
 const activeTab = ref<'console' | 'network' | 'errors' | 'snapshot'>('console')
@@ -70,6 +100,15 @@ onMounted(() => connect())
         />
         {{ connected ? '已连接' : '断开中' }}
       </span>
+      <button
+        v-if="selectedDevice"
+        @click="openAiContext"
+        :disabled="generating"
+        class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+      >
+        <span v-if="generating">生成中...</span>
+        <span v-else>✨ 复制 AI 诊断上下文</span>
+      </button>
     </header>
 
     <div class="flex-1 flex overflow-hidden">
@@ -187,6 +226,42 @@ onMounted(() => connect())
           </div>
         </div>
       </main>
+    </div>
+
+    <!-- AI 诊断上下文弹窗 -->
+    <div
+      v-if="showAiModal"
+      class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      @click.self="showAiModal = false"
+    >
+      <div class="bg-white rounded-lg shadow-xl w-[720px] max-h-[80vh] flex flex-col">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+          <h3 class="text-sm font-semibold text-gray-800">AI 诊断上下文</h3>
+          <div class="flex items-center gap-2">
+            <button
+              @click="copyToClipboard"
+              class="px-3 py-1 text-xs rounded font-medium"
+              :class="copyState === 'copied'
+                ? 'bg-green-100 text-green-700'
+                : copyState === 'error'
+                ? 'bg-red-100 text-red-700'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+            >
+              {{ copyState === 'copied' ? '✓ 已复制' : copyState === 'error' ? '复制失败' : '复制全部' }}
+            </button>
+            <button
+              @click="showAiModal = false"
+              class="px-3 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-5">
+          <pre v-if="generating" class="text-sm text-gray-400">正在拉取设备快照...</pre>
+          <pre v-else class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ contextText }}</pre>
+        </div>
+      </div>
     </div>
   </div>
 </template>
