@@ -193,6 +193,13 @@ export async function execOnDevice(
       resolve(result)
     })
 
-    device.ws.send(JSON.stringify({ type: 'exec', execId, code }))
+    /** ws.send 可能因竞态（readyState 检查后断开）抛异常，保护之 */
+    try {
+      device.ws.send(JSON.stringify({ type: 'exec', execId, code }))
+    } catch {
+      device.pendingExecs.delete(execId)
+      clearTimeout(timer)
+      resolve({ success: false, error: '发送执行指令失败（连接已断开）' })
+    }
   })
 }

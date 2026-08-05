@@ -233,4 +233,34 @@ export function setupWebSocket(
       if (ws.readyState === ws.OPEN) ws.send(text)
     }
   }
+
+  /**
+   * WS 心跳：每 30s ping 所有连接，检测脏断开（移动端弱网/TCP 未正常关闭）。
+   * 每个连接标记 alive，ping 后删除标记，收到 pong 重新标记。
+   * 下个周期仍无标记 → 连接已死，terminate 强制清理（触发 close → 下线）。
+   */
+  const HEARTBEAT_INTERVAL = 30000
+  const aliveSet = new WeakSet<WebSocket>()
+
+  /** 新连接默认存活 + 监听 pong */
+  wss.on('connection', (ws) => {
+    aliveSet.add(ws)
+    ws.on('pong', () => aliveSet.add(ws))
+  })
+
+  const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.readyState !== ws.OPEN) return
+      if (!aliveSet.has(ws)) {
+        /** 上个周期 ping 后没收到 pong → 脏断开，强制关闭 */
+        ws.terminate()
+        return
+      }
+      aliveSet.delete(ws)
+      ws.ping()
+    })
+  }, HEARTBEAT_INTERVAL)
+
+  /** server 关闭时清理心跳定时器 */
+  wss.on('close', () => clearInterval(interval))
 }
