@@ -54,11 +54,20 @@ node tools/skill/scripts/clarosight.mjs inject userscript    # Tampermonkey
 6. clarosight network <id>                # 看接口请求是否正常
 ```
 
+**用户："线上压缩代码报错，堆栈指向 a1b2.min.js:1:8453，看不出是哪段代码"**
+
+```
+1. clarosight errors <id>                 # errors 输出会自动带 ↳ 原始源码位置（若有 source map）
+2. clarosight exec <id> "return await __clarosight_sourcemap(1, 8453, 'https://site.com/a1b2.min.js')"
+   # → { source: 'src/cart.ts', line: 142, column: 8, name: 'calculateTotal' }
+```
+
+错误采集时会自动尝试解析 source map（若 .map 文件同源可访问），errors 输出里的 `↳ 原始源码` 行即解析结果。
+若自动解析失败（跨域/无 map），可用 `__clarosight_sourcemap` 在远程页面上下文手动解析（页面同源可访问自己的 .map）。
+
 ## exec 代码指南
 
-exec 的 code 作为 **async 函数体**执行，可以写多条语句，用 `return` 返回值：
-
-```js
+exec 的 code 作为 **async 函数体**执行，可以写多条语句，用 `return` 返回值：```js
 // 读取元素文本
 return document.querySelector('.price')?.textContent
 
@@ -78,6 +87,8 @@ return document.querySelector('#result')?.textContent
 - `__clarosight_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup 序列，用于搜索框等监听 keyup 的场景）
 - `__clarosight_wait(ms)` — 异步等待
 - `__clarosight_snapshot()` — 手动取页面快照
+- `__clarosight_sourcemap(line, col, sourceUrl?)` — 解析 source map，把压缩代码位置映射回原始源码位置（线上压缩代码报错时定位真实出错点）
+- `__clarosight_sourcemapStack([{url,line,col},...])` — 批量解析堆栈帧，返回紧凑文本
 
 **注意**：exec code 是 async 函数体，写 `return` 才有返回值。多条操作间用 `await __clarosight_wait(0)` 让框架处理响应式更新。
 

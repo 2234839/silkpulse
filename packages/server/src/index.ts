@@ -100,6 +100,25 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       return
     }
 
+    /** 7. /test-fixtures/crash.js(+.map) —— source map 解析测试用的压缩脚本 + map */
+    /** minified: function n(r){throw new Error(r)}n("source map 测试错误") —— 加载即抛错 */
+    /** throw @ 1:14 → crash.ts:2:2，new Error @ 1:20 → crash.ts:2:8 */
+    if (pathname === '/test-fixtures/crash.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' })
+      res.end('function n(r){throw new Error(r)}n("source map 测试错误")\n//# sourceMappingURL=crash.js.map')
+      return
+    }
+    if (pathname === '/test-fixtures/crash.js.map') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({
+        version: 3,
+        sources: ['crash.ts'],
+        mappings: 'AAAA,SAASA,EAAeC,EAAoB,CAC1C,MAAM,IAAI,MAAMA,CAAG,CACrB,CACAD,EAAe,qCAAiB',
+        names: ['crashOnPurpose', 'msg'],
+      }))
+      return
+    }
+
     /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {

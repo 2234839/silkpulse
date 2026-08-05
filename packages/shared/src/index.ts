@@ -105,12 +105,26 @@ export interface ErrorEntry {
   message: string
   /** 错误堆栈 */
   stack?: string
-  /** 来源文件 */
+  /** 来源文件（压缩后） */
   source?: string
-  /** 行号 */
+  /** 行号（压缩后） */
   line?: number
-  /** 列号 */
+  /** 列号（压缩后） */
   col?: number
+  /** source map 解析后的原始位置（若有） */
+  mapped?: SourceMapPosition
+}
+
+/** source map 解析结果：压缩位置 → 原始源码位置 */
+export interface SourceMapPosition {
+  /** 原始源文件路径 */
+  source: string
+  /** 原始行号（1-based） */
+  line: number
+  /** 原始列号（0-based） */
+  column: number
+  /** 符号名（若有） */
+  name?: string
 }
 
 /** exec 在远程设备执行 JS 的结果 */

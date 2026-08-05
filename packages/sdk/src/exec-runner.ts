@@ -17,6 +17,7 @@
 import type { ServerToDeviceMessage, ExecResult } from '@clarosight/shared'
 import { startExecCapture, endExecCapture } from './log-collector.js'
 import { takeSnapshot, getElement } from './snapshot.js'
+import { resolveOriginalPosition, resolveStack } from './source-map-helper.js'
 
 /** exec 回调类型（由 ws-client 设置，负责 WS 回传） */
 export type ExecHandler = (message: ServerToDeviceMessage) => void
@@ -101,6 +102,27 @@ export function installHelpers(): void {
 
   /** 取页面快照（exec code 也可手动调用） */
   w.__clarosight_snapshot = (): ReturnType<typeof takeSnapshot> => takeSnapshot()
+
+  /**
+   * source map 解析：把压缩代码位置映射回原始源码位置
+   * 用法：const pos = await __clarosight_sourcemap(line, col, sourceUrl?)
+   * sourceUrl 省略时用当前页面 URL
+   * 返回 { source, line, column, name? } 或 null
+   */
+  w.__clarosight_sourcemap = (
+    line: number,
+    col: number,
+    sourceUrl?: string,
+  ): Promise<import('@clarosight/shared').SourceMapPosition | null> =>
+    resolveOriginalPosition(sourceUrl ?? location.href, line, col)
+
+  /**
+   * 批量解析堆栈帧（紧凑文本输出，AI 直接读）
+   * 用法：const lines = await __clarosight_sourcemapStack([{url, line, col}, ...])
+   */
+  w.__clarosight_sourcemapStack = (
+    frames: Array<{ url: string; line: number; col: number }>,
+  ): Promise<string[]> => resolveStack(frames)
 }
 
 /**

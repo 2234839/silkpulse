@@ -344,6 +344,50 @@ async function main() {
       fail('标签测试前置失败：无在线设备')
     }
 
+    /** 15. source map 解析 —— 压缩代码错误自动映射回原始源码位置 */
+    const smDev = await waitForDevice()
+    if (smDev) {
+      /** 注入带 sourceMappingURL 的压缩脚本，执行时抛错 */
+      await testPage.evaluate(() => {
+        const s = document.createElement('script')
+        s.src = '/test-fixtures/crash.js'
+        document.head.appendChild(s)
+      })
+      /** 等待错误捕获 + source map 异步解析（fetch crash.js → 解析 sourceMappingURL → fetch crash.js.map → 解析） */
+      await new Promise((r) => setTimeout(r, 3000))
+      const errors = await (await fetch(`${SERVER}/api/devices/${smDev.id}/errors`)).json()
+      /** 找到 crash.js 引发的错误（source 含 crash.js） */
+      const crashErr = errors.reverse().find((e) => e.source?.includes('crash.js'))
+      if (!crashErr) {
+        fail('source map 测试前置失败：未捕获到 crash.js 错误')
+      } else if (crashErr.mapped && crashErr.mapped.source === 'crash.ts') {
+        ok(`source map 解析成功: ${crashErr.source}:${crashErr.line}:${crashErr.col} → ${crashErr.mapped.source}:${crashErr.mapped.line}:${crashErr.mapped.column}`)
+      } else {
+        fail(`source map 解析失败: mapped=${JSON.stringify(crashErr.mapped)}（source=${crashErr.source}）`)
+      }
+
+      /** 16. __clarosight_sourcemap exec 辅助函数 —— AI 主动解析堆栈位置 */
+      const smExecRes = await fetch(`${SERVER}/api/devices/${smDev.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: 'return await __clarosight_sourcemap(1, 14, location.origin + "/test-fixtures/crash.js")',
+        }),
+      }).then((r) => r.json())
+      if (smExecRes.success) {
+        const pos = JSON.parse(smExecRes.result)
+        if (pos && pos.source === 'crash.ts' && pos.line === 2) {
+          ok(`__clarosight_sourcemap exec 辅助函数: 1:14 → ${pos.source}:${pos.line}:${pos.column}`)
+        } else {
+          fail(`__clarosight_sourcemap 返回异常: ${smExecRes.result}`)
+        }
+      } else {
+        fail(`__clarosight_sourcemap 执行失败: ${smExecRes.error}`)
+      }
+    } else {
+      fail('source map 测试前置失败：无在线设备')
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

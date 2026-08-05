@@ -450,6 +450,13 @@ onMounted(() => connect())
             <div v-for="(e, i) in errors" :key="i" class="bg-red-50 border border-red-200 rounded p-3">
               <div class="text-sm text-red-800 font-medium">{{ e.message }}</div>
               <div class="text-xs text-gray-400 mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
+              <!-- source map 解析后的原始位置（AI 诊断关键信息） -->
+              <div v-if="e.mapped" class="mt-1 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 font-mono">
+                ↳ {{ e.mapped.source }}:{{ e.mapped.line }}:{{ e.mapped.column }}<span v-if="e.mapped.name" class="text-blue-500"> ({{ e.mapped.name }})</span>
+              </div>
+              <div v-else-if="e.source" class="mt-1 text-xs text-gray-400 font-mono">
+                ↳ {{ e.source }}:{{ e.line }}:{{ e.col }}
+              </div>
               <pre v-if="e.stack" class="text-xs text-red-600 mt-2 whitespace-pre-wrap">{{ e.stack }}</pre>
             </div>
             <div v-if="errors.length === 0" class="text-gray-400 text-center py-8">暂无错误</div>

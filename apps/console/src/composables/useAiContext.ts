@@ -91,6 +91,12 @@ function buildContext(input: AiContextInput & { snapshot: string }): string {
   } else {
     for (const e of input.errors.slice(-10)) {
       lines.push(`- ${e.message}`)
+      /** 优先展示 source map 解析出的原始源码位置（压缩代码定位的关键） */
+      if (e.mapped) {
+        lines.push(`  原始源码: ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}${e.mapped.name ? ` (${e.mapped.name})` : ''}`)
+      } else if (e.source) {
+        lines.push(`  位置: ${e.source}:${e.line}:${e.col}`)
+      }
       if (e.stack) lines.push(`  \`\`\``, ...e.stack.split('\n').slice(0, 4).map((l) => `  ${l}`), `  \`\`\``)
     }
   }

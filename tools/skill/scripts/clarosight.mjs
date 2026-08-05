@@ -192,6 +192,12 @@ async function main() {
       }
       for (const e of errors) {
         console.log(`[${fmtTime(e.timestamp)}] ${e.message}`)
+        /** source map 解析成功时优先展示原始位置（AI 诊断的关键信息） */
+        if (e.mapped) {
+          console.log(`  ↳ 原始源码: ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}${e.mapped.name ? ` (${e.mapped.name})` : ''}`)
+        } else if (e.source) {
+          console.log(`  ↳ 压缩位置: ${e.source}:${e.line}:${e.col}（无 source map）`)
+        }
         if (e.stack) console.log(e.stack)
         console.log('')
       }
@@ -265,6 +271,8 @@ exec code 中可直接用的辅助函数：
   __clarosight_type(idx, text)      模拟键盘逐字输入（触发 keydown/keyup 序列）
   __clarosight_wait(ms)             异步等待
   __clarosight_snapshot()           手动取快照
+  __clarosight_sourcemap(line,col,srcUrl?)  解析 source map（压缩位置→原始源码位置）
+  __clarosight_sourcemapStack(frames)       批量解析堆栈帧
 
 环境变量：
   CLAROSIGHT_SERVER  server 地址，默认 http://localhost:8080`)
