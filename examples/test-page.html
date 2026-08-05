@@ -40,6 +40,18 @@
   </div>
 
   <div class="demo">
+    <h3>表单状态（验证快照 disabled/readonly/required/aria 采集）</h3>
+    <form id="state-form" onsubmit="return false">
+      <input id="ro-input" value="只读值" readonly />
+      <input id="req-input" placeholder="必填字段" required />
+      <label><input type="checkbox" id="ind-cb" /> 半选框</label>
+      <button id="disabled-btn" disabled>禁用按钮</button>
+      <button id="aria-disabled-btn" aria-disabled="true">aria禁用</button>
+      <button id="expand-btn" aria-expanded="false" aria-controls="panel">展开</button>
+    </form>
+  </div>
+
+  <div class="demo">
     <h3>网络请求（验证 network 采集）</h3>
     <button id="fetch-ok">fetch 成功请求</button>
     <button id="fetch-404">fetch 404 请求</button>
@@ -146,6 +158,9 @@
       show('已触发 Promise 错误')
       Promise.reject(new Error('clarosight 测试：未处理的 Promise 错误'))
     })
+
+    /** 设置 checkbox 半选状态（indeterminate 只能通过 JS 设置，HTML 属性无效） */
+    document.getElementById('ind-cb').indeterminate = true
 
     console.info('clarosight 测试页已加载')
   </script>

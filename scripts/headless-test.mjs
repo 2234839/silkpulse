@@ -179,6 +179,35 @@ async function main() {
       } else fail(`exec type 异常: ${JSON.stringify(typeRes).slice(0, 150)}`)
     } else fail('snapshot 未找到搜索框 idx')
 
+    /**
+     * 5.2 快照表单状态采集 —— disabled/readonly/required/indeterminate/aria-disabled/aria-expanded
+     *
+     * AI 诊断远程表单问题（"按钮为什么点不了""表单为什么提交失败"）时，
+     * 必须从快照看到这些状态，否则无法定位根因。
+     */
+    {
+      const formSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const checks = [
+        { re: /input #\d+ val=只读值 readonly/, label: 'readonly 输入框' },
+        { re: /input #\d+ ph:必填字段 required/, label: 'required 输入框' },
+        { re: /input #\d+ type:checkbox indeterminate/, label: 'indeterminate 半选框' },
+        { re: /button #\d+ disabled 禁用按钮/, label: 'disabled 原生禁用按钮' },
+        { re: /button #\d+ aria-disabled/, label: 'aria-disabled 自定义禁用' },
+        { re: /button #\d+ collapsed 展开/, label: 'aria-expanded=false 折叠态' },
+      ]
+      let pass = 0
+      const missed = []
+      for (const c of checks) {
+        if (c.re.test(formSnap)) pass++
+        else missed.push(c.label)
+      }
+      if (pass === checks.length) {
+        ok(`快照表单状态全量采集（${pass}/${checks.length}: readonly/required/indeterminate/disabled/aria-disabled/collapsed）`)
+      } else {
+        fail(`快照表单状态缺失 ${missed.join('、')}（${pass}/${checks.length}）`)
+      }
+    }
+
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))

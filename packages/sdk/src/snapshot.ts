@@ -225,7 +225,25 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
     }
   }
 
+  /**
+   * 表单状态全量采集
+   *
+   * AI 诊断远程表单问题（提交失败/无法点击/值改不了）时，必须看到这些状态：
+   * - disabled：原生禁用，点击无效
+   * - readOnly：值不可编辑（但能聚焦、能选中复制），与 disabled 行为不同
+   * - required：必填，表单校验失败的常见根因
+   * - indeterminate：checkbox 半选（全选列表的中间态）
+   * - aria-disabled：自定义组件（尤 Vue/React 按钮组件）常用 aria 而非原生 disabled
+   * - aria-expanded：折叠/展开态（菜单、抽屉、手风琴），AI 判断"展开后元素找不到"的关键
+   */
   if (htmlEl.disabled) entry.disabled = true
+  if (htmlEl.readOnly) entry.readOnly = true
+  if (htmlEl.required) entry.required = true
+  if (htmlEl.type === 'checkbox' && htmlEl.indeterminate) entry.indeterminate = true
+  const ariaDisabled = el.getAttribute('aria-disabled')
+  if (ariaDisabled === 'true') entry.ariaDisabled = true
+  const ariaExpanded = el.getAttribute('aria-expanded')
+  if (ariaExpanded !== null) entry.ariaExpanded = ariaExpanded === 'true'
   const aria = el.getAttribute('aria-label')
   if (aria) entry.aria = aria.slice(0, 40)
 

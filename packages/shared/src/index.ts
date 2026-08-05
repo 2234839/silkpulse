@@ -169,8 +169,18 @@ export interface SnapshotElement {
   text?: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 是否只读（input/textarea，值不可编辑但可聚焦） */
+  readOnly?: boolean
+  /** 是否必填（表单校验失败时 AI 据此判断缺哪个字段） */
+  required?: boolean
+  /** checkbox 半选状态（全选列表的中间态） */
+  indeterminate?: boolean
   /** 是否选中（checkbox/radio） */
   checked?: boolean
+  /** aria-disabled（自定义组件常用，按钮可能用此而非 disabled） */
+  ariaDisabled?: boolean
+  /** aria-expanded（折叠/展开状态，菜单/手风琴等自定义组件） */
+  ariaExpanded?: boolean
   /** input 的值 */
   value?: string
   /** placeholder */
