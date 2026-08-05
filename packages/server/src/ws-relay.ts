@@ -41,12 +41,32 @@ export function setupWebSocket(
   const deviceWatchers = new Map<string, Set<WebSocket>>()
 
   /** 向所有订阅了某设备的控制台广播消息 */
+  /**
+   * 单连接背压上限（bytes）
+   *
+   * 控制台客户端网络慢（VPN/弱网）时，ws.send 持续往内核缓冲区塞数据，
+   * bufferedAmount 无限膨胀会拖垮 server 内存。超过此阈值判定连接已积压，
+   * 丢弃后续消息并强制关闭该连接，保护 server 和其他客户端。
+   * 1MB 约等于数千条日志的体积，正常订阅远不会触顶。
+   */
+  const MAX_BUFFERED = 1024 * 1024
+
   function broadcast(deviceId: string, msg: ServerToConsoleMessage) {
     const watchers = deviceWatchers.get(deviceId)
     if (!watchers) return
     const text = JSON.stringify(msg)
     for (const ws of watchers) {
-      if (ws.readyState === ws.OPEN) ws.send(text)
+      if (ws.readyState !== ws.OPEN) continue
+      /** 背压保护：积压超限的连接直接关闭，不再塞数据 */
+      if (ws.bufferedAmount > MAX_BUFFERED) {
+        ws.close(1011, 'backpressure: send buffer overflow')
+        continue
+      }
+      /**
+       * send 带回调：连接已死但 readyState 尚未更新的竞态下，send 内部会回调报错，
+       * 不带回调时 ws 库会抛同步异常。回调吞掉错误（close 回调统一清理死连接）。
+       */
+      ws.send(text, () => {})
     }
   }
 

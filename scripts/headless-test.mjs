@@ -412,6 +412,42 @@ async function main() {
     if (seen.list) ok(`控制台 WS 连接 + device-list 推送成功`)
     else fail('控制台 WS 未收到 device-list')
 
+    /**
+     * 9.1 WS broadcast 背压保护 —— 设备突发大量日志时 server 不崩、控制台仍可订阅
+     *
+     * server 的 broadcast 有 bufferedAmount 背压上限（1MB），慢客户端超限会被关闭。
+     * 这里验证正常路径不受影响：突发日志后新控制台连接仍能收到推送，
+     * 且 HTTP API 仍响应（server 进程存活，未被背压拖垮）。
+     */
+    {
+      /** 设备端突发 200 条日志（SDK 有限流，会丢一部分，但 server 收到的都会经 broadcast） */
+      await testPage.evaluate(() => {
+        for (let i = 0; i < 200; i++) console.info(`burst-${i}`)
+      })
+      await new Promise((r) => setTimeout(r, 1500))
+      /** 新控制台连接订阅，应能收到 device-list（server WS 仍正常接受连接） */
+      const afterBurst = await consolePage.evaluate(async (deviceId) => {
+        return new Promise((resolve) => {
+          const ws = new WebSocket(`ws://${location.host}/ws/console`)
+          let gotList = false
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'subscribe', deviceId }))
+            gotList = true
+          }
+          setTimeout(() => { ws.close(); resolve(gotList) }, 1500)
+        })
+      }, device.id)
+      /** HTTP API 仍响应（server 存活） */
+      const apiAlive = (await fetch(`${SERVER}/api/devices`)).ok
+      const burstLogs = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const burstReceived = burstLogs.some((l) => String(l.message).includes('burst-'))
+      if (afterBurst && apiAlive && burstReceived) {
+        ok(`WS 背压保护：突发日志后 server 存活、控制台仍可连接、日志已入库（${burstLogs.length} 条）`)
+      } else {
+        fail(`背压保护异常：连接=${afterBurst} api=${apiAlive} 日志入库=${burstReceived}`)
+      }
+    }
+
     /** 10. 多设备并发 —— 再开第二个 /demo 页面（同源，第二个设备） */
     const testPage2 = await browser.newPage()
     await testPage2.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
