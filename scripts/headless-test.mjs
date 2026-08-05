@@ -765,7 +765,39 @@ async function main() {
       }
     }
 
-    /** 20. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
+    /** 20. skill CLI —— network 命令展示 headers + inspect 聚合命令 */
+    {
+      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/clarosight.mjs')
+      /** network 命令：应输出含请求头/响应头 */
+      const netOut = execSync(
+        `node ${skillScript} network ${device.id}`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const netHasHeaders = netOut.includes('请求头') || netOut.includes('content-type')
+
+      /** inspect 命令：应聚合 错误 + 异常网络 + 快照 */
+      const inspectOut = execSync(
+        `node ${skillScript} inspect ${device.id}`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const inspectOk = inspectOut.includes('clarosight 设备诊断聚合')
+        && inspectOut.includes('## 错误')
+        && inspectOut.includes('## 异常网络请求')
+        && inspectOut.includes('## 页面快照')
+
+      if (netHasHeaders) {
+        ok(`skill network 命令展示 headers ✓`)
+      } else {
+        fail(`skill network 命令未展示 headers：${netOut.slice(0, 200)}`)
+      }
+      if (inspectOk) {
+        ok(`skill inspect 聚合命令正常（含错误/网络/快照三段）`)
+      } else {
+        fail(`skill inspect 命令异常：${inspectOut.slice(0, 200)}`)
+      }
+    }
+
+    /** 21. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
     {
       /** 默认应无 .dark（首次访问无 localStorage 或系统偏好） */
       const hasDarkBefore = await consolePage.evaluate(() => document.documentElement.classList.contains('dark'))

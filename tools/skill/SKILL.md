@@ -21,10 +21,13 @@ description: 远程设备调试器 —— 查看、诊断、操作用户在远�
 # 1. 先看有哪些在线设备
 node tools/skill/scripts/clarosight.mjs devices
 
-# 2. 取页面快照（AI 友好的 compact 文本，一眼读懂页面结构）
+# 2. 一键诊断聚合（错误 + 失败网络 + 快照，AI 诊断最高效的入口）
+node tools/skill/scripts/clarosight.mjs inspect <deviceId>
+
+# 3. 取页面快照（AI 友好的 compact 文本，一眼读懂页面结构）
 node tools/skill/scripts/clarosight.mjs snapshot <deviceId>
 
-# 3. 查看错误和日志
+# 4. 查看错误和日志
 node tools/skill/scripts/clarosight.mjs errors <deviceId>
 node tools/skill/scripts/clarosight.mjs logs <deviceId>
 
@@ -47,11 +50,9 @@ node tools/skill/scripts/clarosight.mjs inject userscript    # Tampermonkey
 
 ```
 1. clarosight devices                     # 确认有在线设备
-2. clarosight errors <id>                 # 先看有没有报错
-3. clarosight logs <id>                   # 看 console 日志
-4. clarosight snapshot <id>               # 看页面实际渲染了什么
-5. clarosight exec <id> "return location.href"   # 确认页面 URL 和状态
-6. clarosight network <id>                # 看接口请求是否正常
+2. clarosight inspect <id>                # 一键聚合：错误 + 失败网络 + 快照（最高效）
+3. 如需深入：clarosight errors/logs/network <id> 逐项细看
+4. clarosight exec <id> "return location.href"    # 执行诊断代码
 ```
 
 **用户："线上压缩代码报错，堆栈指向 a1b2.min.js:1:8453，看不出是哪段代码"**

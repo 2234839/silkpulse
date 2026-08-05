@@ -179,6 +179,18 @@ async function main() {
         const status = e.status || '—'
         console.log(`[${fmtTime(e.timestamp)}] ${e.method.padEnd(6)} ${String(status).padEnd(4)} ${e.duration}ms  ${e.url}`)
         if (e.error) console.log(`          ⚠ ${e.error}`)
+        /** 关键请求头（鉴权/cookie/content-type 等，诊断与复现所需） */
+        if (e.reqHeaders) {
+          const pairs = Object.entries(e.reqHeaders).map(([k, v]) => `${k}: ${v}`)
+          console.log(`          请求头: ${pairs.join(' | ')}`)
+        }
+        /** 关键响应头 */
+        if (e.resHeaders) {
+          const pairs = Object.entries(e.resHeaders).map(([k, v]) => `${k}: ${v}`)
+          console.log(`          响应头: ${pairs.join(' | ')}`)
+        }
+        if (e.reqBody) console.log(`          请求体: ${e.reqBody}`)
+        if (e.resBody) console.log(`          响应体: ${e.resBody}`)
       }
       break
     }
@@ -201,6 +213,70 @@ async function main() {
         if (e.stack) console.log(e.stack)
         console.log('')
       }
+      break
+    }
+
+    case 'inspect': {
+      /**
+       * inspect <id> —— 一键诊断聚合：设备信息 + 错误 + 失败网络 + 快照
+       *
+       * AI 诊断时最常用的组合查询，一次拿到完整现场，省得分 3-4 次调用。
+       * 与控制台"AI 诊断上下文"按钮对齐，输出 token 友好的结构化文本。
+       */
+      const id = await resolveDeviceId(args[0])
+      const [devices, errors, network, snapshotRes] = await Promise.all([
+        getJson('/api/devices'),
+        getJson(`/api/devices/${id}/errors`),
+        getJson(`/api/devices/${id}/network`),
+        get(`/api/devices/${id}/snapshot`),
+      ])
+      const device = devices.find((d) => d.id === id)
+      const snapshot = await snapshotRes.text()
+
+      console.log('# clarosight 设备诊断聚合')
+      console.log('')
+      console.log(`- 页面: ${device?.title ?? id}`)
+      console.log(`- URL: ${device?.url ?? '未知'}`)
+      console.log(`- 类型: ${device?.deviceType ?? 'unknown'} · ${device?.viewportWidth}×${device?.viewportHeight}`)
+      if (device?.tags?.length) console.log(`- 标签: ${device.tags.join(', ')}`)
+      console.log('')
+
+      console.log(`## 错误 (${errors.length})`)
+      if (errors.length === 0) {
+        console.log('（无）')
+      } else {
+        for (const e of errors.slice(-10)) {
+          console.log(`- ${e.message}`)
+          if (e.mapped) {
+            console.log(`  原始源码: ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}${e.mapped.name ? ` (${e.mapped.name})` : ''}`)
+          } else if (e.source) {
+            console.log(`  位置: ${e.source}:${e.line}:${e.col}`)
+          }
+          if (e.stack) console.log('  ```', ...e.stack.split('\n').slice(0, 4).map((l) => `\n  ${l}`), '\n  ```')
+        }
+      }
+      console.log('')
+
+      const failed = network.filter((n) => n.status >= 400 || n.status === 0)
+      console.log(`## 异常网络请求 (${failed.length})`)
+      if (failed.length === 0) {
+        console.log('（无）')
+      } else {
+        for (const n of failed.slice(-10)) {
+          console.log(`- ${n.method} ${n.status} ${n.url} (${n.duration}ms)`)
+          if (n.error) console.log(`  ⚠ ${n.error}`)
+        }
+      }
+      console.log('')
+
+      console.log('## 页面快照')
+      console.log('```')
+      console.log(snapshot)
+      console.log('```')
+      console.log('')
+      console.log('---')
+      console.log(`提示：可在该设备执行诊断代码，例如：`)
+      console.log(`  clarosight exec ${id.slice(0, 8)} --code "return __clarosight_snapshot()"`)
       break
     }
 
@@ -258,6 +334,7 @@ async function main() {
   clarosight logs <id> [since]             拉取设备 console 日志
   clarosight network <id> [since]          拉取设备 network 记录
   clarosight errors <id>                   拉取设备错误
+  clarosight inspect <id>                  一键诊断聚合（错误+失败网络+快照，AI 最常用）
   clarosight tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）
   clarosight inject [bookmarklet|userscript]  生成接入片段
 
