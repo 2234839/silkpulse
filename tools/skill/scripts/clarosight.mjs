@@ -81,6 +81,33 @@ function fmtDuration(ms) {
   return `${Math.floor(hours / 24)} 天`
 }
 
+/**
+ * 解析 logs/network 命令的范围参数
+ *
+ * 支持：
+ *   <无>         → since=0, tail=undefined（全部）
+ *   20           → since=0, tail=20（最近 20 条，AI 最常用）
+ *   --tail=20    → 同上
+ *   --since=100  → since=100, tail=undefined（游标增量拉取）
+ *
+ * tail 与 since 互斥：有 tail 时不关心 since（取全量后截断末尾 N 条）。
+ */
+function parseRangeArgs(rangeArgs) {
+  let since = 0
+  let tail
+  for (const arg of rangeArgs) {
+    if (arg.startsWith('--since=')) {
+      since = Number(arg.slice(8)) || 0
+    } else if (arg.startsWith('--tail=')) {
+      tail = Number(arg.slice(7)) || undefined
+    } else if (/^\d+$/.test(arg)) {
+      /** 纯数字 → tail（最近 N 条，AI 最直觉的用法） */
+      tail = Number(arg)
+    }
+  }
+  return { since, tail }
+}
+
 /** 读取 stdin 全部内容（用于 exec 传入复杂多行代码） */
 function readStdin() {
   return new Promise((resolve) => {
@@ -176,13 +203,21 @@ async function main() {
 
     case 'logs': {
       const id = await resolveDeviceId(args[0])
-      const since = args[1] ? Number(args[1]) : 0
+      /**
+       * 第二参数解析：--since=N（游标分页）/ --tail=N 或正整数（只取最近 N 条）
+       *
+       * AI 诊断时最常用 --tail / 直接传 N："看最近 20 条日志"，因为 AI 不知道当前序号。
+       * since 适合轮询场景（持续增量拉取）。
+       */
+      const { since, tail } = parseRangeArgs(args.slice(1))
       const logs = await getJson(`/api/devices/${id}/logs?since=${since}`)
       if (logs.length === 0) {
         console.log('（暂无日志）')
         return
       }
-      for (const l of logs) {
+      /** tail 截断：只展示最近 N 条（已按时间正序，取末尾） */
+      const display = tail ? logs.slice(-tail) : logs
+      for (const l of display) {
         console.log(`[${fmtTime(l.timestamp)}] ${l.type.toUpperCase().padEnd(5)} ${l.message}`)
       }
       break
@@ -190,13 +225,14 @@ async function main() {
 
     case 'network': {
       const id = await resolveDeviceId(args[0])
-      const since = args[1] ? Number(args[1]) : 0
+      const { since, tail } = parseRangeArgs(args.slice(1))
       const entries = await getJson(`/api/devices/${id}/network?since=${since}`)
       if (entries.length === 0) {
         console.log('（暂无网络请求）')
         return
       }
-      for (const e of entries) {
+      const display = tail ? entries.slice(-tail) : entries
+      for (const e of display) {
         const status = e.status || '—'
         console.log(`[${fmtTime(e.timestamp)}] ${e.method.padEnd(6)} ${String(status).padEnd(4)} ${e.duration}ms  ${e.url}`)
         if (e.error) console.log(`          ⚠ ${e.error}`)
@@ -373,8 +409,8 @@ async function main() {
   clarosight devices                       列出在线设备
   clarosight snapshot <id>                 取设备页面快照（AI 友好的 compact 文本）
   clarosight exec <id> <code>              在设备页面执行 JS（支持 return）
-  clarosight logs <id> [since]             拉取设备 console 日志
-  clarosight network <id> [since]          拉取设备 network 记录
+  clarosight logs <id> [N|--tail=N|--since=N]   拉取日志（N=最近N条，--since=游标增量）
+  clarosight network <id> [N|--tail=N|--since=N] 拉取网络记录（同上）
   clarosight errors <id>                   拉取设备错误
   clarosight inspect <id>                  一键诊断聚合（错误+失败网络+快照，AI 最常用）
   clarosight tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）

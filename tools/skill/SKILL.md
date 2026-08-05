@@ -29,7 +29,8 @@ node tools/skill/scripts/clarosight.mjs snapshot <deviceId>
 
 # 4. 查看错误和日志
 node tools/skill/scripts/clarosight.mjs errors <deviceId>
-node tools/skill/scripts/clarosight.mjs logs <deviceId>
+node tools/skill/scripts/clarosight.mjs logs <deviceId> 20          # 最近 20 条日志（AI 常用，省 token）
+node tools/skill/scripts/clarosight.mjs network <deviceId> 10       # 最近 10 条网络请求
 
 # 4. 在远程页面执行诊断代码
 node tools/skill/scripts/clarosight.mjs exec <deviceId> "return document.querySelector('#btn').textContent"

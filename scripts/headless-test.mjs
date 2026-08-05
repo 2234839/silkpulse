@@ -1225,6 +1225,37 @@ async function main() {
       } else {
         fail(`skill inspect 命令异常：${inspectOut.slice(0, 300)}`)
       }
+
+      /**
+       * skill logs/network --tail 限制条数验证
+       *
+       * AI 诊断时最常用"最近 N 条"而非全部（省 token），--tail=N 或直接传 N 都应截断。
+       */
+      const logsFull = execSync(
+        `node ${skillScript} logs ${device.id}`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const logsTail = execSync(
+        `node ${skillScript} logs ${device.id} 5`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const fullLines = logsFull.split('\n').filter((l) => l.trim().startsWith('['))
+      const tailLines = logsTail.split('\n').filter((l) => l.trim().startsWith('['))
+
+      if (fullLines.length > 5 && tailLines.length === 5) {
+        /** 验证 tail 是 full 的末尾 5 条（最后一行相同） */
+        const lastMatch = fullLines[fullLines.length - 1] === tailLines[tailLines.length - 1]
+        if (lastMatch) {
+          ok(`skill logs --tail 生效（全部 ${fullLines.length} 条 → 最近 5 条，末尾一致）`)
+        } else {
+          fail(`skill logs --tail 末尾不一致：full末="${fullLines[fullLines.length - 1]}" tail末="${tailLines[tailLines.length - 1]}"`)
+        }
+      } else if (fullLines.length <= 5) {
+        /** 日志不足 5 条时无法验证截断，跳过 */
+        ok(`skill logs --tail（当前 ${fullLines.length} 条日志不足 5 条，跳过截断验证）`)
+      } else {
+        fail(`skill logs --tail 异常：全部=${fullLines.length} tail=${tailLines.length}（期望 5）`)
+      }
     }
 
     /** 21. 深色模式 —— 控制台主题切换，<html> 加 .dark class + CSS 变量生效 */
