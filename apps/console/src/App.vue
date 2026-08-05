@@ -5,7 +5,7 @@
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  */
 import { ref, computed, watch, onMounted, useTemplateRef, nextTick } from 'vue'
-import type { NetworkEntry } from '@clarosight/shared'
+import type { NetworkEntry, ErrorEntry } from '@clarosight/shared'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
@@ -314,6 +314,12 @@ watch(filteredLogs, async () => {
 
 /** Errors 面板：关键词搜索（按 message / stack / mapped.source） */
 const errorSearch = ref('')
+/**
+ * 正在复制的错误 timestamp（标识哪条错误卡片显示"已复制"反馈）
+ *
+ * 用 timestamp 而非索引：filteredErrors 过滤后索引不稳定，timestamp 是错误唯一标识。
+ */
+const copyingErrorTs = ref<string | null>(null)
 const filteredErrors = computed(() => {
   const q = errorSearch.value.trim().toLowerCase()
   if (!q) return errors.value
@@ -324,6 +330,34 @@ const filteredErrors = computed(() => {
     return false
   })
 })
+
+/**
+ * 把单条错误格式化为可粘贴的文本（message + 时间 + 源码位置 + stack）
+ *
+ * 给 AI/同事看完整错误现场：mapped 源码位置（压缩→原始）+ 完整堆栈，
+ * 对齐 skill CLI errors 命令的输出格式。
+ */
+function formatErrorText(e: ErrorEntry): string {
+  const parts = [`[${new Date(e.timestamp).toLocaleString()}] ${e.message}`]
+  if (e.mapped) {
+    parts.push(`  原始源码: ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}${e.mapped.name ? ` (${e.mapped.name})` : ''}`)
+  } else if (e.source) {
+    parts.push(`  位置: ${e.source}:${e.line}:${e.col}`)
+  }
+  if (e.stack) parts.push(e.stack)
+  return parts.join('\n')
+}
+
+/** 复制单条错误到剪贴板 */
+async function copyError(e: ErrorEntry) {
+  const ok = await copyText(formatErrorText(e))
+  if (ok) {
+    copyingErrorTs.value = e.timestamp
+    setTimeout(() => {
+      if (copyingErrorTs.value === e.timestamp) copyingErrorTs.value = null
+    }, 1500)
+  }
+}
 
 /** Network 面板：关键词搜索（按 URL / 方法 / 状态码）+ 状态码筛选 */
 const networkSearch = ref('')
@@ -780,7 +814,15 @@ onMounted(() => connect())
             <!-- 错误列表 -->
             <div class="flex-1 overflow-y-auto p-4 space-y-3">
               <div v-for="(e, i) in filteredErrors" :key="i" class="bg-red-soft border border-red-soft rounded p-3">
-              <div class="text-sm text-red-key font-medium break-all">{{ e.message }}</div>
+              <div class="flex items-start justify-between gap-2">
+                <div class="text-sm text-red-key font-medium break-all flex-1">{{ e.message }}</div>
+                <!-- 复制单条错误（message + 源码位置 + stack，粘贴给 AI/同事） -->
+                <button
+                  @click="copyError(e)"
+                  class="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
+                  :title="formatErrorText(e).slice(0, 100)"
+                >{{ copyingErrorTs === e.timestamp ? '✓' : '复制' }}</button>
+              </div>
               <div class="text-xs text-faint mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
               <!-- source map 解析后的原始位置（AI 诊断关键信息） -->
               <div v-if="e.mapped" class="mt-1 text-xs text-blue-key bg-blue-soft border border-blue-soft rounded px-2 py-1 font-mono">

@@ -962,6 +962,44 @@ async function main() {
       } else {
         fail(`错误搜索过滤异常：总数=${totalErrors} 过滤后=${filteredErrCount}`)
       }
+
+      /**
+       * 19.1 复制错误按钮 —— 每条错误卡片有"复制"按钮，点击后反馈"✓"
+       *
+       * 其他数据面板（Network cURL / Snapshot / AI 上下文）都有复制按钮，
+       * Errors 面板之前只能手动选中复制。现在每条错误卡片加了复制按钮，
+       * 格式化 message + 源码位置 + stack 为文本。验证按钮存在 + 点击反馈态。
+       */
+      /** 清空搜索（前面测试可能留了搜索词）后确保错误列表有卡片 */
+      const copyBtnResult = await consolePage.evaluate(() => {
+        const cards = document.querySelectorAll('.bg-red-soft.border.border-red-soft.rounded.p-3')
+        if (cards.length === 0) return { error: 'no error cards' }
+        /** 找第一个卡片内的复制按钮（文本"复制"或"✓"） */
+        const firstCard = cards[0]
+        const btns = Array.from(firstCard.querySelectorAll('button'))
+        const copyBtn = btns.find((b) => b.textContent.trim() === '复制')
+        if (!copyBtn) return { error: 'no 复制 button in first card' }
+        copyBtn.click()
+        return { clicked: true }
+      })
+      if (copyBtnResult.error) {
+        fail(`错误复制按钮异常：${copyBtnResult.error}`)
+      } else {
+        /** 等 Vue 更新按钮反馈态 + 剪贴板写入 */
+        await new Promise((r) => setTimeout(r, 300))
+        const feedback = await consolePage.evaluate(() => {
+          const cards = document.querySelectorAll('.bg-red-soft.border.border-red-soft.rounded.p-3')
+          if (cards.length === 0) return { error: 'no cards' }
+          const btns = Array.from(cards[0].querySelectorAll('button'))
+          /** 复制后按钮文本应变"✓" */
+          return { text: btns.find((b) => b.textContent.trim() === '✓') ? '✓' : (btns[0]?.textContent?.trim() ?? '') }
+        })
+        if (feedback.text === '✓') {
+          ok(`错误复制按钮反馈成功（点击后 → ✓）`)
+        } else {
+          fail(`错误复制按钮反馈异常：${JSON.stringify(feedback)}`)
+        }
+      }
     }
 
     /** 19.5 Tab 数量徽标 —— Console/Network/Errors tab 显示条数，Errors 红色高亮 */
