@@ -10,6 +10,8 @@
     "dev:sdk": "vp run @clarosight/sdk#dev",
     "dev:console": "vp run @clarosight/console#dev",
     "start": "vp run @clarosight/server#start",
+    "typecheck": "pnpm exec tsc --noEmit -p packages/shared/tsconfig.json && pnpm exec tsc --noEmit -p packages/sdk/tsconfig.json && pnpm exec tsc --noEmit -p packages/server/tsconfig.json",
+    "test": "node scripts/headless-test.mjs",
     "check": "vp check"
   },
   "devDependencies": {

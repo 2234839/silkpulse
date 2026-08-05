@@ -4,11 +4,30 @@
  * 验证：控制台 UI、SDK 注入连接、snapshot、exec、__clarosight_click、console/error 采集
  */
 import puppeteer from 'puppeteer-core'
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
 const SERVER = process.env.CLAROSIGHT_SERVER ?? 'http://localhost:8081'
-const CHROMIUM = '/usr/bin/chromium-browser'
+
+/**
+ * 探测 chromium 可执行文件路径
+ * 优先级：CHROMIUM_PATH 环境变量 > which 探测常见名称 > 报错
+ */
+function detectChromium() {
+  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH
+  const candidates = ['chromium-browser', 'chromium', 'google-chrome', 'google-chrome-stable']
+  for (const name of candidates) {
+    try {
+      const found = execSync(`which ${name} 2>/dev/null`, { encoding: 'utf8' }).trim()
+      if (found && fs.existsSync(found)) return found
+    } catch {}
+  }
+  console.error('未找到 chromium，请设置 CHROMIUM_PATH 环境变量指向 chromium 可执行文件')
+  process.exit(1)
+}
+
+const CHROMIUM = detectChromium()
 const PASS = '\x1b[32m✓\x1b[0m'
 const FAIL = '\x1b[31m✗\x1b[0m'
 
@@ -386,6 +405,54 @@ async function main() {
       }
     } else {
       fail('source map 测试前置失败：无在线设备')
+    }
+
+    /** 17. iframe 元素采集 —— snapshot 应穿透同源 iframe，元素带 frame 标识 */
+    const iframeDev = await waitForDevice()
+    if (iframeDev) {
+      /** 创建同源 iframe（srcdoc 继承源），内含交互元素 */
+      await testPage.evaluate(() => {
+        const ifr = document.createElement('iframe')
+        ifr.name = 'embed-frame'
+        ifr.srcdoc = '<!DOCTYPE html><html><body><button id="iframe-btn">iframe按钮</button><input id="iframe-input" placeholder="iframe输入框" /></body></html>'
+        document.body.appendChild(ifr)
+      })
+      await new Promise((r) => setTimeout(r, 800))
+      const snapText = await (await fetch(`${SERVER}/api/devices/${iframeDev.id}/snapshot`)).text()
+      /** 验证 iframe 内元素被采集 + 带 frame 标识 */
+      if (snapText.includes('[frame:embed-frame]') && snapText.includes('iframe按钮')) {
+        ok(`iframe 元素采集成功（snapshot 含 frame:embed-frame 标记）`)
+      } else {
+        fail(`iframe 元素未出现在 snapshot 中`)
+      }
+
+      /** 18. exec 操作 iframe 内元素 —— click iframe 内按钮 */
+      const iframeClickRes = await fetch(`${SERVER}/api/devices/${iframeDev.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          /** 找到 iframe 内按钮的 idx（snapshot 里带 frame 标识的那个）并点击 */
+          code: `
+            const snap = __clarosight_snapshot()
+            const btn = snap.els.find(e => e.frame === 'embed-frame' && e.tag === 'button')
+            if (!btn) return { error: '未找到 iframe 按钮', count: snap.els.filter(e => e.frame).length }
+            const clicked = __clarosight_click(btn.idx)
+            return { clicked, idx: btn.idx, text: btn.text }
+          `,
+        }),
+      }).then((r) => r.json())
+      if (iframeClickRes.success) {
+        const r = JSON.parse(iframeClickRes.result)
+        if (r.clicked) {
+          ok(`exec 成功点击 iframe 内元素（idx=${r.idx}, text="${r.text}"）`)
+        } else {
+          fail(`点击 iframe 元素失败: ${iframeClickRes.result}`)
+        }
+      } else {
+        fail(`exec iframe 测试失败: ${iframeClickRes.error}`)
+      }
+    } else {
+      fail('iframe 测试前置失败：无在线设备')
     }
 
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)

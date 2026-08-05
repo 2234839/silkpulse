@@ -57,17 +57,41 @@ function isLeaf(el: Element): boolean {
   return true
 }
 
-/** 递归收集所有元素，穿透 shadow DOM（仅 open mode） */
-function collectAllElements(root: ParentNode): Element[] {
-  const elements: Element[] = []
+/** 带上下文的元素：frame 标识来自递归进入 iframe 时记录 */
+interface CollectedElement {
+  el: Element
+  /** 所在 iframe 标识（src 路径），主文档元素为 undefined */
+  frame?: string
+}
+
+/**
+ * 递归收集所有元素，穿透 shadow DOM（open mode）+ 同源 iframe
+ * 跨域 iframe 受浏览器安全限制无法访问（属正常行为）
+ */
+function collectAllElements(root: ParentNode, frame?: string): CollectedElement[] {
+  const result: CollectedElement[] = []
   for (const el of root.querySelectorAll('*')) {
-    elements.push(el)
+    result.push({ el, frame })
     const shadow = (el as HTMLElement).shadowRoot
     if (shadow) {
-      for (const s of collectAllElements(shadow)) elements.push(s)
+      for (const s of collectAllElements(shadow, frame)) result.push(s)
+    }
+    /** 同源 iframe：递归采集其 document 内元素，标记 frame 标识 */
+    if (el.tagName === 'IFRAME') {
+      const ifr = el as HTMLIFrameElement
+      /** iframe 标识：优先 name，否则 src 路径（省 origin 避免泄露完整地址） */
+      const frameLabel = ifr.name || ifr.getAttribute('src') || 'iframe'
+      try {
+        const doc = ifr.contentDocument
+        if (doc?.body) {
+          for (const s of collectAllElements(doc.body, frameLabel)) result.push(s)
+        }
+      } catch {
+        /** 跨域 iframe 访问 contentDocument 会抛 SecurityError，跳过 */
+      }
     }
   }
-  return elements
+  return result
 }
 
 /** 查找父级 LABEL（用于 checkbox/radio 的文本标签） */
@@ -108,8 +132,9 @@ function getElementText(el: Element, tagLower: string, leaf: boolean): string {
 
 /**
  * 采集单个元素 → SnapshotElement（不采集则返回 null）
+ * @param frame 元素所在的 iframe 标识（主文档为 undefined）
  */
-function processElement(el: Element, maxIdx: { v: number }): SnapshotElement | null {
+function processElement(el: Element, maxIdx: { v: number }, frame?: string): SnapshotElement | null {
   const tag = el.tagName
   if (tag in SKIP_TAGS) return null
 
@@ -153,6 +178,7 @@ function processElement(el: Element, maxIdx: { v: number }): SnapshotElement | n
   const entry: SnapshotElement = { tag: tagLower, idx }
   if (el.id) entry.id = el.id
   if (txt) entry.text = txt
+  if (frame) entry.frame = frame
 
   /** 交互元素的状态标记 */
   if (isInteractive) {
@@ -236,8 +262,8 @@ export function takeSnapshot(): SnapshotData {
 
   const all = collectAllElements(document.body)
   const els: SnapshotElement[] = []
-  for (const el of all) {
-    const entry = processElement(el, maxIdxBox)
+  for (const { el, frame } of all) {
+    const entry = processElement(el, maxIdxBox, frame)
     if (entry) els.push(entry)
     /** 上限 120 个元素，防爆体积 */
     if (els.length >= 120) break

@@ -23,7 +23,7 @@
 - **console 劫持**：info/warn/error/debug 全级别采集，安全序列化（限深限长防卡死）
 - **network 采集**：fetch + XHR 劫持，HAR 风格（URL/方法/状态/请求体/响应体/耗时）
 - **error 捕获**：window.onerror + unhandledrejection，含堆栈 + **自动 source map 解析**（压缩位置 → 原始源码位置，让 AI 能定位压缩代码的真实出错点）
-- **compact 快照**：移植自 pilot 的 AI 友好文本格式，稳定索引，~400 字符压缩整页状态
+- **compact 快照**：移植自 pilot 的 AI 友好文本格式，稳定索引，~400 字符压缩整页状态，穿透 shadow DOM + 同源 iframe
 
 ### AI 操作（exec 通道）
 AI 在远程设备执行任意诊断 JS，内置辅助函数：
@@ -155,7 +155,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（26 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（28 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -178,14 +178,19 @@ clarosight/
 ## 端到端测试
 
 ```bash
+# 类型检查
+pnpm typecheck
+
 # 启动 server
 node packages/server/dist/bin/clarosight.mjs --port 8083
 
 # 运行无头测试（puppeteer-core + 系统 chromium）
-CLAROSIGHT_SERVER=http://localhost:8083 node scripts/headless-test.mjs
+CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-26 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、设备标签/备注（设置/查询/SPA 路由后保留）、source map 解析（错误自动映射 + exec 辅助函数）。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 28 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+
+28 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、console/network/error 采集（含 POST body）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、设备标签/备注（设置/查询/SPA 路由后保留）、source map 解析（错误自动映射 + exec 辅助函数）、iframe 元素采集（穿透同源 iframe）。
 
 ## License
 

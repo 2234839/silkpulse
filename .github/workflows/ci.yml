@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装系统 chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          which chromium-browser
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 启动 server
+        run: |
+          node packages/server/dist/bin/clarosight.mjs --port 8083 &
+          echo $! > /tmp/server.pid
+
+      - name: 等待 server 就绪
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8083/api/devices >/dev/null 2>&1; then
+              echo "server 就绪"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "server 启动超时"
+          exit 1
+
+      - name: 无头浏览器端到端测试
+        env:
+          CLAROSIGHT_SERVER: http://localhost:8083
+        run: pnpm test

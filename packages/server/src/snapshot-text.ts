@@ -35,6 +35,8 @@ function serializeCompactText(els: SnapshotElement[]): string {
     const parts: string[] = [e.tag]
     /** 交互元素显示 idx，供 AI 通过 __clarosight_click(i) 等精确操作 */
     if (e.idx != null) parts.push(`#${e.idx}`)
+    /** iframe 内的元素标注来源 frame，让 AI 知道元素不在主文档 */
+    if (e.frame != null) parts.push(`[frame:${e.frame}]`)
     /** 有 id 的非交互元素输出 id，帮助 AI 理解语义 */
     if (e.id != null && !INTERACTIVE_TAGS.has(e.tag)) parts.push(`#${e.id}`)
     if (e.value != null) {

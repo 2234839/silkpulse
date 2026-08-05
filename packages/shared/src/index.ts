@@ -183,5 +183,7 @@ export interface SnapshotElement {
   aria?: string
   /** 链接 href（相对路径） */
   href?: string
+  /** 元素所在的 iframe 标识（src 或 name，主文档元素无此字段） */
+  frame?: string
   [k: string]: unknown
 }
