@@ -317,6 +317,44 @@ export function installHelpers(): void {
   w.__clarosight_sourcemapStack = (
     frames: Array<{ url: string; line: number; col: number }>,
   ): Promise<string[]> => resolveStack(frames)
+
+  /**
+   * 查询页面存储（localStorage / sessionStorage / cookie）
+   *
+   * 远程调试高频需求：登录态/token 存 localStorage、用户配置存 sessionStorage、
+   * 会话信息存 cookie。用户报"登录态丢了""接口 401""显示异常"时，根因常在 storage。
+   * 不用这个函数就得手写 Object.keys(localStorage).map(...)，笨重且易出错。
+   *
+   * type: 'local'（默认）/ 'session' / 'cookie'
+   * 返回 { key: value } 对象，单个值截断到 200 字符（防过大值撑爆 exec 结果）
+   */
+  w.__clarosight_storage = (
+    /** 查询类型：localStorage / sessionStorage / cookie */
+    type: 'local' | 'session' | 'cookie' = 'local',
+  ): Record<string, string> => {
+    /** 单个值最大长度：超长截断（如 base64 图片、JWT 较长，留头部够诊断） */
+    const MAX_VAL = 200
+    const truncate = (s: string): string => (s.length > MAX_VAL ? s.slice(0, MAX_VAL) + `…(${s.length})` : s)
+    if (type === 'cookie') {
+      const result: Record<string, string> = {}
+      /** document.cookie 是 "k1=v1; k2=v2" 格式，HttpOnly cookie 拿不到（浏览器限制） */
+      for (const part of document.cookie.split(';')) {
+        const eq = part.indexOf('=')
+        if (eq > 0) {
+          const k = part.slice(0, eq).trim()
+          result[k] = truncate(part.slice(eq + 1).trim())
+        }
+      }
+      return result
+    }
+    const store = type === 'session' ? sessionStorage : localStorage
+    const result: Record<string, string> = {}
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i)
+      if (k) result[k] = truncate(store.getItem(k) || '')
+    }
+    return result
+  }
 }
 
 /**

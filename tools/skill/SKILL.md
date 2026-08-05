@@ -95,6 +95,7 @@ return document.querySelector('#result')?.textContent
 - `__clarosight_snapshot()` — 手动取页面快照
 - `__clarosight_sourcemap(line, col, sourceUrl?)` — 解析 source map，把压缩代码位置映射回原始源码位置（线上压缩代码报错时定位真实出错点）
 - `__clarosight_sourcemapStack([{url,line,col},...])` — 批量解析堆栈帧，返回紧凑文本
+- `__clarosight_storage(type?)` — 查询页面存储（`'local'`/`'session'`/`'cookie'`，默认 `'local'`），返回 `{key:value}` 对象。诊断登录态丢失/接口 401/配置异常（token 在 localStorage、会话在 cookie），单个值超 200 字符截断
 
 **注意**：exec code 是 async 函数体，写 `return` 才有返回值。多条操作间用 `await __clarosight_wait(0)` 让框架处理响应式更新。
 

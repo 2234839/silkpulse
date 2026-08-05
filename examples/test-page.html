@@ -98,6 +98,14 @@
     <div id="log">（点击按钮试试）</div>
   </div>
 
+  <!-- 初始化 storage 测试数据（验证 __clarosight_storage 查询能力） -->
+  <script>
+    localStorage.setItem('cs-token', 'test-token-abc123')
+    localStorage.setItem('cs-user', JSON.stringify({ id: 1, name: 'clarosight' }))
+    sessionStorage.setItem('cs-tab', 'session-data')
+    document.cookie = 'cs-auth=cookie-value; path=/'
+  </script>
+
   <!-- clarosight SDK 注入：data-server 指定 server 地址 -->
   <script src="http://localhost:8080/sdk.js" data-server="http://localhost:8080"></script>
   <script>

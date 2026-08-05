@@ -1223,6 +1223,49 @@ async function main() {
       fail('source map 测试前置失败：无在线设备')
     }
 
+    /**
+     * 16.5 __clarosight_storage —— 查询 localStorage / sessionStorage / cookie
+     *
+     * 远程调试高频需求：登录态/token 在 localStorage、会话信息在 cookie。
+     * 验证三种类型都能正确返回 {key: value}，且值截断逻辑正常。
+     */
+    {
+      const storageDev = await waitForDevice()
+      if (storageDev) {
+        /** localStorage：应含 cs-token + cs-user（测试页初始化时设置） */
+        const localRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: `return __clarosight_storage('local')` }),
+        })).json()
+        const localOk = localRes.success && localRes.result?.includes('cs-token') && localRes.result?.includes('test-token-abc123') && localRes.result?.includes('cs-user')
+
+        /** sessionStorage：应含 cs-tab */
+        const sessionRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: `return __clarosight_storage('session')` }),
+        })).json()
+        const sessionOk = sessionRes.success && sessionRes.result?.includes('cs-tab') && sessionRes.result?.includes('session-data')
+
+        /** cookie：应含 cs-auth（HttpOnly 拿不到是浏览器限制，cs-auth 非 HttpOnly 可读） */
+        const cookieRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: `return __clarosight_storage('cookie')` }),
+        })).json()
+        const cookieOk = cookieRes.success && cookieRes.result?.includes('cs-auth') && cookieRes.result?.includes('cookie-value')
+
+        if (localOk && sessionOk && cookieOk) {
+          ok(`__clarosight_storage 查询生效（localStorage ✓ sessionStorage ✓ cookie ✓）`)
+        } else {
+          fail(`__clarosight_storage 异常：local=${localOk} session=${sessionOk} cookie=${cookieOk}（local=${localRes.result?.slice(0, 100)} cookie=${cookieRes.result?.slice(0, 100)}）`)
+        }
+      } else {
+        fail('__clarosight_storage 测试前置失败：无在线设备')
+      }
+    }
+
     /** 17. iframe 元素采集 —— snapshot 应穿透同源 iframe，元素带 frame 标识 */
     const iframeDev = await waitForDevice()
     if (iframeDev) {
