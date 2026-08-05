@@ -1495,6 +1495,44 @@ async function main() {
       }
     }
 
+    /**
+     * 26. 设备列表在线时长 —— 控制台 UI + skill CLI 都显示"在线 N 分钟"
+     *
+     * "设备接入了多久"是诊断问题性质的关键线索：
+     * 刚接入就报错 → 可能是初始化 bug；运行 1 小时后才报错 → 可能是内存泄漏/状态累积。
+     * 控制台 UI 30 秒刷新相对时间，skill CLI 在 devices 命令输出。
+     */
+    {
+      /** 控制台 UI 验证：设备列表含"在线"文字 + 相对时间格式 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        /** 切到任意非 snapshot 面板再回来触发刷新（确保设备列表可见） */
+      })
+      /** 设备列表始终可见（左侧 aside），直接检查文本 */
+      const uiOnlineText = await consolePage.evaluate(() => {
+        const aside = document.querySelector('aside')
+        if (!aside) return null
+        const text = aside.textContent
+        /** 匹配"在线 刚刚" / "在线 3 分钟" / "在线 1 小时" 等 */
+        const match = text.match(/在线\s+(刚刚|\d+\s*(分钟|小时|天))/)
+        return match ? match[0] : null
+      })
+
+      /** skill CLI 验证：devices 命令输出含"在线" */
+      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/clarosight.mjs')
+      const devicesOut = execSync(
+        `node ${skillScript} devices`,
+        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+      )
+      const skillHasOnline = devicesOut.includes('在线')
+
+      if (uiOnlineText && skillHasOnline) {
+        ok(`设备在线时长展示生效（UI: "${uiOnlineText}"，skill CLI devices 含"在线"）`)
+      } else {
+        fail(`在线时长展示异常：UI="${uiOnlineText}" skillCLI=${skillHasOnline}`)
+      }
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

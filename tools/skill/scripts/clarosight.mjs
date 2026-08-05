@@ -71,6 +71,16 @@ function fmtTime(ts) {
   return new Date(ts).toLocaleTimeString()
 }
 
+/** 毫秒差 → 人类可读时长（"刚刚" / "3 分钟" / "1 小时" / "2 天"） */
+function fmtDuration(ms) {
+  const mins = Math.floor(ms / 60000)
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins} 分钟`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} 小时`
+  return `${Math.floor(hours / 24)} 天`
+}
+
 /** 读取 stdin 全部内容（用于 exec 传入复杂多行代码） */
 function readStdin() {
   return new Promise((resolve) => {
@@ -111,7 +121,9 @@ async function main() {
         console.log(`  ${mark} [${d.id}]`)
         console.log(`       标题: ${d.title}`)
         console.log(`       URL:  ${d.url}`)
-        console.log(`       类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}`)
+        /** 在线时长：判断问题性质的关键线索（刚接入就报错 vs 运行许久才报错） */
+        const onlineDur = d.onlineAt ? ` · 在线 ${fmtDuration(Date.now() - d.onlineAt)}` : ''
+        console.log(`       类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}${onlineDur}`)
         console.log(`       UA:   ${d.userAgent.slice(0, 80)}`)
         if (d.tags?.length) console.log(`       标签: ${d.tags.join(', ')}`)
         if (d.note) console.log(`       备注: ${d.note}`)

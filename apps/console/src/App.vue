@@ -356,6 +356,27 @@ function refreshSnapshot() {
 }
 
 /**
+ * 设备在线时长显示 —— 每 30 秒刷新 now，驱动相对时间重算
+ *
+ * 诊断时"设备接入了多久"是判断问题性质的关键线索（刚接入就报错 vs 接入 1 小时后才报错）。
+ * 30 秒粒度够用：相对时间（"5 分钟前"）不需要秒级精度，低频刷新省 CPU。
+ */
+const now = ref(Date.now())
+setInterval(() => { now.value = Date.now() }, 30000)
+
+/** 把时间戳格式化为相对时长（"刚刚" / "3 分钟" / "1 小时" / "2 天") */
+function relativeTime(ts: number): string {
+  /** 依赖 now 让 Vue 在刷新时重算 */
+  const elapsed = Math.max(0, now.value - ts)
+  const mins = Math.floor(elapsed / 60000)
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins} 分钟`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} 小时`
+  return `${Math.floor(hours / 24)} 天`
+}
+
+/**
  * Snapshot 面板：行级搜索过滤
  *
  * 快照几百字符压缩整页结构，诊断"某个按钮在哪""表单有没有 disabled"时，
@@ -483,6 +504,7 @@ onMounted(() => connect())
             </div>
             <div class="flex items-center gap-2 mt-1">
               <span class="text-xs text-faint">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
+              <span v-if="d.onlineAt" class="text-xs text-faint" :title="new Date(d.onlineAt).toLocaleString()">· 在线 {{ relativeTime(d.onlineAt) }}</span>
               <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium">{{ d.errorCount }} 错误</span>
             </div>
           </li>
