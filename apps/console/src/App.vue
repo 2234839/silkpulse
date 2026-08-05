@@ -5,6 +5,7 @@
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  */
 import { ref, computed, watch, onMounted } from 'vue'
+import type { NetworkEntry } from '@clarosight/shared'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
@@ -41,6 +42,9 @@ const deviceTypeIcon = (t: string): string => {
   return '🖥️'
 }
 
+/** network 面板：选中的请求条目（点击展开详情） */
+const selectedNetwork = ref<NetworkEntry | null>(null)
+
 /** AI 诊断弹窗 */
 const showAiModal = ref(false)
 
@@ -69,8 +73,9 @@ const logColor = (type: string): string => {
   return 'text-gray-700'
 }
 
-/** 选中设备变化时拉取快照 */
+/** 选中设备变化时拉取快照 + 清空 network 详情选中 */
 watch(selectedDeviceId, (id) => {
+  selectedNetwork.value = null
   if (id && activeTab.value === 'snapshot') {
     fetchSnapshot(id)
   }
@@ -185,29 +190,83 @@ onMounted(() => connect())
             <div v-if="logs.length === 0" class="text-gray-400 text-center py-8">暂无日志</div>
           </div>
 
-          <!-- Network 面板 -->
-          <div v-else-if="activeTab === 'network'" class="flex-1 overflow-y-auto bg-gray-50">
-            <table class="w-full text-sm">
-              <thead class="bg-gray-100 text-gray-600 text-xs uppercase">
-                <tr>
-                  <th class="text-left px-4 py-2">方法</th>
-                  <th class="text-left px-4 py-2">状态</th>
-                  <th class="text-left px-4 py-2">URL</th>
-                  <th class="text-right px-4 py-2">耗时</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(n, i) in network" :key="i" class="border-b border-gray-100">
-                  <td class="px-4 py-2 text-gray-600 font-mono text-xs">{{ n.method }}</td>
-                  <td class="px-4 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-gray-400'">
-                    {{ n.status || '—' }}
-                  </td>
-                  <td class="px-4 py-2 text-gray-700 truncate max-w-xs">{{ n.url }}</td>
-                  <td class="px-4 py-2 text-right text-gray-500 text-xs font-mono">{{ n.duration }}ms</td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="network.length === 0" class="text-gray-400 text-center py-8">暂无网络请求</div>
+          <!-- Network 面板（主从布局：请求列表 + 详情） -->
+          <div v-else-if="activeTab === 'network'" class="flex-1 flex overflow-hidden bg-gray-50">
+            <!-- 请求列表 -->
+            <div class="w-2/5 overflow-y-auto border-r border-gray-200">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-100 text-gray-600 text-xs uppercase sticky top-0">
+                  <tr>
+                    <th class="text-left px-3 py-2">方法</th>
+                    <th class="text-left px-3 py-2">状态</th>
+                    <th class="text-left px-3 py-2">URL</th>
+                    <th class="text-right px-3 py-2">耗时</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="(n, i) in network"
+                    :key="i"
+                    @click="selectedNetwork = n"
+                    class="border-b border-gray-100 cursor-pointer hover:bg-blue-50"
+                    :class="selectedNetwork === n ? 'bg-blue-50' : ''"
+                  >
+                    <td class="px-3 py-2 text-gray-600 font-mono text-xs">{{ n.method }}</td>
+                    <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-gray-400'">
+                      {{ n.status || '—' }}
+                    </td>
+                    <td class="px-3 py-2 text-gray-700 truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
+                    <td class="px-3 py-2 text-right text-gray-500 text-xs font-mono">{{ n.duration }}ms</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-if="network.length === 0" class="text-gray-400 text-center py-8 text-sm">暂无网络请求</div>
+            </div>
+
+            <!-- 详情面板 -->
+            <div class="flex-1 overflow-y-auto p-4">
+              <template v-if="selectedNetwork">
+                <div class="space-y-4">
+                  <!-- 基本信息 -->
+                  <div>
+                    <div class="text-xs text-gray-400 mb-1">URL</div>
+                    <div class="text-sm font-mono text-gray-800 break-all bg-white p-2 rounded border border-gray-200">{{ selectedNetwork.url }}</div>
+                  </div>
+                  <div class="flex gap-6 text-sm">
+                    <div><span class="text-gray-400">方法：</span><span class="font-mono text-gray-800">{{ selectedNetwork.method }}</span></div>
+                    <div>
+                      <span class="text-gray-400">状态：</span>
+                      <span class="font-mono" :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'">{{ selectedNetwork.status || '—' }}</span>
+                    </div>
+                    <div><span class="text-gray-400">耗时：</span><span class="font-mono text-gray-800">{{ selectedNetwork.duration }}ms</span></div>
+                  </div>
+
+                  <!-- 错误 -->
+                  <div v-if="selectedNetwork.error" class="bg-red-50 border border-red-200 rounded p-3">
+                    <div class="text-xs text-red-400 mb-1">错误</div>
+                    <div class="text-sm text-red-700 font-mono">{{ selectedNetwork.error }}</div>
+                  </div>
+
+                  <!-- 请求体 -->
+                  <div v-if="selectedNetwork.reqBody">
+                    <div class="text-xs text-gray-400 mb-1">请求体</div>
+                    <pre class="text-xs font-mono text-gray-700 bg-white p-3 rounded border border-gray-200 whitespace-pre-wrap break-all">{{ selectedNetwork.reqBody }}</pre>
+                  </div>
+
+                  <!-- 响应体 -->
+                  <div v-if="selectedNetwork.resBody">
+                    <div class="text-xs text-gray-400 mb-1">响应体</div>
+                    <pre class="text-xs font-mono text-gray-700 bg-white p-3 rounded border border-gray-200 whitespace-pre-wrap break-all">{{ selectedNetwork.resBody }}</pre>
+                  </div>
+
+                  <!-- 无 body 提示 -->
+                  <div v-if="!selectedNetwork.reqBody && !selectedNetwork.resBody && !selectedNetwork.error" class="text-xs text-gray-400">
+                    此请求无请求体/响应体（可能是 GET 请求或响应未完成）
+                  </div>
+                </div>
+              </template>
+              <div v-else class="text-gray-400 text-center py-8 text-sm">点击左侧请求查看详情</div>
+            </div>
           </div>
 
           <!-- Errors 面板 -->

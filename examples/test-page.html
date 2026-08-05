@@ -38,6 +38,7 @@
     <button id="fetch-ok">fetch 成功请求</button>
     <button id="fetch-404">fetch 404 请求</button>
     <button id="xhr-btn">XHR 请求</button>
+    <button id="post-btn">POST 请求（带 body）</button>
   </div>
 
   <div class="demo">
@@ -97,6 +98,23 @@
         show(`XHR 完成，状态码 ${xhr.status}`)
       }
       xhr.send()
+    })
+
+    /** network：POST 请求（带请求体，验证 reqBody/resBody 采集） */
+    document.getElementById('post-btn').addEventListener('click', async () => {
+      const payload = { name: 'clarosight', action: 'test', ts: Date.now() }
+      console.log('POST 发起: /api/echo', payload)
+      try {
+        const res = await fetch('/api/echo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const text = await res.text()
+        show(`POST 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
+      } catch (e) {
+        show('POST 失败: ' + e.message)
+      }
     })
 
     /** error：运行时错误（同步抛出，触发 window error 事件） */

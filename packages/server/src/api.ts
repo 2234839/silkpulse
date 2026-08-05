@@ -63,6 +63,13 @@ export async function handleApiRoute(
     return true
   }
 
+  /** /api/echo —— 回显端点（测试 POST body 采集，返回接收到的 body） */
+  if (pathname === '/api/echo') {
+    const body = await readBody(req)
+    sendJson(res, { ok: true, received: body ? JSON.parse(body) : null, time: Date.now() })
+    return true
+  }
+
   /** /api/devices —— 列出所有在线设备 */
   if (pathname === '/api/devices' && req.method === 'GET') {
     sendJson(res, registry.list())

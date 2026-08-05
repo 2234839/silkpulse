@@ -112,10 +112,11 @@ async function main() {
     if (logs.some((l) => l.message.includes('打招呼'))) ok(`console 采集成功（${logs.length} 条）`)
     else fail(`console 采集异常: ${logs.slice(-2).map((l) => l.message).join(' | ')}`)
 
-    /** 7. network 采集 —— fetch + xhr */
+    /** 7. network 采集 —— fetch + xhr + POST body */
     await testPage.evaluate(() => document.getElementById('fetch-ok')?.click())
     await testPage.evaluate(() => document.getElementById('fetch-404')?.click())
     await testPage.evaluate(() => document.getElementById('xhr-btn')?.click())
+    await testPage.evaluate(() => document.getElementById('post-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
     const network = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
     const hasFetch = network.some((n) => n.url.includes('/api/devices'))
@@ -126,6 +127,14 @@ async function main() {
     } else {
       fail(`network 采集不完整（fetch=${hasFetch} 404=${has404} xhr=${hasXhr}，共 ${network.length} 条）`)
       console.log('  network 详情:', JSON.stringify(network.map((n) => ({ m: n.method, s: n.status, u: n.url.slice(-30) }))))
+    }
+
+    /** 7.1 POST body 采集 —— 验证 reqBody/resBody 被正确捕获 */
+    const postEntry = network.find((n) => n.method === 'POST' && n.url.includes('/api/echo'))
+    if (postEntry && postEntry.reqBody && postEntry.reqBody.includes('clarosight') && postEntry.resBody) {
+      ok(`POST body 采集成功（reqBody ${postEntry.reqBody.length} 字符，resBody ${postEntry.resBody.length} 字符）`)
+    } else {
+      fail(`POST body 采集异常: ${JSON.stringify({ method: postEntry?.method, hasReq: !!postEntry?.reqBody, hasRes: !!postEntry?.resBody })}`)
     }
 
     /** 8. error 采集 —— 运行时错误 + Promise rejection */

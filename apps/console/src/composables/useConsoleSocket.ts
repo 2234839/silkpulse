@@ -30,15 +30,28 @@ export function useConsoleSocket() {
 
   let ws: WebSocket | null = null
 
-  /** 切换选中的设备（订阅该设备的实时数据） */
-  function selectDevice(id: string | null) {
+  /** 切换选中的设备（订阅实时数据 + 拉取历史缓冲区） */
+  async function selectDevice(id: string | null) {
     selectedDeviceId.value = id
     logs.value = []
     network.value = []
     errors.value = []
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    if (id) {
+    if (!id) return
+    if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe', deviceId: id }))
+    }
+    /** 同时拉取 server 端环形缓冲区的历史数据，让用户立即看到选中前的请求/日志 */
+    try {
+      const [logsRes, netRes, errRes] = await Promise.all([
+        fetch(`/api/devices/${id}/logs`),
+        fetch(`/api/devices/${id}/network`),
+        fetch(`/api/devices/${id}/errors`),
+      ])
+      logs.value = await logsRes.json()
+      network.value = await netRes.json()
+      errors.value = await errRes.json()
+    } catch {
+      /** 拉取失败时保持空，WS 推送仍会补充新数据 */
     }
   }
 
