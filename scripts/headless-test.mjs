@@ -957,6 +957,91 @@ async function main() {
       }
     }
 
+    /**
+     * 20.8 exec 结果样式 + 快照折叠 —— 失败红色、快照默认折叠不撑屏
+     *
+     * exec 结果之前成功/失败同一颜色，失败信息淹没在正常文本里；
+     * 快照直接拼在返回值后面，几百字符撑满结果区。
+     */
+    {
+      /** 先清空 localStorage 历史，确保干净起点 */
+      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.reload({ waitUntil: 'networkidle0' })
+      await new Promise((r) => setTimeout(r, 500))
+      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await new Promise((r) => setTimeout(r, 400))
+      /** 切到 exec 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const execTab = tabs.find((t) => t.textContent.trim().startsWith('Exec'))
+        if (execTab) execTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+
+      /** 执行成功代码（含快照） */
+      await consolePage.evaluate(() => {
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          ta.value = 'return 1 + 1'
+          ta.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const runBtn = btns.find((b) => b.textContent.includes('执行'))
+        if (runBtn) runBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 1500))
+      const successView = await consolePage.evaluate(() => {
+        const pre = document.querySelector('pre')
+        const details = document.querySelector('details')
+        return {
+          resultText: pre ? pre.textContent : '',
+          resultColor: pre ? pre.className : '',
+          hasSnapshotDetails: !!details,
+          snapshotCollapsed: details ? !details.hasAttribute('open') : false,
+        }
+      })
+      /** 成功：结果含返回值，颜色正常（text-primary，非 red）；快照折叠 */
+      const okSuccess = successView.resultText.includes('2')
+        && !successView.resultColor.includes('red')
+        && successView.hasSnapshotDetails
+        && successView.snapshotCollapsed
+      if (okSuccess) {
+        ok(`exec 成功结果正常色 + 快照默认折叠（${successView.resultText.slice(0, 30).trim()}…）`)
+      } else {
+        fail(`exec 成功样式异常：${JSON.stringify(successView).slice(0, 200)}`)
+      }
+
+      /** 执行失败代码 */
+      await consolePage.evaluate(() => {
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          ta.value = 'throw new Error("测试失败")'
+          ta.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const runBtn = btns.find((b) => b.textContent.includes('执行'))
+        if (runBtn) runBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 1500))
+      const failView = await consolePage.evaluate(() => {
+        const pre = document.querySelector('pre')
+        return {
+          resultText: pre ? pre.textContent : '',
+          resultColor: pre ? pre.className : '',
+        }
+      })
+      /** 失败：含错误信息，颜色为红 */
+      if (failView.resultText.includes('失败') && failView.resultColor.includes('red')) {
+        ok(`exec 失败结果红色高亮（${failView.resultText.slice(0, 40).trim()}…）`)
+      } else {
+        fail(`exec 失败样式异常：${JSON.stringify(failView).slice(0, 200)}`)
+      }
+    }
+
     /** 21. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
     {
       /** 先清空 localStorage 历史，确保干净起点 */

@@ -177,6 +177,10 @@ const logSearch = ref('')
 /** Exec 面板：在控制台直接执行诊断代码 */
 const execCode = ref('return document.title')
 const execResult = ref('')
+/** exec 执行后快照（独立展示，默认折叠，避免快照撑满结果区） */
+const execSnapshot = ref('')
+/** exec 执行状态：null 未执行 / true 成功 / false 失败（控制结果区配色） */
+const execOk = ref<boolean | null>(null)
 const execRunning = ref(false)
 
 /** 执行诊断代码 */
@@ -184,6 +188,8 @@ async function runExec() {
   if (!selectedDeviceId.value || execRunning.value) return
   execRunning.value = true
   execResult.value = '执行中...'
+  execSnapshot.value = ''
+  execOk.value = null
   let ok = false
   try {
     const res = await fetch(`/api/devices/${selectedDeviceId.value}/exec`, {
@@ -196,14 +202,16 @@ async function runExec() {
       ok = true
       const parts = [`=== 返回值 ===`, data.result ?? 'undefined']
       if (data.logs?.length) parts.push('', '=== 执行期间日志 ===', ...data.logs)
-      if (data.snapshotText) parts.push('', '=== 执行后快照 ===', data.snapshotText)
       execResult.value = parts.join('\n')
+      /** 快照独立存储，渲染时折叠展示（快照几百字符，不该和返回值混排） */
+      execSnapshot.value = data.snapshotText ?? ''
     } else {
       execResult.value = `✗ 执行失败: ${data.error}`
     }
   } catch (e) {
     execResult.value = `✗ 请求失败: ${e instanceof Error ? e.message : String(e)}`
   } finally {
+    execOk.value = ok
     /** 记录执行历史（成功/失败都记，失败也是试错过程的一部分） */
     recordExec(execCode.value, ok)
     execRunning.value = false
@@ -682,7 +690,18 @@ onMounted(() => connect())
               </div>
               <!-- 结果展示区 -->
               <div class="flex-1 overflow-y-auto p-3">
-                <pre v-if="execResult" class="text-xs font-mono text-primary whitespace-pre-wrap">{{ execResult }}</pre>
+                <template v-if="execResult">
+                  <!-- 失败时红色，成功/执行中正常色 -->
+                  <pre
+                    class="text-xs font-mono whitespace-pre-wrap"
+                    :class="execOk === false ? 'text-red-500' : 'text-primary'"
+                  >{{ execResult }}</pre>
+                  <!-- 执行后快照：默认折叠（快照几百字符，不该和返回值混排撑满屏） -->
+                  <details v-if="execSnapshot" class="mt-3">
+                    <summary class="text-xs text-blue-600 cursor-pointer select-none hover:text-blue-700">▶ 执行后快照（{{ execSnapshot.length }} 字符，点击展开）</summary>
+                    <pre class="text-xs font-mono text-secondary whitespace-pre-wrap mt-2 p-2 bg-surface rounded border border-base">{{ execSnapshot }}</pre>
+                  </details>
+                </template>
                 <div v-else class="text-faint text-center py-8 text-sm">输入代码后点击执行</div>
               </div>
             </div>
