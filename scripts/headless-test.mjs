@@ -208,6 +208,42 @@ async function main() {
       }
     }
 
+    /**
+     * 5.3 exec 错误信息含 stack —— AI 诊断远程报错时需要出错位置
+     *
+     * 之前 exec catch 只返回 "TypeError: xxx" 单行，AI 无法定位。
+     * 现在运行时错误附带 stack（截断），语法错误保持单行（无 stack）。
+     */
+    {
+      /** 运行时错误：访问 null 的属性 */
+      const runtimeErr = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `const x = null; return x.foo` }),
+      })).json()
+      if (!runtimeErr.success && runtimeErr.error && runtimeErr.error.includes('TypeError')) {
+        if (runtimeErr.error.includes('\n')) {
+          ok(`exec 运行时错误含 stack（${runtimeErr.error.split('\n')[0]}…）`)
+        } else {
+          fail(`exec 运行时错误缺 stack：${runtimeErr.error}`)
+        }
+      } else {
+        fail(`exec 运行时错误格式异常: ${JSON.stringify(runtimeErr).slice(0, 150)}`)
+      }
+
+      /** 语法错误：缺括号，应有 SyntaxError 但无需 stack */
+      const syntaxErr = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `return {` }),
+      })).json()
+      if (!syntaxErr.success && syntaxErr.error && syntaxErr.error.includes('SyntaxError')) {
+        ok(`exec 语法错误正确捕获（${syntaxErr.error.slice(0, 60)}）`)
+      } else {
+        fail(`exec 语法错误异常: ${JSON.stringify(syntaxErr).slice(0, 150)}`)
+      }
+    }
+
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))

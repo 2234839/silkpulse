@@ -145,7 +145,20 @@ export async function handleExec(code: string, execId: string): Promise<void> {
     result = serializeResult(ret)
   } catch (e) {
     success = false
-    error = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+    /**
+     * 错误信息增强：运行时错误附带 stack（截断 6 行），帮 AI 定位出错位置。
+     * 语法错误（SyntaxError 无 stack）只返回 name: message。
+     * stack 含压缩代码位置没关系——source map 解析能力已具备，AI 可进一步解析。
+     */
+    if (e instanceof Error) {
+      error = `${e.name}: ${e.message}`
+      if (e.stack) {
+        const stackLines = e.stack.split('\n').slice(0, 6).join('\n')
+        error += `\n${stackLines}`
+      }
+    } else {
+      error = String(e)
+    }
   }
 
   const logs = endExecCapture()
