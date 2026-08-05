@@ -244,6 +244,29 @@ async function main() {
       }
     }
 
+    /**
+     * 5.4 exec 异步超时保护 —— 永不 resolve 的代码由 SDK 端 9s 超时兜底
+     *
+     * `return new Promise(() => {})` 会无限挂起。之前靠 server 端 10s 超时回"执行超时"，
+     * 但 SDK 端 promise 仍泄漏、exec 日志捕获队列永不结束。现在 SDK 端 Promise.race
+     * 先于 server 触发（9s < 10s），干净回传超时 + 释放资源。
+     */
+    {
+      const hangStart = Date.now()
+      const hangRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `return new Promise(() => {})` }),
+      })).json()
+      const elapsed = Date.now() - hangStart
+      /** 应在 ~9s（SDK 端）返回，而非 10s（server 端），且报超时 */
+      if (!hangRes.success && hangRes.error && hangRes.error.includes('超时')) {
+        ok(`exec 异步超时保护生效（${elapsed}ms 返回：${hangRes.error.slice(0, 40)}）`)
+      } else {
+        fail(`exec 超时异常：elapsed=${elapsed}ms success=${hangRes.success} err=${hangRes.error ?? '无'}`)
+      }
+    }
+
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))

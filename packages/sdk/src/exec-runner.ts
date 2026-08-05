@@ -126,6 +126,16 @@ export function installHelpers(): void {
 }
 
 /**
+ * SDK 端 exec 超时（ms），比 server 端（10s）早 1s 触发
+ *
+ * 异步永不 resolve 的代码（如 `return new Promise(() => {})`）会让 await fn() 永久挂起。
+ * 若靠 server 端 10s 超时来兜底，server 会回"超时"给 AI，但 SDK 端的 promise 仍泄漏、
+ * exec 日志捕获队列永不结束。SDK 端先于 server 触发，能干净地回传超时 + 释放资源。
+ * 同步死循环（while(true){}）无法救——它阻塞主线程，连定时器都跑不了。
+ */
+const SDK_EXEC_TIMEOUT = 9000
+
+/**
  * 处理 server 下发的 exec 指令
  * 异步执行 code，捕获 console，取快照，回传 ExecResult
  */
@@ -141,7 +151,13 @@ export async function handleExec(code: string, execId: string): Promise<void> {
      * 辅助函数（__clarosight_click 等）已挂到 window，函数体内可直接访问。
      */
     const fn = new Function(`"use strict"; return (async () => {\n${code}\n})()`) as () => Promise<unknown>
-    const ret = await fn()
+    /** Promise.race：异步永不 resolve 时由 SDK 端超时兜底，不等 server 干等 */
+    const ret = await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('执行超时（SDK 9s）')), SDK_EXEC_TIMEOUT),
+      ),
+    ])
     result = serializeResult(ret)
   } catch (e) {
     success = false

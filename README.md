@@ -54,6 +54,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **环形缓冲区**：server 内存保留最近 500 条日志 / 100 条网络 / 50 条错误
 - **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304
 - **WS 背压保护**：broadcast 检查 `bufferedAmount`，慢客户端（VPN/弱网）积压超 1MB 时自动关闭该连接，防止单个慢消费者拖垮 server 内存；send 带回调避免竞态抛异常
+- **exec 异步超时**：永不 resolve 的代码（如 `new Promise(() => {})`）由 SDK 端 9s 超时兜底（早于 server 10s），干净回传 + 释放 exec 日志捕获队列，不靠 server 干等导致 promise 泄漏
 
 ## 架构
 
@@ -163,7 +164,7 @@ clarosight/
 ├── examples/
 │   └── test-page.html   # 测试页（含交互/搜索/网络/错误场景）
 └── scripts/
-    └── headless-test.mjs # 无头浏览器端到端测试（51 项）
+    └── headless-test.mjs # 无头浏览器端到端测试（52 项）
 ```
 
 整个项目用 [VitePlus](https://viteplus.dev/) 统一管理 —— `vp pack` 打包库、`vp build` 构建应用、`catalog:` 统一版本。
@@ -196,9 +197,9 @@ node packages/server/dist/bin/clarosight.mjs --port 8083
 CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 ```
 
-CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 51 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 52 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-51 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集、exec 错误含 stack、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、exec 执行历史、复制为 cURL、skill CLI（network headers + inspect 聚合）、深色模式。
+52 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type、快照表单状态采集、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头）、error 采集、资源加载失败不计入 errorCount、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、exec 执行历史、复制为 cURL、skill CLI（network headers + inspect 聚合）、深色模式。
 
 ## License
 
