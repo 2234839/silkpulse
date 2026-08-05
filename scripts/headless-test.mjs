@@ -226,6 +226,38 @@ async function main() {
       fail(`bookmarklet 注入未上线新设备（${beforeCount} → ${afterCount}）`)
     }
 
+    /** 13. 断线重连 —— 模拟网络闪断，验证设备自动重连 + 历史保留 */
+    const reconDev = await waitForDevice()
+    if (reconDev) {
+      const logsBeforeRecon = await (await fetch(`${SERVER}/api/devices/${reconDev.id}/logs`)).json()
+      /** 用 CDP 模拟断网 → 等 WS 断开 → 恢复 → 等 SDK 重连 */
+      const cdp = await testPage.target().createCDPSession()
+      await cdp.send('Network.enable')
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+      })
+      await new Promise((r) => setTimeout(r, 3000))
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+      })
+      await new Promise((r) => setTimeout(r, 6000))
+      const reconDevices = await (await fetch(`${SERVER}/api/devices`)).json()
+      const reconMatch = reconDevices.find((d) => d.id === reconDev.id)
+      if (reconMatch) {
+        const logsAfterRecon = await (await fetch(`${SERVER}/api/devices/${reconDev.id}/logs`)).json()
+        /** 验证：重连后历史日志不丢 */
+        if (logsAfterRecon.length >= logsBeforeRecon.length) {
+          ok(`断线重连成功（历史保留 ${logsBeforeRecon.length}→${logsAfterRecon.length} 条日志）`)
+        } else {
+          fail(`重连后历史丢失（${logsBeforeRecon.length}→${logsAfterRecon.length}）`)
+        }
+      } else {
+        fail(`断线重连失败：设备 ${reconDev.id.slice(0, 8)} 未重连`)
+      }
+    } else {
+      fail('重连测试前置失败：无在线设备')
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

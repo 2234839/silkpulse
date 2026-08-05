@@ -164,7 +164,12 @@ export function setupWebSocket(
       })
 
       ws.on('close', () => {
-        if (deviceId) registry.unregister(deviceId)
+        /** 只有当 registry 里这个 device 的 ws 仍是当前关闭的 ws 时才下线。
+         *  若设备已用新 ws 重连，registry 里是新的 ws，此时旧连接关闭不应下线 */
+        const current = registry.get(deviceId)
+        if (current && current.ws === ws) {
+          registry.unregister(deviceId)
+        }
         deviceSockets.delete(ws)
         notifyDeviceListChanged()
       })

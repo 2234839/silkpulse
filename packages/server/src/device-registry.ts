@@ -130,8 +130,16 @@ export class DeviceRegistry {
     for (const l of this.listeners) l(event)
   }
 
-  /** 设备上线 */
+  /** 设备上线（含重连：同 id 复用缓冲区，只更新 ws，不丢历史数据） */
   register(info: DeviceInfo, ws: WebSocket): Device {
+    const existing = this.devices.get(info.id)
+    if (existing) {
+      /** 重连：保留 logs/network/errors 历史，只换连接和元信息 */
+      existing.ws = ws
+      existing.info = { ...info, onlineAt: existing.info.onlineAt }
+      this.emit({ type: 'online', device: existing.info })
+      return existing
+    }
     const device: Device = {
       info,
       ws,

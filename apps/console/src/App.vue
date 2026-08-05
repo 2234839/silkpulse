@@ -73,6 +73,22 @@ const logColor = (type: string): string => {
   return 'text-gray-700'
 }
 
+/** Console 面板：级别筛选 + 搜索 */
+const logLevelFilter = ref<'all' | 'error' | 'warn' | 'info' | 'debug'>('all')
+const logSearch = ref('')
+/** 筛选后的日志（级别 + 关键词） */
+const filteredLogs = computed(() => {
+  let result = logs.value
+  if (logLevelFilter.value !== 'all') {
+    result = result.filter((l) => l.type === logLevelFilter.value)
+  }
+  const q = logSearch.value.trim().toLowerCase()
+  if (q) {
+    result = result.filter((l) => l.message.toLowerCase().includes(q))
+  }
+  return result
+})
+
 /** 选中设备变化时拉取快照 + 清空 network 详情选中 */
 watch(selectedDeviceId, (id) => {
   selectedNetwork.value = null
@@ -180,14 +196,41 @@ onMounted(() => connect())
             </button>
           </nav>
 
-          <!-- Console 面板 -->
-          <div v-if="activeTab === 'console'" class="flex-1 overflow-y-auto p-4 bg-gray-50 font-mono text-sm">
-            <div v-for="(log, i) in logs" :key="i" class="py-0.5 border-b border-gray-100">
-              <span class="text-gray-400 text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
-              <span class="text-gray-400 text-xs mr-2 uppercase">{{ log.type }}</span>
-              <span :class="logColor(log.type)">{{ log.message }}</span>
+          <!-- Console 面板（含级别筛选 + 搜索） -->
+          <div v-if="activeTab === 'console'" class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+            <!-- 工具栏 -->
+            <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white">
+              <div class="flex gap-1">
+                <button
+                  v-for="lvl in (['all', 'error', 'warn', 'info', 'debug'] as const)"
+                  :key="lvl"
+                  @click="logLevelFilter = lvl"
+                  class="px-2 py-0.5 text-xs rounded font-medium"
+                  :class="logLevelFilter === lvl
+                    ? 'bg-gray-800 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                >
+                  {{ lvl === 'all' ? '全部' : lvl.toUpperCase() }}
+                </button>
+              </div>
+              <input
+                v-model="logSearch"
+                placeholder="搜索日志..."
+                class="ml-auto px-2 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-400 w-48"
+              />
+              <span class="text-xs text-gray-400">{{ filteredLogs.length }}/{{ logs.length }}</span>
             </div>
-            <div v-if="logs.length === 0" class="text-gray-400 text-center py-8">暂无日志</div>
+            <!-- 日志列表 -->
+            <div class="flex-1 overflow-y-auto p-4 font-mono text-sm">
+              <div v-for="(log, i) in filteredLogs" :key="i" class="py-0.5 border-b border-gray-100">
+                <span class="text-gray-400 text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+                <span class="text-gray-400 text-xs mr-2 uppercase">{{ log.type }}</span>
+                <span :class="logColor(log.type)">{{ log.message }}</span>
+              </div>
+              <div v-if="filteredLogs.length === 0" class="text-gray-400 text-center py-8">
+                {{ logs.length === 0 ? '暂无日志' : '无匹配日志' }}
+              </div>
+            </div>
           </div>
 
           <!-- Network 面板（主从布局：请求列表 + 详情） -->
