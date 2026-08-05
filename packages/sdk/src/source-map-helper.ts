@@ -16,6 +16,24 @@ import { parseSourceMap, originalPositionFor, type SourceMapData } from './sourc
 const mapCache = new Map<string, SourceMapData | null>()
 
 /**
+ * 带超时的 fetch
+ *
+ * source map 解析中遇到的 fetch（脚本内容 / .map 文件）可能因目标站点慢、跨域挂起、
+ * 服务器无响应而无限期 pending——错误风暴时每个错误都触发一次解析，挂起的 promise 会累积泄漏。
+ * 超时后 AbortController 中止请求，fetch 抛 AbortError，由调用方 catch 走静默回退。
+ */
+const FETCH_TIMEOUT_MS = 8000
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * 从脚本 URL 或源文件 URL 推断 source map URL
  * 策略：
  * 1. 同 URL 加 .map（最常见：app.js → app.js.map）
@@ -46,7 +64,7 @@ function extractSourceMappingUrl(scriptText: string, scriptUrl: string): string 
 async function loadSourceMap(mapUrl: string): Promise<SourceMapData | null> {
   if (mapCache.has(mapUrl)) return mapCache.get(mapUrl) ?? null
   try {
-    const res = await fetch(mapUrl)
+    const res = await fetchWithTimeout(mapUrl)
     if (!res.ok) {
       mapCache.set(mapUrl, null)
       return null
@@ -81,13 +99,13 @@ export async function resolveOriginalPosition(
   /** 先尝试从脚本内容读 sourceMappingURL 注释（最准确），失败则用 .map 猜测 */
   let mapUrl: string | null = null
   try {
-    const res = await fetch(sourceUrl)
+    const res = await fetchWithTimeout(sourceUrl)
     if (res.ok) {
       const text = await res.text()
       mapUrl = extractSourceMappingUrl(text, sourceUrl)
     }
   } catch {
-    /** 跨域无法读脚本内容 —— 回退到 .map 猜测 */
+    /** 跨域无法读脚本内容 / 超时 —— 回退到 .map 猜测 */
   }
   if (!mapUrl) mapUrl = guessMapUrl(sourceUrl)
 
