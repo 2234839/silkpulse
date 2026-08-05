@@ -70,6 +70,16 @@ function fmtTime(ts) {
   return new Date(ts).toLocaleTimeString()
 }
 
+/** 读取 stdin 全部内容（用于 exec 传入复杂多行代码） */
+function readStdin() {
+  return new Promise((resolve) => {
+    let data = ''
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (chunk) => (data += chunk))
+    process.stdin.on('end', () => resolve(data.trim()))
+  })
+}
+
 async function main() {
   switch (cmd) {
     case 'devices': {
@@ -100,7 +110,15 @@ async function main() {
 
     case 'exec': {
       const id = await resolveDeviceId(args[0])
-      const code = args.slice(1).join(' ')
+      /** code 优先来自命令行剩余参数；为空时读 stdin（支持复杂多行代码，避免 shell 转义） */
+      let code = args.slice(1).join(' ')
+      if (!code) {
+        if (process.stdin.isTTY) {
+          console.error('缺少要执行的 code（可在命令行传入，或通过管道：echo "..." | clarosight exec <id>）')
+          process.exit(1)
+        }
+        code = await readStdin()
+      }
       if (!code) {
         console.error('缺少要执行的 code')
         process.exit(1)
@@ -173,6 +191,28 @@ async function main() {
       break
     }
 
+    case 'inject': {
+      const form = args[0] ?? 'snippet'
+      if (form === 'bookmarklet') {
+        const res = await get('/inject/bookmarklet')
+        console.log('将下面这一行拖到浏览器书签栏，在任意页面点击即接入：\n')
+        console.log(await res.text())
+      } else if (form === 'userscript') {
+        const res = await get('/inject/userscript')
+        console.log('将下面内容保存为 .user.js 文件，或直接安装到 Tampermonkey：\n')
+        console.log(await res.text())
+      } else {
+        console.log('SDK 注入方式：')
+        console.log('')
+        console.log('1) script 标签（最常用）：')
+        console.log(`   <script src="${SERVER}/sdk.js" data-server="${SERVER}"></script>`)
+        console.log('')
+        console.log('2) bookmarklet：clarosight inject bookmarklet')
+        console.log('3) userscript： clarosight inject userscript')
+      }
+      break
+    }
+
     case 'help':
     case '--help':
     case '-h':
@@ -186,6 +226,10 @@ async function main() {
   clarosight logs <id> [since]             拉取设备 console 日志
   clarosight network <id> [since]          拉取设备 network 记录
   clarosight errors <id>                   拉取设备错误
+  clarosight inject [bookmarklet|userscript]  生成接入片段
+
+exec 的 code 也可通过 stdin 传入（适合复杂多行代码）：
+  echo "return document.title" | clarosight exec <id>
 
 设备 id 支持前缀模糊匹配。code 作为 async 函数体执行，可写多条语句，用 return 返回值。
 exec code 中可直接用的辅助函数：

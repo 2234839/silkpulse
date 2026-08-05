@@ -183,6 +183,26 @@ async function main() {
       fail(`AI 诊断上下文数据不完整: ${JSON.stringify(aiContext)}`)
     }
 
+    /** 12. bookmarklet 注入 —— 拉取 bookmarklet，在真实页面执行，验证新设备上线 */
+    const beforeCount = (await (await fetch(`${SERVER}/api/devices`)).json()).length
+    const bookmarklet = await (await fetch(`${SERVER}/inject/bookmarklet`)).text()
+    /** bookmarklet 形如 javascript:<encoded>，解码后在目标页面执行 */
+    const bmCode = decodeURIComponent(bookmarklet.replace(/^javascript:/, ''))
+    const bmPage = await browser.newPage()
+    bmPage.on('console', (m) => { if (m.type() === 'error') console.log('  [bm console.error]', m.text()) })
+    bmPage.on('pageerror', (e) => console.log('  [bm pageerror]', e.message))
+    /** 用一个同源的真实页面（/demo 会自动注入，这里用 server 根控制台页验证"二次注入被防重"不阻断 bookmarklet 自身）
+     *  真正验证 bookmarklet：用一个不含 SDK 的独立 HTML 页面 */
+    await bmPage.goto(`${SERVER}/inject-test`, { waitUntil: 'domcontentloaded' })
+    await bmPage.evaluate(bmCode)
+    await new Promise((r) => setTimeout(r, 2000))
+    const afterCount = (await (await fetch(`${SERVER}/api/devices`)).json()).length
+    if (afterCount > beforeCount) {
+      ok(`bookmarklet 注入成功（设备数 ${beforeCount} → ${afterCount}）`)
+    } else {
+      fail(`bookmarklet 注入未上线新设备（${beforeCount} → ${afterCount}）`)
+    }
+
     console.log(`\n========== 测试完成：${step - failed} 通过，${failed} 失败 ==========`)
   } catch (e) {
     fail('测试中断', e)

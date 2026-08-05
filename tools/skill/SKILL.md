@@ -30,9 +30,16 @@ node tools/skill/scripts/clarosight.mjs logs <deviceId>
 
 # 4. 在远程页面执行诊断代码
 node tools/skill/scripts/clarosight.mjs exec <deviceId> "return document.querySelector('#btn').textContent"
+
+# 复杂多行代码用管道传入（避免 shell 转义）
+echo 'return { url: location.href, btn: document.querySelector("#btn")?.textContent }' | node tools/skill/scripts/clarosight.mjs exec <deviceId>
+
+# 5. 生成接入片段（给新设备装 SDK）
+node tools/skill/scripts/clarosight.mjs inject bookmarklet   # 书签
+node tools/skill/scripts/clarosight.mjs inject userscript    # Tampermonkey
 ```
 
-设备 id 支持前缀模糊匹配，输入前几个字符即可。
+设备 id 支持前缀模糊匹配，输入前几个字符即可。exec 的 code 也支持通过 stdin 传入（适合复杂多行代码）。
 
 ## 典型诊断流程
 

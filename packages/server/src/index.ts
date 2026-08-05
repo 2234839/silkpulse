@@ -80,6 +80,26 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       }
     }
 
+    /** 5. /inject/* —— 多形态注入（bookmarklet / userscript），让不方便改源码的线上站也能接入 */
+    if (pathname === '/inject/bookmarklet' || pathname === '/inject/userscript') {
+      const origin = `http://localhost:${port}`
+      if (pathname === '/inject/bookmarklet') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end(buildBookmarklet(origin))
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
+        res.end(buildUserscript(origin))
+      }
+      return
+    }
+
+    /** 6. /inject-test —— 不含 SDK 的干净页面（测试 bookmarklet/userscript 注入效果） */
+    if (pathname === '/inject-test') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>inject 测试页</title></head><body><h1>空白测试页</h1><p>用于验证 bookmarklet/userscript 注入</p></body></html>`)
+      return
+    }
+
     /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -150,4 +170,39 @@ function controlUnavailableHtml(): string {
 <p>SDK 接入：在目标页面注入 <code>&lt;script src="/sdk.js"&gt;&lt;/script&gt;</code></p>
 <p>HTTP API：<code>GET /api/devices</code> 查看在线设备</p>
 </body></html>`
+}
+
+/**
+ * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
+ * 防重复注入（同页面多次点 bookmarklet 只生效一次）
+ */
+function injectScriptCode(origin: string): string {
+  return `(function(){var k='__clarosight_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';s.dataset.server='${origin}';document.head.appendChild(s);})();`
+}
+
+/**
+ * 构建 bookmarklet —— 拖到书签栏，在任意页面点击即注入
+ */
+function buildBookmarklet(origin: string): string {
+  const code = injectScriptCode(origin)
+  /** bookmarklet 需要 URL 编码特殊字符 */
+  return `javascript:${encodeURIComponent(code)}`
+}
+
+/**
+ * 构建 Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入
+ */
+function buildUserscript(origin: string): string {
+  const code = injectScriptCode(origin)
+  return `// ==UserScript==
+// @name         clarosight 远程调试注入
+// @namespace    clarosight
+// @version      0.1.0
+// @description  自动注入 clarosight SDK，将当前页面接入远程调试
+// @match        *://*/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+(function(){${code}})();
+`
 }

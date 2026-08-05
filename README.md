@@ -50,11 +50,19 @@ pnpm start    # 默认端口 8080
 
 ### 接入远程设备
 
-在目标页面注入 SDK：
+**方式一：script 标签**（最常用，能改源码时）
 
 ```html
 <script src="http://localhost:8080/sdk.js" data-server="http://localhost:8080"></script>
 ```
+
+**方式二：bookmarklet**（线上站不便改源码时）
+
+访问 `http://localhost:8080/inject/bookmarklet`，将输出的 `javascript:` 链接拖到浏览器书签栏，在任意页面点击即接入。
+
+**方式三：userscript**（Tampermonkey/Greasemonkey）
+
+访问 `http://localhost:8080/inject/userscript`，保存为 `.user.js` 安装到油猴，自动匹配所有页面注入。
 
 ### AI 接入（skill）
 
