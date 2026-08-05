@@ -13,7 +13,7 @@ import type { DeviceInfo, ServerToDeviceMessage, LogEntry, NetworkEntry, ErrorEn
 import { connect, send, onMessage, disconnect } from './ws-client.js'
 import { installLogCollector } from './log-collector.js'
 import { installNetworkCollector } from './network-collector.js'
-import { installErrorCatcher, getErrorCount } from './error-catcher.js'
+import { installErrorCatcher, getErrorCount, setResourceErrorHandler } from './error-catcher.js'
 import { pushRecentError } from './snapshot.js'
 import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
 
@@ -102,6 +102,9 @@ export function init(options: InitOptions): void {
     pushRecentError(entry.message)
     send({ type: 'error', error: entry })
   })
+  /** 资源加载失败（404 图片/脚本等）转给 snapshot 的 recentErrors，
+   *  不进 error 流、不计 errorCount，避免一个 404 资源就让设备亮红条误导诊断 */
+  setResourceErrorHandler((msg) => pushRecentError(msg))
 
   /** 2. 安装 exec 辅助函数（必须在 connect 前挂到 window） */
   installHelpers()

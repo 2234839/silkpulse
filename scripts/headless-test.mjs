@@ -260,6 +260,40 @@ async function main() {
     if (errors.length >= 1) ok(`error 采集成功（${errors.length} 条${hasPromiseError ? '，含 Promise rejection' : ''}）`)
     else fail(`error 采集异常: 未捕获到错误`)
 
+    /** 8.5 资源加载失败不应计入 errorCount（避免 404 图片误导诊断） */
+    {
+      /** 记录触发前的 errorCount */
+      const beforeDeviceInfo = await (await fetch(`${SERVER}/api/devices`)).json()
+      const errCountBefore = beforeDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
+      const errsBefore = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+
+      /** 注入 3 个 404 资源（img / script / link） */
+      await testPage.evaluate(() => {
+        const img = document.createElement('img')
+        img.src = '/not-exist-resource.png'
+        document.body.appendChild(img)
+        const script = document.createElement('script')
+        script.src = '/not-exist-resource.js'
+        document.body.appendChild(script)
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = '/not-exist-resource.css'
+        document.head.appendChild(link)
+      })
+      await new Promise((r) => setTimeout(r, 1200))
+
+      /** 验证 errorCount 和 errors 数量都没增长 */
+      const afterDeviceInfo = await (await fetch(`${SERVER}/api/devices`)).json()
+      const errCountAfter = afterDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
+      const errsAfter = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+
+      if (errCountAfter === errCountBefore && errsAfter === errsBefore) {
+        ok(`资源加载失败不计入 errorCount（${errCountBefore}→${errCountAfter}，errors ${errsBefore}→${errsAfter}）`)
+      } else {
+        fail(`资源错误被误计入：errorCount ${errCountBefore}→${errCountAfter}，errors ${errsBefore}→${errsAfter}`)
+      }
+    }
+
     /** 9. 控制台 WS 实时推送（选中设备后能看到日志） */
     const seen = await consolePage.evaluate(async (deviceId) => {
       const ws = new WebSocket(`ws://${location.host}/ws/console`)
