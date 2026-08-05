@@ -75,7 +75,8 @@ async function openAiContext() {
 }
 
 /** 当前激活的面板 */
-const activeTab = ref<'console' | 'network' | 'errors' | 'snapshot'>('console')
+/** 当前激活的面板 */
+const activeTab = ref<'console' | 'network' | 'errors' | 'snapshot' | 'exec'>('console')
 
 /** 日志级别 → tailwind 颜色 */
 const logColor = (type: string): string => {
@@ -88,6 +89,38 @@ const logColor = (type: string): string => {
 /** Console 面板：级别筛选 + 搜索 */
 const logLevelFilter = ref<'all' | 'error' | 'warn' | 'info' | 'debug'>('all')
 const logSearch = ref('')
+
+/** Exec 面板：在控制台直接执行诊断代码 */
+const execCode = ref('return document.title')
+const execResult = ref('')
+const execRunning = ref(false)
+
+/** 执行诊断代码 */
+async function runExec() {
+  if (!selectedDeviceId.value || execRunning.value) return
+  execRunning.value = true
+  execResult.value = '执行中...'
+  try {
+    const res = await fetch(`/api/devices/${selectedDeviceId.value}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: execCode.value }),
+    })
+    const data = await res.json()
+    if (data.success) {
+      const parts = [`=== 返回值 ===`, data.result ?? 'undefined']
+      if (data.logs?.length) parts.push('', '=== 执行期间日志 ===', ...data.logs)
+      if (data.snapshotText) parts.push('', '=== 执行后快照 ===', data.snapshotText)
+      execResult.value = parts.join('\n')
+    } else {
+      execResult.value = `✗ 执行失败: ${data.error}`
+    }
+  } catch (e) {
+    execResult.value = `✗ 请求失败: ${e instanceof Error ? e.message : String(e)}`
+  } finally {
+    execRunning.value = false
+  }
+}
 /** 筛选后的日志（级别 + 关键词） */
 const filteredLogs = computed(() => {
   let result = logs.value
@@ -202,7 +235,7 @@ onMounted(() => connect())
           <!-- Tab 栏 -->
           <nav class="flex border-b border-gray-200 bg-white">
             <button
-              v-for="tab in (['console', 'network', 'errors', 'snapshot'] as const)"
+              v-for="tab in (['console', 'network', 'errors', 'snapshot', 'exec'] as const)"
               :key="tab"
               @click="activeTab = tab"
               class="px-4 py-2 text-sm font-medium border-b-2"
@@ -210,7 +243,7 @@ onMounted(() => connect())
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'"
             >
-              {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : 'Snapshot' }}
+              {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : 'Exec' }}
             </button>
             <button
               v-if="activeTab === 'snapshot'"
@@ -348,9 +381,39 @@ onMounted(() => connect())
           </div>
 
           <!-- Snapshot 面板 -->
-          <div v-else class="flex-1 overflow-y-auto p-4 bg-gray-50">
+          <div v-else-if="activeTab === 'snapshot'" class="flex-1 overflow-y-auto p-4 bg-gray-50">
             <div v-if="snapLoading" class="text-gray-400 text-center py-8">加载中...</div>
             <pre v-else class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ snapshotText }}</pre>
+          </div>
+
+          <!-- Exec 面板（在控制台直接执行诊断代码） -->
+          <div v-else-if="activeTab === 'exec'" class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+            <!-- 代码编辑区 -->
+            <div class="p-3 border-b border-gray-200 bg-white">
+              <textarea
+                v-model="execCode"
+                rows="4"
+                placeholder="输入诊断代码，如：return document.title"
+                class="w-full text-xs font-mono p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-400 resize-y"
+                @keydown.ctrl.enter="runExec"
+                @keydown.meta.enter="runExec"
+              />
+              <div class="flex items-center gap-2 mt-2">
+                <button
+                  @click="runExec"
+                  :disabled="execRunning"
+                  class="px-3 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {{ execRunning ? '执行中...' : '执行 (Ctrl+↵)' }}
+                </button>
+                <span class="text-xs text-gray-400">辅助函数：__clarosight_click / setValue / type / wait / snapshot</span>
+              </div>
+            </div>
+            <!-- 结果展示区 -->
+            <div class="flex-1 overflow-y-auto p-3">
+              <pre v-if="execResult" class="text-xs font-mono text-gray-700 whitespace-pre-wrap">{{ execResult }}</pre>
+              <div v-else class="text-gray-400 text-center py-8 text-sm">输入代码后点击执行</div>
+            </div>
           </div>
         </template>
 
