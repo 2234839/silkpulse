@@ -509,6 +509,7 @@ onMounted(() => connect())
                 <table class="w-full text-sm">
                   <thead class="bg-elevated text-secondary text-xs uppercase sticky top-0">
                     <tr>
+                      <th class="text-left px-3 py-2">时间</th>
                       <th class="text-left px-3 py-2">方法</th>
                       <th class="text-left px-3 py-2">状态</th>
                       <th class="text-left px-3 py-2">URL</th>
@@ -523,6 +524,7 @@ onMounted(() => connect())
                       class="border-b border-light cursor-pointer hover:bg-blue-soft"
                       :class="selectedNetwork === n ? 'bg-blue-soft' : ''"
                     >
+                      <td class="px-3 py-2 text-faint text-xs font-mono whitespace-nowrap">{{ new Date(n.timestamp).toLocaleTimeString() }}</td>
                       <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
                       <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
                         {{ n.status || '—' }}
@@ -553,6 +555,7 @@ onMounted(() => connect())
                     <div class="text-sm font-mono text-primary break-all bg-surface p-2 rounded border border-base">{{ selectedNetwork.url }}</div>
                   </div>
                   <div class="flex gap-6 text-sm">
+                    <div><span class="text-faint">时间：</span><span class="font-mono text-primary">{{ new Date(selectedNetwork.timestamp).toLocaleString() }}</span></div>
                     <div><span class="text-faint">方法：</span><span class="font-mono text-primary">{{ selectedNetwork.method }}</span></div>
                     <div>
                       <span class="text-faint">状态：</span>

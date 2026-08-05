@@ -876,6 +876,22 @@ async function main() {
       } else {
         fail(`网络搜索过滤异常：总数=${totalNet} 过滤后=${filteredNetCount}`)
       }
+
+      /** 20.1 network 列表时间戳列 —— 诊断时序问题时需看请求时刻 */
+      const hasTimeCol = await consolePage.evaluate(() => {
+        const ths = Array.from(document.querySelectorAll('thead th'))
+        const hasHeader = ths.some((th) => th.textContent.trim() === '时间')
+        /** 首行首个 td 应是时间格式（HH:MM:SS） */
+        const firstTd = document.querySelector('tbody tr td')
+        const timeText = firstTd ? firstTd.textContent.trim() : ''
+        const isTime = /^\d{1,2}:\d{2}:\d{2}/.test(timeText)
+        return hasHeader && isTime
+      })
+      if (hasTimeCol) {
+        ok(`network 列表含时间戳列（表头"时间" + 首行时间格式）`)
+      } else {
+        fail(`network 列表缺时间戳列`)
+      }
     }
 
     /** 21. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
