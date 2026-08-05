@@ -45,6 +45,18 @@ const deviceTypeIcon = (t: string): string => {
 /** network 面板：选中的请求条目（点击展开详情） */
 const selectedNetwork = ref<NetworkEntry | null>(null)
 
+/** 设备列表搜索（按标题/URL/类型 筛选） */
+const deviceSearch = ref('')
+const filteredDevices = computed(() => {
+  const q = deviceSearch.value.trim().toLowerCase()
+  if (!q) return devices.value
+  return devices.value.filter((d) =>
+    d.title.toLowerCase().includes(q)
+    || d.url.toLowerCase().includes(q)
+    || (d.deviceType ?? '').toLowerCase().includes(q)
+  )
+})
+
 /** AI 诊断弹窗 */
 const showAiModal = ref(false)
 
@@ -141,32 +153,45 @@ onMounted(() => connect())
 
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧：设备列表 -->
-      <aside class="w-72 border-r border-gray-200 bg-white overflow-y-auto">
+      <aside class="w-72 border-r border-gray-200 bg-white overflow-y-auto flex flex-col">
         <div class="px-4 py-3 border-b border-gray-200">
           <h2 class="text-sm font-semibold text-gray-700">
             在线设备
             <span class="text-gray-400 font-normal">({{ devices.length }})</span>
           </h2>
+          <input
+            v-model="deviceSearch"
+            placeholder="搜索设备（标题/URL/类型）..."
+            class="mt-2 w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-400"
+          />
         </div>
         <ul>
           <li
-            v-for="d in devices"
+            v-for="d in filteredDevices"
             :key="d.id"
             @click="selectDevice(d.id)"
-            class="px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+            class="px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 relative"
             :class="selectedDeviceId === d.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''"
           >
+            <!-- 有错误时左侧红条 -->
+            <span
+              v-if="d.errorCount > 0"
+              class="absolute left-0 top-0 bottom-0 w-1 bg-red-400"
+            />
             <div class="text-sm font-medium text-gray-800 truncate">
               <span class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
             </div>
             <div class="text-xs text-gray-500 truncate">{{ d.url }}</div>
             <div class="flex items-center gap-2 mt-1">
               <span class="text-xs text-gray-400">{{ d.deviceType }} · {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
-              <span v-if="d.errorCount > 0" class="text-xs text-red-500">{{ d.errorCount }} 错误</span>
+              <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium">{{ d.errorCount }} 错误</span>
             </div>
           </li>
           <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
             暂无在线设备
+          </li>
+          <li v-else-if="filteredDevices.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
+            无匹配设备
           </li>
         </ul>
       </aside>

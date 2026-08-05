@@ -143,6 +143,8 @@ export function setupWebSocket(
               deviceId,
               error: msg.error,
             })
+            /** 错误数变化会改变设备列表状态（红条/计数），推送更新 */
+            notifyDeviceListChanged()
             break
           }
           case 'snapshot': {

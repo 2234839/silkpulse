@@ -203,6 +203,29 @@ async function main() {
       fail(`多设备并发异常（期望 ≥2，实际 ${devicesList.length}）`)
     }
 
+    /** 10.1 设备搜索 —— 控制台搜索框筛选设备列表 */
+    const searchResult = await consolePage.evaluate(async (q) => {
+      const input = document.querySelector('input[placeholder*="搜索设备"]')
+      if (!input) return { error: '无搜索框' }
+      input.value = q
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise((r) => setTimeout(r, 300))
+      const visibleLis = document.querySelectorAll('ul li').length
+      return { visibleLis }
+    }, 'clarosight')
+    if (searchResult.visibleLis >= 2) {
+      ok(`控制台设备搜索生效（搜索 "clarosight" 匹配 ${searchResult.visibleLis} 个）`)
+    } else {
+      fail(`设备搜索异常: ${JSON.stringify(searchResult)}`)
+    }
+
+    /** 10.2 清空搜索 */
+    await consolePage.evaluate(() => {
+      const input = document.querySelector('input[placeholder*="搜索设备"]')
+      if (input) { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })) }
+    })
+    await new Promise((r) => setTimeout(r, 300))
+
     /** 11. AI 诊断上下文 —— 控制台"复制 AI 诊断上下文"按钮 */
     /** 先在测试页触发错误和网络请求，制造诊断现场 */
     await testPage.evaluate(() => document.getElementById('runtime-error-btn')?.click())

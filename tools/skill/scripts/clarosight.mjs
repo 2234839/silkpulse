@@ -88,14 +88,22 @@ async function main() {
         console.log('（暂无在线设备。接入方式：在目标页面注入 <script src="' + SERVER + '/sdk.js"></script>）')
         return
       }
-      console.log(`在线设备 ${devices.length} 个：\n`)
-      for (const d of devices) {
-        console.log(`  [${d.id}]`)
-        console.log(`    标题: ${d.title}`)
-        console.log(`    URL:  ${d.url}`)
-        console.log(`    类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}`)
-        console.log(`    UA:   ${d.userAgent.slice(0, 80)}`)
-        if (d.errorCount > 0) console.log(`    ⚠ 错误数: ${d.errorCount}`)
+      /** 按错误数降序排序：有错误的设备优先展示，AI 能快速定位问题设备 */
+      const sorted = [...devices].sort((a, b) => (b.errorCount ?? 0) - (a.errorCount ?? 0))
+      const errorDevices = sorted.filter((d) => d.errorCount > 0)
+      if (errorDevices.length > 0) {
+        console.log(`⚠ ${errorDevices.length} 个设备有错误（已置顶）：\n`)
+      } else {
+        console.log(`在线设备 ${devices.length} 个：\n`)
+      }
+      for (const d of sorted) {
+        const mark = d.errorCount > 0 ? '⚠' : ' '
+        console.log(`  ${mark} [${d.id}]`)
+        console.log(`       标题: ${d.title}`)
+        console.log(`       URL:  ${d.url}`)
+        console.log(`       类型: ${d.deviceType ?? 'unknown'} · ${d.viewportWidth}×${d.viewportHeight}`)
+        console.log(`       UA:   ${d.userAgent.slice(0, 80)}`)
+        if (d.errorCount > 0) console.log(`       错误数: ${d.errorCount}`)
         console.log('')
       }
       break
