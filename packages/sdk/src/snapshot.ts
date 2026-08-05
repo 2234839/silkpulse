@@ -214,9 +214,23 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
     } else if (tagLower === 'select') {
       const sel = el as HTMLSelectElement
       const selOpt = sel.options[sel.selectedIndex]
-      if (selOpt) entry.value = selOpt.text.slice(0, 60)
+      /**
+       * select 的 value 输出 value:text 格式
+       *
+       * AI 操作 select 需要知道 option 的 value（__clarosight_setValue 传 value），
+       * 但纯 value（如 "bj"）无语义，需配 text（"北京"）让 AI 理解含义。
+       * 格式 "bj:北京" 兼顾两者——AI 看到 val=bj:北京 知道当前选"北京"，
+       * setValue(idx, "bj") 可切换。
+       */
+      if (selOpt) entry.value = `${selOpt.value}:${selOpt.text}`.slice(0, 60)
+      /**
+       * options 同样用 value:text 格式，让 AI 知道每个选项的 value 和 label。
+       * 若 value 和 text 相同（无 value 属性的 option），只输出 text 省空间。
+       */
       if (sel.options.length > 0 && sel.options.length <= 10) {
-        entry.options = Array.from(sel.options, (o) => o.text)
+        entry.options = Array.from(sel.options, (o) =>
+          o.value && o.value !== o.text ? `${o.value}:${o.text}` : o.text,
+        )
       }
     } else {
       if (htmlEl.value) entry.value = htmlEl.value.slice(0, 60)

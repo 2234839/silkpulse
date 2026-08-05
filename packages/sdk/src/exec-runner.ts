@@ -54,14 +54,22 @@ export function installHelpers(): void {
   const w = window as unknown as Record<string, unknown>
 
   /**
-   * 用原生 setter 设置 input/textarea 的 value
+   * 用原生 setter 设置 input/textarea/select 的 value
    *
    * 直接 el.value = x 在 React 等框架的受控组件上不生效（框架覆盖了 setter）。
-   * 用原型链上的原生 setter（HTMLInputElement.prototype.value 的 setter）绕过。
+   * 用原型链上的原生 setter（各元素 prototype 上的 value setter）绕过。
    * setValue 和 type 共用此 helper，确保两者在 React/Vue 上行为一致。
+   * select 走 HTMLSelectElement.prototype.value 的 setter。
    */
-  const setNativeValue = (el: HTMLInputElement | HTMLTextAreaElement, val: string): void => {
-    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  const setNativeValue = (el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, val: string): void => {
+    let proto: object
+    if (el.tagName === 'TEXTAREA') {
+      proto = HTMLTextAreaElement.prototype
+    } else if (el.tagName === 'SELECT') {
+      proto = HTMLSelectElement.prototype
+    } else {
+      proto = HTMLInputElement.prototype
+    }
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
     if (setter) {
       setter.call(el, val)
@@ -78,11 +86,18 @@ export function installHelpers(): void {
     return true
   }
 
-  /** 设置表单值（触发 input 事件，兼容 Vue/React v-model） */
+  /**
+   * 设置表单值（触发 input/change 事件，兼容 Vue/React v-model）
+   *
+   * 支持 input / textarea / select 三类表单元素：
+   * - input/textarea：用原生 value setter（React 受控组件兼容），触发 input + change
+   * - select：设 .value（匹配 option 的 value），触发 change（select 的框架事件是 change 非 input）
+   */
   w.__clarosight_setValue = (idx: number, val: string): boolean => {
-    const el = getElement(idx) as HTMLInputElement | undefined
+    const el = getElement(idx) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined
     if (!el) return false
     setNativeValue(el, val)
+    /** select 主要监听 change；input/textarea 主要监听 input。两种都触发，覆盖所有框架约定 */
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
     return true

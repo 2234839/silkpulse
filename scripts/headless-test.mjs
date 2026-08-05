@@ -205,6 +205,47 @@ async function main() {
     } else fail('snapshot 未找到搜索框 idx')
 
     /**
+     * 5.15 exec + __clarosight_setValue 对 select 元素
+     *
+     * select 的 value setter 在 HTMLSelectElement.prototype 上（非 HTMLInputElement），
+     * 之前 setNativeValue 只查 input/textarea 的原型，select 上设值无效。
+     * 验证 setValue 后 select.value 正确变更 + change 事件触发（console 有"选择城市"日志）。
+     */
+    {
+      const selectSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      /**
+       * select 是交互元素，id 不输出到 compact 文本。
+       * options 用 value:text 格式（bj:北京|sh:上海|gz:广州），用此特征定位 idx。
+       * 验证 value:text 格式让 AI 知道 option 的 value（setValue 需要）。
+       */
+      const selectMatch = selectSnap.match(/select #(\d+)[^\n]*<bj:北京\|sh:上海\|gz:广州>/)
+      /** 验证当前选中值也是 value:text 格式（check= 或 val= 前缀，取决于序列化逻辑） */
+      const hasValueFormat = /select #\d+ (?:check|val)=bj:北京/.test(selectSnap)
+      if (selectMatch) {
+        const selectIdx = selectMatch[1]
+        /** 记录 setValue 前的日志数，验证 change 事件触发新日志 */
+        const logsBefore = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+        const logsBeforeCount = logsBefore.length
+        /** setValue 上海（"sh"），返回 select.value 确认写入 */
+        const setRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: `__clarosight_setValue(${selectIdx}, "sh"); return document.querySelector("#city-select").value` }),
+        })).json()
+        await new Promise((r) => setTimeout(r, 500))
+        /** setValue 后应有新的"选择城市: sh"日志（change 事件触发的 console.log） */
+        const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+        const hasCityLog = logsAfter.slice(logsAfter.length - logsBeforeCount > 0 ? logsAfter.length - 10 : 0).some((l) => l.message.includes('选择城市') && l.message.includes('sh'))
+        const resultStr = setRes.result ?? ''
+        if (selectMatch && hasValueFormat && setRes.success && resultStr.includes('sh') && hasCityLog) {
+          ok(`exec + __clarosight_setValue(${selectIdx}, "sh") 对 select 生效（value="${resultStr.replace(/"/g, '')}"，change 事件触发 ✓，快照 options 含 value:text ✓）`)
+        } else {
+          fail(`exec setValue(select) 异常: value=${resultStr}，change日志=${hasCityLog}，options格式=${hasValueFormat}`)
+        }
+      } else fail('snapshot 未找到 city-select idx')
+    }
+
+    /**
      * 5.2 快照表单状态采集 —— disabled/readonly/required/indeterminate/aria-disabled/aria-expanded
      *
      * AI 诊断远程表单问题（"按钮为什么点不了""表单为什么提交失败"）时，
