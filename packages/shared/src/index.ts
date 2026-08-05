@@ -12,6 +12,7 @@ export type DeviceMessage =
   | { type: 'register'; device: DeviceInfo }
   | { type: 'update-info'; device: Partial<DeviceInfo> & Pick<DeviceInfo, 'id'> }
   | { type: 'log'; log: LogEntry }
+  | { type: 'log-repeat' }
   | { type: 'network'; entry: NetworkEntry }
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
@@ -27,6 +28,7 @@ export type ServerToConsoleMessage =
   | { type: 'device-offline'; deviceId: string }
   | { type: 'device-list'; devices: DeviceInfo[] }
   | { type: 'log'; deviceId: string; log: LogEntry }
+  | { type: 'log-repeat'; deviceId: string }
   | { type: 'network'; deviceId: string; entry: NetworkEntry }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
 
@@ -94,6 +96,14 @@ export interface LogEntry {
   type: 'info' | 'warn' | 'error' | 'debug'
   /** 序列化后的消息文本 */
   message: string
+  /**
+   * 连续重复次数（仅当 >1 时存在）
+   *
+   * 页面循环/spam 同一条日志时，SDK 聚合为一条 + repeat 计数，
+   * 避免重复日志占满环形缓冲区、挤掉有价值的诊断日志。
+   * 与 Chrome DevTools 的重复日志 ⓧN 行为一致。
+   */
+  repeat?: number
 }
 
 /** network 请求条目（HAR 风格，借鉴 PageSpy） */

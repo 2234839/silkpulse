@@ -12,6 +12,8 @@ import type { LogEntry } from '@clarosight/shared'
 
 /** 单条日志的内部收集回调 */
 type LogSink = (entry: LogEntry) => void
+/** 连续重复日志的回调（无 payload，语义：最后一条日志又重复了一次） */
+type RepeatSink = () => void
 
 /**
  * exec 期间日志队列上限
@@ -127,9 +129,13 @@ let droppedTimer: ReturnType<typeof setInterval> | null = null
 /**
  * 安装 console 劫持
  * @param sink 每条日志的接收回调（由 index 传入，负责 WS 上报）
+ * @param repeatSink 连续重复日志回调（最后一条日志又重复一次时触发）
  */
-export function installLogCollector(sink: LogSink): void {
+export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void {
   limiter = new RateLimiter(50)
+  /** 上一条放行上报的日志（type+message），用于检测连续重复 */
+  let lastType: LogEntry['type'] | null = null
+  let lastMessage = ''
   /** 限流汇总上报：每秒检查一次，有丢弃则发一条提示 */
   droppedReporter = (count: number) => {
     const entry: LogEntry = {
@@ -175,6 +181,19 @@ export function installLogCollector(sink: LogSink): void {
 
       /** 上报前限流（error 不限流） */
       if (limiter && limiter.check(type) === 'drop') return
+
+      /**
+       * 连续重复日志聚合（error 不参与，每条 error 都重要）。
+       * 与上一条 type+message 完全相同 → 不新增条目，只通知"重复 +1"；
+       * 不同 → 更新 last 并作为新条目上报。
+       * 避免 setInterval/循环里的 spam 日志占满缓冲区挤掉有价值的诊断日志。
+       */
+      if (type !== 'error' && lastType === type && lastMessage === message) {
+        repeatSink()
+        return
+      }
+      lastType = type
+      lastMessage = message
 
       const entry: LogEntry = {
         timestamp: new Date().toISOString(),

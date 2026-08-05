@@ -96,7 +96,10 @@ export function init(options: InitOptions): void {
   const wsUrl = `${wsBase.replace(/\/$/, '')}/ws/device`
 
   /** 1. 装配采集器，每个 collector 的 sink → WS 上报 */
-  installLogCollector((entry: LogEntry) => send({ type: 'log', log: entry }))
+  installLogCollector(
+    (entry: LogEntry) => send({ type: 'log', log: entry }),
+    () => send({ type: 'log-repeat' }),
+  )
   installNetworkCollector((entry: NetworkEntry) => send({ type: 'network', entry }))
   installErrorCatcher((entry: ErrorEntry) => {
     pushRecentError(entry.message)

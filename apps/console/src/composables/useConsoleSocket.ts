@@ -123,6 +123,17 @@ export function useConsoleSocket() {
           logs.value = [...logs.value, msg.log].slice(-200)
         }
         break
+      case 'log-repeat': {
+        /** 连续重复日志：最后一条 repeat +1（浅拷贝触发 shallowRef 响应式） */
+        if (msg.deviceId === selectedDeviceId.value && logs.value.length > 0) {
+          const arr = logs.value.slice()
+          const lastIdx = arr.length - 1
+          const last = arr[lastIdx]
+          arr[lastIdx] = { ...last, repeat: (last.repeat ?? 1) + 1 }
+          logs.value = arr
+        }
+        break
+      }
       case 'network':
         if (msg.deviceId === selectedDeviceId.value) {
           network.value = [...network.value, msg.entry].slice(-50)

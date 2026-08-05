@@ -145,6 +145,20 @@ export function setupWebSocket(
             broadcast(deviceId, { type: 'log', deviceId, log: msg.log })
             break
           }
+          case 'log-repeat': {
+            /**
+             * 连续重复日志：最后一条 repeat +1（不发新条目）。
+             * SDK 检测到与上一条 type+message 完全相同时不发 log，只发 log-repeat，
+             * 避免循环/spam 日志占满环形缓冲区挤掉有价值的诊断日志。
+             */
+            if (!device) return
+            const last = device.logs.last()
+            if (last) {
+              last.repeat = (last.repeat ?? 1) + 1
+              broadcast(deviceId, { type: 'log-repeat', deviceId })
+            }
+            break
+          }
           case 'network': {
             if (!device) return
             device.network.push(msg.entry)

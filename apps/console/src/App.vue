@@ -765,6 +765,7 @@ onMounted(() => connect())
                 <span class="text-faint text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
                 <span class="text-faint text-xs mr-2 uppercase">{{ log.type }}</span>
                 <span :class="logColor(log.type)" class="break-all">{{ log.message }}</span>
+                <span v-if="log.repeat" class="text-[10px] text-faint ml-1 shrink-0">×{{ log.repeat }}</span>
                 <span class="text-[10px] text-blue-key opacity-0 group-hover:opacity-60 ml-1">{{ copyingLogTs === log.timestamp ? '✓' : '复制' }}</span>
               </div>
               <div v-if="filteredLogs.length === 0" class="text-faint text-center py-8">

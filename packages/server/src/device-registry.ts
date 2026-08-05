@@ -53,6 +53,11 @@ class RingBuffer<T> {
     return item
   }
 
+  /** 取最后一条（无数据返回 undefined）—— 连续重复日志聚合用 */
+  last(): T | undefined {
+    return this.items[this.items.length - 1]
+  }
+
   /** 返回序号 > since 的所有条目 */
   since(since: number): T[] {
     if (!since) return this.all()

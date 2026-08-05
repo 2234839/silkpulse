@@ -94,6 +94,11 @@
   </div>
 
   <div class="demo">
+    <h3>日志 spam（验证连续重复日志聚合）</h3>
+    <button id="spam-log-btn">连续输出相同日志 ×10</button>
+  </div>
+
+  <div class="demo">
     <h3>输出</h3>
     <div id="log">（点击按钮试试）</div>
   </div>
@@ -283,6 +288,16 @@
     document.getElementById('promise-error-btn').addEventListener('click', () => {
       show('已触发 Promise 错误')
       Promise.reject(new Error('clarosight 测试：未处理的 Promise 错误'))
+    })
+
+    /**
+     * 连续重复日志：同步输出 10 条完全相同的日志。
+     * 验证 SDK 连续重复聚合：应只上报 1 条 + repeat=9，而非 10 条占满缓冲区。
+     */
+    document.getElementById('spam-log-btn').addEventListener('click', () => {
+      for (let i = 0; i < 10; i++) {
+        console.log('clarosight spam: 重复日志测试')
+      }
     })
 
     /** 设置 checkbox 半选状态（indeterminate 只能通过 JS 设置，HTML 属性无效） */

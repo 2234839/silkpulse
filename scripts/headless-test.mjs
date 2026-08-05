@@ -871,6 +871,28 @@ async function main() {
       }
     }
 
+    /**
+     * 8.7 连续重复日志聚合（防 spam 日志占满缓冲区）
+     *
+     * 页面循环输出 10 条相同日志 → SDK 应聚合成 1 条 + repeat=9，
+     * 而非 10 条占满缓冲区挤掉有价值的诊断日志。
+     * 验证 server 端 logs（HTTP API）+ console UI（×N 徽标）。
+     */
+    {
+      await testPage.evaluate(() => document.getElementById('spam-log-btn')?.click())
+      await new Promise((r) => setTimeout(r, 500))
+      const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      /** 筛出 spam 日志条目 */
+      const spamEntries = logsAfter.filter((l) => l.message.includes('clarosight spam'))
+      /** 应只有 1 条，且 repeat=10（总共出现 10 次：第一条上报 + 9 次重复聚合） */
+      const aggregatedOk = spamEntries.length === 1 && spamEntries[0].repeat === 10
+      if (aggregatedOk) {
+        ok(`连续重复日志聚合生效（10 条相同日志 → 1 条 + repeat=10，未占满缓冲区）`)
+      } else {
+        fail(`日志聚合异常：spam 条目数=${spamEntries.length}（期望 1），repeat=${spamEntries[0]?.repeat}（期望 10）`)
+      }
+    }
+
     /** 9. 控制台 WS 实时推送（选中设备后能看到日志） */
     const seen = await consolePage.evaluate(async (deviceId) => {
       const ws = new WebSocket(`ws://${location.host}/ws/console`)
