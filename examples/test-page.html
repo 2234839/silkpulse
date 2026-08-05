@@ -52,6 +52,19 @@
   </div>
 
   <div class="demo">
+    <h3>滚动 + hover（验证 __clarosight_scroll / __clarosight_hover）</h3>
+    <div id="scroll-box" style="height:100px;overflow:auto;border:1px solid #ccc;padding:8px;">
+      <div id="scroll-content">
+        <p>滚动行 1</p><p>滚动行 2</p><p>滚动行 3</p>
+        <p>滚动行 4</p><p>滚动行 5</p><p>滚动行 6</p>
+        <p>滚动行 7（底部）</p>
+      </div>
+    </div>
+    <button id="hover-btn">悬停看我</button>
+    <div id="hover-result" style="display:none;color:#059669;font-weight:bold;">已悬停 ✓</div>
+  </div>
+
+  <div class="demo">
     <h3>网络请求（验证 network 采集）</h3>
     <button id="fetch-ok">fetch 成功请求</button>
     <button id="fetch-404">fetch 404 请求</button>
@@ -86,6 +99,12 @@
 
     document.getElementById('city-select').addEventListener('change', (e) => {
       console.log('选择城市:', e.target.value)
+    })
+
+    /** hover：mouseover 显示提示（验证 __clarosight_hover 触发 hover 逻辑） */
+    document.getElementById('hover-btn').addEventListener('mouseover', () => {
+      document.getElementById('hover-result').style.display = 'block'
+      console.log('hover 触发')
     })
 
     /** 搜索框：keyup 触发搜索（模拟真实交互，只能用键盘事件触发） */

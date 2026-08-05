@@ -129,6 +129,58 @@ export function installHelpers(): void {
   /** 异步等待（exec code 中 await __clarosight_wait(100)） */
   w.__clarosight_wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+  /**
+   * 滚动页面或元素到指定位置
+   *
+   * 两种模式：
+   * - 不传 idx（idx < 0）：滚动整个窗口（window.scrollTo）
+   * - 传 idx：滚动该元素内部（如 overflow:auto 的 div）
+   *
+   * 用途：触发懒加载、检查 sticky 定位、滚动到折叠区域查看内容。
+   * 滚动后 AI 应重新 __clarosight_snapshot() 看页面变化。
+   */
+  w.__clarosight_scroll = (idx: number, x: number, y: number): boolean => {
+    if (idx < 0) {
+      window.scrollTo(x, y)
+      return true
+    }
+    const el = getElement(idx)
+    if (!el) return false
+    ;(el as HTMLElement).scrollTo(x, y)
+    return true
+  }
+
+  /**
+   * 滚动元素到可视区域（scrollIntoView）
+   *
+   * 用于让某个元素滚入视野：检查懒加载元素、让 sticky header 遮挡的元素可见。
+   * block/inline 参数对应原生 scrollIntoViewOptions，默认 'center'（居中展示）。
+   */
+  w.__clarosight_scrollIntoView = (idx: number, block: ScrollLogicalPosition = 'center'): boolean => {
+    const el = getElement(idx)
+    if (!el) return false
+    ;(el as HTMLElement).scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' })
+    return true
+  }
+
+  /**
+   * 鼠标悬停（模拟 hover，触发 mouseover/mouseenter 事件）
+   *
+   * 用于诊断 hover 展开的下拉菜单、tooltip、CSS :hover 样式变化。
+   * CSS :hover 伪类无法通过 JS 直接触发，但 mouseover/mouseenter 事件能
+   * 覆盖依赖 JS 的 hover 逻辑（大部分框架组件的下拉/tooltip）。
+   */
+  w.__clarosight_hover = (idx: number): boolean => {
+    const el = getElement(idx)
+    if (!el) return false
+    const target = el as HTMLElement
+    target.focus?.()
+    target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }))
+    target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }))
+    target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }))
+    return true
+  }
+
   /** 取页面快照（exec code 也可手动调用） */
   w.__clarosight_snapshot = (): ReturnType<typeof takeSnapshot> => takeSnapshot()
 

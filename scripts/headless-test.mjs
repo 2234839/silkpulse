@@ -378,6 +378,43 @@ async function main() {
     }
 
     /**
+     * 5.45 exec + __clarosight_scroll + __clarosight_hover
+     *
+     * scroll：滚动 #scroll-box 内部（overflow:auto），验证 scrollTop 变化。
+     * scrollIntoView：将元素滚入视野。
+     * hover：mouseover 触发 #hover-btn 的 hover 逻辑，验证 #hover-result 显示。
+     */
+    {
+      /** 先取快照找到 scroll-box 和 hover-btn 的 idx */
+      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const scrollMatch = snap.match(/div #(\d+)[^\n]*scroll-box/)
+      const hoverMatch = snap.match(/button #(\d+)[^\n]*悬停看我/)
+
+      /** 测试 scroll：滚动 scroll-box 到底部（0, 500） */
+      const scrollRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_scroll(${scrollMatch ? scrollMatch[1] : -1}, 0, 500); return document.querySelector("#scroll-box").scrollTop > 0` }),
+      })).json()
+      const scrollOk = scrollRes.success && scrollRes.result === 'true'
+
+      /** 测试 hover：hover hover-btn，验证 hover-result 显示 */
+      const hoverRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: `__clarosight_hover(${hoverMatch ? hoverMatch[1] : -1}); return getComputedStyle(document.querySelector("#hover-result")).display` }),
+      })).json()
+      /** result 被 serializeResult JSON.stringify，带引号 */
+      const hoverOk = hoverRes.success && hoverRes.result?.includes('block')
+
+      if (scrollOk && hoverOk) {
+        ok(`exec scroll + hover 生效（scroll scrollTop>0 ✓，hover 触发 mouseover ✓）`)
+      } else {
+        fail(`exec scroll/hover 异常：scroll=${scrollOk}（idx=${scrollMatch?.[1]}），hover=${hoverOk}（idx=${hoverMatch?.[1]}，res=${hoverRes.result}）`)
+      }
+    }
+
+    /**
      * 5.5 设备掉线时 pending exec 立即失败（回归 server exec 定时器清理）
      *
      * 场景：AI 发起 exec → 设备在执行期间断开 → server 应立即 reject（"设备已断开"），
