@@ -455,7 +455,92 @@ async function main() {
       fail('iframe 测试前置失败：无在线设备')
     }
 
-    /** 19. 复制为 cURL —— network 详情面板的 cURL 生成（AI/本地复现远程请求） */
+    /** 19. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
+    {
+      /** 先清空 localStorage 历史，确保干净起点 */
+      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.reload({ waitUntil: 'networkidle0' })
+      await new Promise((r) => setTimeout(r, 500))
+      /** 选中第一个设备 */
+      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await new Promise((r) => setTimeout(r, 400))
+      /** 切到 exec 面板 */
+      await consolePage.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const execTab = tabs.find((t) => t.textContent.trim() === 'Exec')
+        if (execTab) execTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 填入代码并执行 */
+      await consolePage.evaluate(() => {
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          ta.value = "return 1 + 1"
+          ta.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      await new Promise((r) => setTimeout(r, 100))
+      /** 点执行按钮 */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const runBtn = btns.find((b) => b.textContent.includes('执行') && !b.textContent.includes('执行中'))
+        if (runBtn) runBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 1000))
+      /** 验证历史侧栏出现该条 */
+      const histAfterRun = await consolePage.evaluate(() => {
+        const items = document.querySelectorAll('.w-56 .truncate')
+        return Array.from(items).map((el) => el.textContent.trim())
+      })
+      if (histAfterRun.some((c) => c.includes('return 1 + 1'))) {
+        ok(`exec 历史记录成功（侧栏含执行的代码）`)
+      } else {
+        fail(`exec 历史未记录：侧栏=${JSON.stringify(histAfterRun)}`)
+      }
+
+      /** 验证点击历史项回填到编辑区 */
+      await consolePage.evaluate(() => {
+        const items = document.querySelectorAll('.w-56 .truncate')
+        for (const it of items) {
+          if (it.textContent.includes('return 1 + 1')) { it.parentElement.click(); break }
+        }
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      const backfilled = await consolePage.evaluate(() => document.querySelector('textarea')?.value)
+      if (backfilled && backfilled.includes('return 1 + 1')) {
+        ok(`exec 历史点击回填成功（textarea 内容已更新）`)
+      } else {
+        fail(`exec 历史回填失败：textarea="${backfilled}"`)
+      }
+
+      /** 验证历史持久化到 localStorage */
+      const persisted = await consolePage.evaluate(() => {
+        const raw = localStorage.getItem('clarosight-exec-history')
+        if (!raw) return null
+        try { return JSON.parse(raw) } catch { return null }
+      })
+      if (Array.isArray(persisted) && persisted.some((h) => h.code && h.code.includes('return 1 + 1'))) {
+        ok(`exec 历史 localStorage 持久化成功（${persisted.length} 条）`)
+      } else {
+        fail(`exec 历史 localStorage 未持久化：${JSON.stringify(persisted)}`)
+      }
+
+      /** 清空历史 */
+      await consolePage.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'))
+        const clearBtn = btns.find((b) => b.textContent.trim() === '清空')
+        if (clearBtn) clearBtn.click()
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      const histAfterClear = await consolePage.evaluate(() => document.querySelectorAll('.w-56 .truncate').length)
+      if (histAfterClear === 0) {
+        ok(`exec 历史清空成功`)
+      } else {
+        fail(`exec 历史清空失败：仍剩 ${histAfterClear} 条`)
+      }
+    }
+
+    /** 20. 复制为 cURL —— network 详情面板的 cURL 生成（AI/本地复现远程请求） */
     {
       /** 先在控制台 UI 选中第一个设备（之前的测试都走 HTTP API，UI 上未选设备） */
       await consolePage.evaluate(() => {

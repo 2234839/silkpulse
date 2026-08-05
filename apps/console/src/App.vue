@@ -10,9 +10,11 @@ import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
 import { useAiContext } from './composables/useAiContext'
 import { useTheme } from './composables/useTheme'
+import { useExecHistory } from './composables/useExecHistory'
 import { copyText } from './utils/clipboard'
 
 const { theme, toggleTheme } = useTheme()
+const { history: execHistory, record: recordExec, remove: removeExecHistory, clear: clearExecHistory } = useExecHistory()
 
 const {
   devices,
@@ -177,6 +179,7 @@ async function runExec() {
   if (!selectedDeviceId.value || execRunning.value) return
   execRunning.value = true
   execResult.value = '执行中...'
+  let ok = false
   try {
     const res = await fetch(`/api/devices/${selectedDeviceId.value}/exec`, {
       method: 'POST',
@@ -185,6 +188,7 @@ async function runExec() {
     })
     const data = await res.json()
     if (data.success) {
+      ok = true
       const parts = [`=== 返回值 ===`, data.result ?? 'undefined']
       if (data.logs?.length) parts.push('', '=== 执行期间日志 ===', ...data.logs)
       if (data.snapshotText) parts.push('', '=== 执行后快照 ===', data.snapshotText)
@@ -195,7 +199,36 @@ async function runExec() {
   } catch (e) {
     execResult.value = `✗ 请求失败: ${e instanceof Error ? e.message : String(e)}`
   } finally {
+    /** 记录执行历史（成功/失败都记，失败也是试错过程的一部分） */
+    recordExec(execCode.value, ok)
     execRunning.value = false
+  }
+}
+
+/** 点击历史项回填到编辑区 */
+function pickHistory(code: string) {
+  execCode.value = code
+}
+
+/** Tab 键在 textarea 中插入两空格缩进（而非跳焦），方便写代码 */
+function handleExecKeydown(e: KeyboardEvent) {
+  if (e.ctrlKey && e.key === 'Enter') {
+    runExec()
+    return
+  }
+  if (e.metaKey && e.key === 'Enter') {
+    runExec()
+    return
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    const ta = e.target as HTMLTextAreaElement
+    const { selectionStart: start, selectionEnd: end, value } = ta
+    execCode.value = value.slice(0, start) + '  ' + value.slice(end)
+    /** 恢复光标位置（Vue 更新后） */
+    requestAnimationFrame(() => {
+      ta.selectionStart = ta.selectionEnd = start + 2
+    })
   }
 }
 /** 筛选后的日志（级别 + 关键词） */
@@ -521,32 +554,70 @@ onMounted(() => connect())
           </div>
 
           <!-- Exec 面板（在控制台直接执行诊断代码） -->
-          <div v-else-if="activeTab === 'exec'" class="flex-1 flex flex-col overflow-hidden bg-base">
-            <!-- 代码编辑区 -->
-            <div class="p-3 border-b border-base bg-surface">
-              <textarea
-                v-model="execCode"
-                rows="4"
-                placeholder="输入诊断代码，如：return document.title"
-                class="w-full text-xs font-mono p-2 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
-                @keydown.ctrl.enter="runExec"
-                @keydown.meta.enter="runExec"
-              />
-              <div class="flex items-center gap-2 mt-2">
-                <button
-                  @click="runExec"
-                  :disabled="execRunning"
-                  class="px-3 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {{ execRunning ? '执行中...' : '执行 (Ctrl+↵)' }}
-                </button>
-                <span class="text-xs text-faint">辅助函数：__clarosight_click / setValue / type / wait / snapshot</span>
+          <div v-else-if="activeTab === 'exec'" class="flex-1 flex overflow-hidden bg-base">
+            <!-- 主区：编辑 + 结果 -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+              <!-- 代码编辑区 -->
+              <div class="p-3 border-b border-base bg-surface">
+                <textarea
+                  v-model="execCode"
+                  rows="5"
+                  placeholder="输入诊断代码，如：return document.title"
+                  class="w-full text-xs font-mono p-2 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
+                  @keydown="handleExecKeydown"
+                />
+                <div class="flex items-center gap-2 mt-2">
+                  <button
+                    @click="runExec"
+                    :disabled="execRunning"
+                    class="px-3 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {{ execRunning ? '执行中...' : '执行 (Ctrl+↵)' }}
+                  </button>
+                  <span class="text-xs text-faint">Tab 缩进 · 辅助函数：__clarosight_click / setValue / type / wait / snapshot / sourcemap</span>
+                </div>
+              </div>
+              <!-- 结果展示区 -->
+              <div class="flex-1 overflow-y-auto p-3">
+                <pre v-if="execResult" class="text-xs font-mono text-primary whitespace-pre-wrap">{{ execResult }}</pre>
+                <div v-else class="text-faint text-center py-8 text-sm">输入代码后点击执行</div>
               </div>
             </div>
-            <!-- 结果展示区 -->
-            <div class="flex-1 overflow-y-auto p-3">
-              <pre v-if="execResult" class="text-xs font-mono text-primary whitespace-pre-wrap">{{ execResult }}</pre>
-              <div v-else class="text-faint text-center py-8 text-sm">输入代码后点击执行</div>
+            <!-- 历史侧栏 -->
+            <div class="w-56 border-l border-base bg-surface flex flex-col overflow-hidden">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-light">
+                <span class="text-xs font-medium text-secondary">执行历史</span>
+                <button
+                  v-if="execHistory.length"
+                  @click="clearExecHistory"
+                  class="text-xs text-faint hover:text-red-500"
+                  title="清空历史"
+                >清空</button>
+              </div>
+              <div class="flex-1 overflow-y-auto">
+                <div
+                  v-for="h in execHistory"
+                  :key="h.code"
+                  class="group px-3 py-2 border-b border-light cursor-pointer hover:bg-elevated"
+                  @click="pickHistory(h.code)"
+                >
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span
+                      class="text-[10px] font-mono"
+                      :class="h.ok ? 'text-green-600' : 'text-red-500'"
+                    >{{ h.ok ? '✓' : '✗' }}</span>
+                    <button
+                      @click.stop="removeExecHistory(h.code)"
+                      class="text-[10px] text-faint hover:text-red-500 opacity-0 group-hover:opacity-100"
+                      title="删除此条"
+                    >✕</button>
+                  </div>
+                  <div class="text-xs font-mono text-muted truncate" :title="h.code">{{ h.code }}</div>
+                </div>
+                <div v-if="!execHistory.length" class="text-xs text-faint text-center py-6">
+                  执行过的代码会出现在这里<br>点击可回填
+                </div>
+              </div>
             </div>
           </div>
         </template>
