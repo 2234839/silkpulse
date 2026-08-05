@@ -133,7 +133,7 @@ node tools/skill/scripts/clarosight.mjs errors <id> 5         # 最近 5 条错�
 node tools/skill/scripts/clarosight.mjs logs <id> 20          # 最近 20 条日志（省 token，AI 常用）
 node tools/skill/scripts/clarosight.mjs network <id>   # 含关键请求头/响应头
 
-# 一键诊断聚合（错误 + 失败网络 + 快照，AI 最高效入口）
+# 一键诊断聚合（错误 + 失败网络 + 慢请求 + 日志 + 快照，AI 最高效入口）
 node tools/skill/scripts/clarosight.mjs inspect <id>
 
 # 5. 生成接入片段
@@ -205,7 +205,7 @@ CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
 
 CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 79 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__clarosight_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select 元素 + 快照 options value:text 双标注**）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集**）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
+73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__clarosight_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select 元素 + 快照 options value:text 双标注**）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集**）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合含日志段）、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）。
 
 ## License
 

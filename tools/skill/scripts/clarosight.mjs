@@ -290,10 +290,11 @@ async function main() {
        * 与控制台"AI 诊断上下文"按钮对齐，输出 token 友好的结构化文本。
        */
       const id = await resolveDeviceId(args[0])
-      const [devicesResp, errors, network, snapshotRes] = await Promise.all([
+      const [devicesResp, errors, network, logs, snapshotRes] = await Promise.all([
         getJson('/api/devices'),
         getJson(`/api/devices/${id}/errors`),
         getJson(`/api/devices/${id}/network`),
+        getJson(`/api/devices/${id}/logs`),
         get(`/api/devices/${id}/snapshot`),
       ])
       const device = devicesResp.devices.find((d) => d.id === id)
@@ -352,6 +353,28 @@ async function main() {
         for (const n of slowTop) {
           const mark = n.duration > SLOW_THRESHOLD ? ' ⚠' : ''
           console.log(`- ${n.duration}ms${mark} ${n.method} ${n.status} ${n.url}`)
+        }
+      }
+      console.log('')
+
+      /**
+       * 最近日志（最多 20 条，与控制台 AI 诊断上下文对齐）
+       *
+       * console 日志常含关键诊断线索（业务状态打印、warn 警告、error 细节）。
+       * error/warn 优先展示（从末尾取 20 条中按级别排序），info/debug 在后。
+       */
+      const recentLogs = logs.slice(-20)
+      /** warn/error 排前面（诊断价值最高），其余按原序 */
+      const sortedLogs = [...recentLogs].sort((a, b) => {
+        const rank = (t) => (t === 'error' ? 0 : t === 'warn' ? 1 : 2)
+        return rank(a.type) - rank(b.type)
+      })
+      console.log(`## 最近日志 (${logs.length}${logs.length > 20 ? '，显示最近 20' : ''})`)
+      if (sortedLogs.length === 0) {
+        console.log('（无）')
+      } else {
+        for (const l of sortedLogs) {
+          console.log(`- [${l.type}] ${l.message}`)
         }
       }
       console.log('')
@@ -431,8 +454,11 @@ exec 的 code 也可通过 stdin 传入（适合复杂多行代码）：
 设备 id 支持前缀模糊匹配。code 作为 async 函数体执行，可写多条语句，用 return 返回值。
 exec code 中可直接用的辅助函数：
   __clarosight_click(idx)           点击 snapshot 中的元素
-  __clarosight_setValue(idx, val)   设置表单值（触发 input 事件）
+  __clarosight_setValue(idx, val)   设置表单值（input/textarea/select，触发 input+change）
   __clarosight_type(idx, text)      模拟键盘逐字输入（触发 keydown/keyup 序列）
+  __clarosight_scroll(idx, x, y)    滚动元素（idx<0 时滚窗口），触发懒加载
+  __clarosight_scrollIntoView(idx)  滚动元素到可视区域
+  __clarosight_hover(idx)           鼠标悬停（触发 mouseover/mouseenter）
   __clarosight_wait(ms)             异步等待
   __clarosight_snapshot()           手动取快照
   __clarosight_sourcemap(line,col,srcUrl?)  解析 source map（压缩位置→原始源码位置）

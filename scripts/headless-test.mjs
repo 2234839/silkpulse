@@ -1547,6 +1547,7 @@ async function main() {
         && inspectOut.includes('## 异常网络请求')
         && inspectOut.includes('## 慢请求 Top')
         && inspectOut.includes('ms')
+        && inspectOut.includes('## 最近日志')
         && inspectOut.includes('## 页面快照')
 
       if (netHasHeaders) {
@@ -1555,7 +1556,7 @@ async function main() {
         fail(`skill network 命令未展示 headers：${netOut.slice(0, 200)}`)
       }
       if (inspectOk) {
-        ok(`skill inspect 聚合命令正常（含错误/异常网络/慢请求Top/快照四段）`)
+        ok(`skill inspect 聚合命令正常（含错误/异常网络/慢请求Top/日志/快照五段）`)
       } else {
         fail(`skill inspect 命令异常：${inspectOut.slice(0, 300)}`)
       }

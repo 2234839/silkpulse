@@ -21,7 +21,7 @@ description: 远程设备调试器 —— 查看、诊断、操作用户在远�
 # 1. 先看有哪些在线设备
 node tools/skill/scripts/clarosight.mjs devices
 
-# 2. 一键诊断聚合（错误 + 失败网络 + 慢请求 Top + 快照，AI 诊断最高效的入口）
+# 2. 一键诊断聚合（错误 + 失败网络 + 慢请求 Top + 日志 + 快照，AI 诊断最高效的入口）
 node tools/skill/scripts/clarosight.mjs inspect <deviceId>
 
 # 3. 取页面快照（AI 友好的 compact 文本，一眼读懂页面结构）
@@ -85,8 +85,11 @@ return document.querySelector('#result')?.textContent
 
 **辅助函数**（exec 代码中可直接用）：
 - `__clarosight_click(idx)` — 点击 snapshot 中 idx 对应的元素
-- `__clarosight_setValue(idx, val)` — 设置表单值（触发 input 事件，兼容 Vue/React v-model）
+- `__clarosight_setValue(idx, val)` — 设置表单值（触发 input/change 事件，兼容 Vue/React v-model，支持 input/textarea/select）
 - `__clarosight_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup 序列，用于搜索框等监听 keyup 的场景）
+- `__clarosight_scroll(idx, x, y)` — 滚动元素内部（idx<0 时滚动整个窗口），触发懒加载/检查 sticky
+- `__clarosight_scrollIntoView(idx, block?)` — 滚动元素到可视区域（block: 'center'|'start'|'end'|'nearest'，默认 center）
+- `__clarosight_hover(idx)` — 鼠标悬停（触发 mouseover/mouseenter），展开下拉菜单/tooltip
 - `__clarosight_wait(ms)` — 异步等待
 - `__clarosight_snapshot()` — 手动取页面快照
 - `__clarosight_sourcemap(line, col, sourceUrl?)` — 解析 source map，把压缩代码位置映射回原始源码位置（线上压缩代码报错时定位真实出错点）
@@ -104,13 +107,14 @@ snapshot 是 token 高效的 compact 文本，每行一个元素：
 # viewport: 375×667
 button #5 text=打招呼            ← 可点击的按钮，idx=5
 input #4 #name-input ph:输入名字  ← 输入框，idx=4，有 placeholder
-select #9 #city-select val:北京 <北京|上海|广州>  ← 下拉框
+select #9 #city-select check=bj:北京 <bj:北京|sh:上海|gz:广州>  ← 下拉框（value:text 格式，setValue 用 value）
 input #10 #agree type:checkbox check 同意条款     ← 勾选框（已选中）
 ```
 
 - `#数字` 是稳定 idx，跨快照不变，供 `__clarosight_click(idx)` 使用
 - `#id名` 是元素的 id 属性（语义信息）
 - 交互元素（button/input/a/select）会显示 idx，纯文本元素不显示
+- select 的 options 用 `value:text` 格式（如 `bj:北京`），`__clarosight_setValue(idx, "bj")` 传 value 切换选项
 
 ## 配置
 
