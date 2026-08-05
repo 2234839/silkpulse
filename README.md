@@ -52,6 +52,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - **SDK 离线缓冲**：启动期间（采集器装好到 WS 连上）和断线期间产生的日志/错误/网络请求，暂存 SDK 内存队列（上限 200 条），重连后 flush，不丢失早期错误
 - **SPA 路由感知**：pushState/replaceState/popstate 上报 URL 变化
 - **环形缓冲区**：server 内存保留最近 500 条日志 / 100 条网络 / 50 条错误
+- **静态资源缓存**：sdk.js/index.html 强制 no-cache（诊断工具不能用旧版），带 hash 的构建产物长缓存 + ETag 304
 
 ## 架构
 
@@ -138,7 +139,7 @@ node tools/skill/scripts/clarosight.mjs inject bookmarklet
 浏览器打开 `http://localhost:8080` —— Vue3 + Tailwind 的设备调试控制台：
 
 - **设备列表**：搜索筛选、设备类型图标（📱手机/📲平板/🖥️桌面）、错误红条高亮
-- **Console 面板**：级别筛选（全部/ERROR/WARN/INFO/DEBUG）+ 关键词搜索
+- **Console 面板**：级别筛选（全部/ERROR/WARN/INFO/DEBUG）+ 关键词搜索 + **自动滚动到最新**（智能：向上翻看历史时不强制拉回）
 - **Network 面板**：主从布局，点击请求查看请求体/响应体详情，**一键复制为 cURL**（远程请求本地/AI 复现），URL/方法/状态码搜索过滤
 - **Errors 面板**：含堆栈展示（可折叠）+ source map 解析后的原始源码位置，message/堆栈/源码位置搜索过滤
 - **Snapshot 面板**：compact 文本格式

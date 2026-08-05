@@ -4,7 +4,7 @@
  *
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  */
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, useTemplateRef, nextTick } from 'vue'
 import type { NetworkEntry } from '@clarosight/shared'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useSnapshot } from './composables/useSnapshot'
@@ -249,6 +249,25 @@ const filteredLogs = computed(() => {
   return result
 })
 
+/** console 面板日志列表 DOM 引用（自动滚动用） */
+const logListEl = useTemplateRef<HTMLDivElement>('logListEl')
+
+/**
+ * 日志变化时自动滚动到底部
+ *
+ * 仅在用户已接近底部时自动滚（避免用户向上翻看历史时被强制拉回）。
+ * 阈值 80px：离底部不足此值视为"在看最新"。
+ */
+watch(filteredLogs, async () => {
+  await nextTick()
+  const el = logListEl.value
+  if (!el) return
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (distanceFromBottom < 80) {
+    el.scrollTop = el.scrollHeight
+  }
+})
+
 /** Errors 面板：关键词搜索（按 message / stack / mapped.source） */
 const errorSearch = ref('')
 const filteredErrors = computed(() => {
@@ -462,7 +481,7 @@ onMounted(() => connect())
               <span class="text-xs text-faint">{{ filteredLogs.length }}/{{ logs.length }}</span>
             </div>
             <!-- 日志列表 -->
-            <div class="flex-1 overflow-y-auto p-4 font-mono text-sm">
+            <div ref="logListEl" class="flex-1 overflow-y-auto p-4 font-mono text-sm">
               <div v-for="(log, i) in filteredLogs" :key="i" class="py-0.5 border-b border-light">
                 <span class="text-faint text-xs mr-2">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
                 <span class="text-faint text-xs mr-2 uppercase">{{ log.type }}</span>

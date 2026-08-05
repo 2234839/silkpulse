@@ -69,6 +69,38 @@ async function main() {
     if (appLen > 50) ok(`控制台 Vue 已渲染（app 内容 ${appLen} 字符）`)
     else fail('控制台 Vue 未渲染')
 
+    /** 1.5 静态资源缓存策略 —— sdk.js 必须 no-cache（诊断工具不能用旧版），带 hash 的长缓存 */
+    {
+      const sdkRes = await fetch(`${SERVER}/sdk.js`)
+      const sdkCache = sdkRes.headers.get('cache-control') ?? ''
+      const sdkEtag = sdkRes.headers.get('etag') ?? ''
+      await sdkRes.text()
+
+      /** 找一个带 hash 的构建产物 */
+      const htmlText = await (await fetch(`${SERVER}/`)).text()
+      const hashedMatch = htmlText.match(/\/assets\/index-[a-zA-Z0-9]+\.js/)
+      const hashedPath = hashedMatch?.[0]
+      const hashedRes = await fetch(`${SERVER}${hashedPath}`)
+      const hashedCache = hashedRes.headers.get('cache-control') ?? ''
+      const hashedEtag = hashedRes.headers.get('etag') ?? ''
+      await hashedRes.text()
+
+      /** ETag 304 验证：带 If-None-Match 应返回 304 */
+      const condRes = await fetch(`${SERVER}${hashedPath}`, {
+        headers: { 'If-None-Match': hashedEtag },
+      })
+
+      const sdkOk = sdkCache.includes('no-cache') && !!sdkEtag
+      const hashedOk = hashedCache.includes('max-age=31536000') && hashedCache.includes('immutable')
+      const etagOk = condRes.status === 304
+
+      if (sdkOk && hashedOk && etagOk) {
+        ok(`缓存策略正确（sdk.js no-cache ✓，/assets/* 长缓存 ✓，ETag 304 ✓）`)
+      } else {
+        fail(`缓存策略异常：sdk=${sdkCache} hashed=${hashedCache} 304=${condRes.status}`)
+      }
+    }
+
     /** 2. 测试页注入 SDK → 自动连接（同源加载，network 采集不受跨域影响） */
     const testPage = await browser.newPage()
     testPage.on('pageerror', (e) => console.log('  [pageerror]', e.message))

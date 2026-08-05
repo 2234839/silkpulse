@@ -122,7 +122,9 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      serveFile(res, filePath, guessContentType(filePath))
+      /** Vite 构建产物在 /assets/ 下且文件名带 8 位 hash，可长缓存；其他保守 no-cache */
+      const isHashed = pathname.includes('/assets/') && /-[a-zA-Z0-9]{8}\.\w+$/.test(pathname)
+      serveFile(res, filePath, guessContentType(filePath), isHashed ? 'longCache' : 'noCache')
       return
     }
 
@@ -155,13 +157,45 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
 }
 
 /** 发送文件响应 */
-function serveFile(res: http.ServerResponse, filePath: string, contentType: string) {
+/**
+ * 缓存策略
+ *
+ * - noCache：诊断工具的入口资源（sdk.js、index.html）必须每次 revalidate，
+ *   否则远程设备用旧 SDK、开发者用旧控制台，行为不一致（诊断工具大忌）
+ * - longCache：带内容 hash 的构建产物（index-XXXX.js/css），永不变化可强缓存
+ */
+type CachePolicy = 'noCache' | 'longCache'
+
+function cacheHeaders(policy: CachePolicy): Record<string, string> {
+  if (policy === 'longCache') {
+    return { 'Cache-Control': 'public, max-age=31536000, immutable' }
+  }
+  return { 'Cache-Control': 'no-cache' }
+}
+
+function serveFile(
+  res: http.ServerResponse,
+  filePath: string,
+  contentType: string,
+  cache: CachePolicy = 'noCache',
+): void {
   try {
-    const stream = fs.createReadStream(filePath)
-    res.writeHead(200, {
+    const stat = fs.statSync(filePath)
+    const headers: Record<string, string> = {
       'Content-Type': contentType,
       'Access-Control-Allow-Origin': '*',
-    })
+      ...cacheHeaders(cache),
+    }
+    /** 带 ETag（文件 mtime+size），支持 304（no-cache 策略下省带宽） */
+    const etag = `"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`
+    headers['ETag'] = etag
+    if (res.req?.headers['if-none-match'] === etag) {
+      res.writeHead(304)
+      res.end()
+      return
+    }
+    const stream = fs.createReadStream(filePath)
+    res.writeHead(200, headers)
     stream.pipe(res)
   } catch {
     res.writeHead(500)
