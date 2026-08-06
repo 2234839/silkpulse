@@ -8,6 +8,7 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
 import { sendSnapshot } from './snapshot-text.js'
+import { generateFeatureDetectScript } from '@clarosight/feature-detect'
 
 /**
  * POST body 最大字节数
@@ -145,6 +146,27 @@ export async function handleApiRoute(
       /** 快照结果序列化为 compact 文本 */
       const text = sendSnapshot(result.result)
       sendText(res, text)
+      return true
+    }
+
+    /**
+     * /api/devices/:id/feature-detect —— 特性检测（类似 Modernizr）
+     *
+     * 通过 exec-bridge 在目标设备上执行检测脚本，返回各特性的支持情况。
+     * 控制台 Feature 面板和 AI skill 都可调用，排查"目标设备是否不支持某特性"。
+     */
+    case 'feature-detect': {
+      const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript())
+      if (!result.success) {
+        sendJson(res, { error: result.error }, 500)
+        return true
+      }
+      /** result.result 是 JSON 字符串（检测项数组），解析后透传给前端 */
+      if (!result.result) {
+        sendJson(res, { error: '检测结果为空' }, 500)
+        return true
+      }
+      sendJson(res, JSON.parse(result.result))
       return true
     }
 

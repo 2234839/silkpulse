@@ -16,6 +16,7 @@
     "check": "vp check"
   },
   "dependencies": {
+    "@clarosight/feature-detect": "workspace:*",
     "@clarosight/shared": "workspace:*",
     "ws": "catalog:"
   },

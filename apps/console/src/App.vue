@@ -7,6 +7,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import SnapshotPanel from './components/SnapshotPanel.vue'
+import FeaturePanel from './components/FeaturePanel.vue'
 import ErrorsPanel from './components/ErrorsPanel.vue'
 import ConsolePanel from './components/ConsolePanel.vue'
 import NetworkPanel from './components/NetworkPanel.vue'
@@ -222,9 +223,9 @@ async function openAiContext() {
 /** 当前激活的面板 */
 /**
  * 面板顺序按使用频率/重要性排列：
- * Console → Element → Network → Storage → Errors → Snapshot → Exec
+ * Console → Element → Network → Storage → Errors → Feature → Snapshot → Exec
  */
-const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'snapshot' | 'exec'>('console')
+const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'feature' | 'snapshot' | 'exec'>('console')
 
 /**
  * 面板切换时按需启停远程采集器
@@ -441,7 +442,7 @@ onMounted(() => connect())
           <!-- Tab 栏 -->
           <nav class="flex border-b border-base bg-surface">
             <button
-              v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'snapshot', 'exec'] as const)"
+              v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec'] as const)"
               :key="tab"
               @click="activeTab = tab"
               class="px-4 py-2 text-sm font-medium border-b-2 flex items-center gap-1.5"
@@ -449,7 +450,7 @@ onMounted(() => connect())
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-muted hover:text-primary'"
             >
-              {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : tab === 'exec' ? 'Exec' : tab === 'element' ? 'Element' : 'Storage' }}
+                {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : tab === 'exec' ? 'Exec' : tab === 'element' ? 'Element' : tab === 'feature' ? 'Feature' : 'Storage' }}
               <!-- 数量徽标：Console/Network/Errors 显示条数，Errors 有错误时红色高亮 -->
               <span
                 v-if="tab === 'console' && logs.length > 0"
@@ -484,6 +485,12 @@ onMounted(() => connect())
           <ErrorsPanel
             v-else-if="activeTab === 'errors'"
             :errors="errors"
+          />
+
+          <!-- Feature 面板（目标设备特性检测，类似 Modernizr） -->
+          <FeaturePanel
+            v-else-if="activeTab === 'feature'"
+            :device-id="selectedDeviceId"
           />
 
           <!-- Snapshot 面板（搜索过滤 + 复制） -->
