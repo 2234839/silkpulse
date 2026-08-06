@@ -36,6 +36,19 @@
   </div>
 
   <div class="demo">
+    <h3>Shadow DOM（验证 Element 面板 shadow 树展开）</h3>
+    <my-widget id="shadow-host"></my-widget>
+    <button id="shadow-add-btn">Shadow 内部动态添加元素</button>
+  </div>
+
+  <div class="demo">
+    <h3>动态 DOM（验证 Element 面板实时刷新 + 高亮）</h3>
+    <button id="dom-add-btn">动态添加元素</button>
+    <button id="dom-remove-btn">移除最后一个动态元素</button>
+    <div id="dynamic-container"></div>
+  </div>
+
+  <div class="demo">
     <h3>表单</h3>
     <select id="city-select">
       <option value="bj">北京</option>
@@ -121,6 +134,52 @@
   <script>
     const logEl = document.getElementById('log')
     const show = (msg) => { logEl.textContent = msg }
+
+    /** Shadow DOM Web Component（验证 Element 面板 shadow 树展开） */
+    customElements.define('my-widget', class extends HTMLElement {
+      connectedCallback() {
+        const shadow = this.attachShadow({ mode: 'open' })
+        shadow.innerHTML = `
+          <style>
+            .widget-box { padding: 12px; border: 2px dashed #7c3aed; border-radius: 6px; }
+            .widget-title { color: #7c3aed; font-weight: bold; }
+          </style>
+          <div class="widget-box">
+            <p class="widget-title">Shadow DOM 内部</p>
+            <button id="inner-btn">Shadow 内按钮</button>
+            <div id="inner-list"></div>
+          </div>
+        `
+      }
+    })
+
+    /** Shadow 内部动态添加元素 */
+    document.getElementById('shadow-add-btn').addEventListener('click', () => {
+      const host = document.getElementById('shadow-host')
+      const list = host.shadowRoot?.querySelector('#inner-list')
+      if (list) {
+        const item = document.createElement('p')
+        item.textContent = `Shadow item ${list.children.length + 1}`
+        list.appendChild(item)
+      }
+    })
+
+    /** 动态 DOM 操作（验证 Element 面板实时刷新 + 高亮） */
+    let dynamicCount = 0
+    document.getElementById('dom-add-btn').addEventListener('click', () => {
+      const container = document.getElementById('dynamic-container')
+      const item = document.createElement('div')
+      dynamicCount++
+      item.className = 'dynamic-item'
+      item.textContent = `动态元素 #${dynamicCount}`
+      item.dataset.idx = String(dynamicCount)
+      container.appendChild(item)
+    })
+    document.getElementById('dom-remove-btn').addEventListener('click', () => {
+      const container = document.getElementById('dynamic-container')
+      const last = container.lastElementChild
+      if (last) container.removeChild(last)
+    })
 
     document.getElementById('greet-btn').addEventListener('click', () => {
       const name = document.getElementById('name-input').value || '匿名'

@@ -23,6 +23,36 @@ export function useConsoleSocket() {
   const network = shallowRef<NetworkEntry[]>([])
   /** 当前选中设备的实时错误 */
   const errors = shallowRef<ErrorEntry[]>([])
+  /**
+   * storage 变化版本号
+   *
+   * 收到远程设备 storage-change 推送时递增，StoragePanel watch 它自动重新拉取。
+   * 用版本号而非直接传数据：storage 数据量大（IndexedDB 可能几百条），
+   * 推送只做信号，拉取走 HTTP（可分页/缓存）。
+   */
+  const storageVersion = ref(0)
+  /** 最后一次 storage 变化的时间戳（面板显示用） */
+  const storageUpdateTime = ref<number | null>(null)
+  /**
+   * DOM 变化版本号（每次收到 dom-change 推送时递增）
+   *
+   * ElementPanel watch 它判断是否需要刷新已展开节点。
+   * 同时携带 parentIdxs + kinds 供 ElementPanel 精确刷新 + 高亮。
+   */
+  const domChangeVersion = ref(0)
+  /** 最近一次 DOM 变化的详细数据（parentIdxs + kinds + timestamp） */
+  const domChangeData = ref<{
+    parentIdxs: number[]
+    kinds: Array<'added' | 'removed' | 'attributes' | 'text'>
+    timestamp: number
+  } | null>(null)
+  /**
+   * 每个 storage key 的最后修改时间戳（运行期间 SDK 捕获）
+   *
+   * key = `${storageType}::${storageKey}`，值 = timestamp。
+   * 只在 SDK 运行期间有效（页面刷新后重置），不需要持久化。
+   */
+  const storageKeyTimes = ref<Record<string, number>>({})
   /** 当前选中设备 id */
   const selectedDeviceId = ref<string | null>(null)
   /** 连接状态 */
@@ -43,6 +73,7 @@ export function useConsoleSocket() {
     logs.value = []
     network.value = []
     errors.value = []
+    storageKeyTimes.value = {}
     if (!id) return
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe', deviceId: id }))
@@ -59,6 +90,19 @@ export function useConsoleSocket() {
       errors.value = await errRes.json()
     } catch {
       /** 拉取失败时保持空，WS 推送仍会补充新数据 */
+    }
+  }
+
+  /**
+   * 通知 server 当前启用的 watcher（按需采集）
+   *
+   * 控制台打开 Storage/Element 面板时调用，传入对应 watcher 类型。
+   * server 汇总所有控制台的请求后，下发 set-watchers 给设备 SDK，
+   * 设备端按需启停 MutationObserver / storage 劫持等。
+   */
+  function setWatchers(deviceId: string, watchers: string[]): void {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set-watchers', deviceId, watchers }))
     }
   }
 
@@ -171,6 +215,28 @@ export function useConsoleSocket() {
           errors.value = [...errors.value, msg.error].slice(-50)
         }
         break
+      case 'storage-change':
+        /**
+         * 远程设备 storage 变化 → 递增版本号 + 记录时间 + 缓存 key 时间戳
+         *
+         * msg.key 可能不存在（clear() 无法确定具体 key），此时只刷新不记 key 时间。
+         */
+        if (msg.deviceId === selectedDeviceId.value) {
+          storageVersion.value++
+          const ts = msg.timestamp ?? Date.now()
+          storageUpdateTime.value = ts
+          if (msg.key) {
+            storageKeyTimes.value = { ...storageKeyTimes.value, [`${msg.storageType}::${msg.key}`]: ts }
+          }
+        }
+        break
+      case 'dom-change':
+        /** 远程设备 DOM 变化 → 递增版本号 + 携带 parentIdxs 供 ElementPanel 精确刷新 */
+        if (msg.deviceId === selectedDeviceId.value) {
+          domChangeVersion.value++
+          domChangeData.value = msg.changes
+        }
+        break
     }
   }
 
@@ -188,9 +254,15 @@ export function useConsoleSocket() {
     logs,
     network,
     errors,
+    storageVersion,
+    storageUpdateTime,
+    storageKeyTimes,
+    domChangeVersion,
+    domChangeData,
     selectedDeviceId,
     connected,
     connect,
     selectDevice,
+    setWatchers,
   }
 }

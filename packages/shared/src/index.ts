@@ -19,10 +19,29 @@ export type DeviceMessage =
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
   | { type: 'exec-result'; execId: string; result: ExecResult }
+  | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
+  | { type: 'dom-change'; changes: DomChangeData }
+
+/**
+ * DOM 变化数据（MutationObserver 采集，Element 面板实时刷新用）
+ *
+ * 每条变化只含最精简信息：哪些父节点的子树发生了变化 + 变化类型。
+ * 控制台收到后只刷新受影响的已展开节点，不重拉整棵树。
+ */
+export interface DomChangeData {
+  /** 变化的父元素 idx 列表（去重），控制台据此决定刷新哪些节点 */
+  parentIdxs: number[]
+  /** 本次变化的类型汇总（added/removed/attributes/text） */
+  kinds: Array<'added' | 'removed' | 'attributes' | 'text'>
+  /** 变化的时间戳 */
+  timestamp: number
+}
 
 /** server → 设备 的消息类型 */
 export type ServerToDeviceMessage =
   | { type: 'exec'; execId: string; code: string }
+  /** 按需启停采集器：控制台打开对应面板时启用，关闭时停止，减少不必要的数据传输 */
+  | { type: 'set-watchers'; watchers: WatcherType[] }
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
@@ -35,11 +54,24 @@ export type ServerToConsoleMessage =
   | { type: 'ws-frame'; deviceId: string; seq: number; frame: WsFrame }
   | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
+  | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
+  | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
 
 /** 控制台 → server 的消息类型 */
 export type ConsoleMessage =
   | { type: 'subscribe'; deviceId: string }
   | { type: 'unsubscribe'; deviceId: string }
+  /** 控制台通知 server 当前启用的 watcher（按需采集，减少不必要的数据传输） */
+  | { type: 'set-watchers'; deviceId: string; watchers: WatcherType[] }
+
+/**
+ * 可按需启停的采集器类型
+ *
+ * 控制台打开对应面板时启用，关闭面板时停止。
+ * - storage：Storage 面板打开时启用 storage-watcher
+ * - dom：Element 面板打开时启用 dom-watcher
+ */
+export type WatcherType = 'storage' | 'dom'
 
 /** 设备元信息 */
 export interface DeviceInfo {
@@ -49,6 +81,8 @@ export interface DeviceInfo {
   url: string
   /** 页面标题 */
   title: string
+  /** 页面图标 URL（SDK 从 <link rel="icon"> 采集，兜底 /favicon.ico） */
+  icon?: string
   /** User-Agent */
   userAgent: string
   /** 视口宽度（移动端识别） */
@@ -96,10 +130,32 @@ export interface OfflineDeviceSummary {
 export interface LogEntry {
   /** ISO 时间戳 */
   timestamp: string
-  /** 日志级别 */
-  type: 'info' | 'warn' | 'error' | 'debug'
-  /** 序列化后的消息文本 */
+  /**
+   * 日志级别/类型
+   *
+   * - info/warn/error/debug：常规级别（console.log 归并到 info）
+   * - table：console.table（message 是表格数据的序列化文本）
+   * - trace：console.trace（message 含堆栈）
+   * - group/groupEnd：分组开始/结束（console.groupCollapsed 归并到 group），前端据此维护缩进层级
+   * - count：console.count/countReset（SDK 端维护计数器，message 含计数值）
+   * - time：console.time/timeEnd/timeLog（SDK 端维护计时器，message 含耗时）
+   * - assert：console.assert 失败（断言成功不上报，与 DevTools 行为一致）
+   * - dir：console.dir/dirxml（对象结构预览）
+   * - clear：console.clear（前端收到后清空日志视图）
+   */
+  type: 'info' | 'warn' | 'error' | 'debug' | 'table' | 'trace' | 'group' | 'groupEnd' | 'count' | 'time' | 'assert' | 'dir' | 'clear'
+  /** 序列化后的消息文本（纯文本，不含样式信息，作为搜索/复制/AI 上下文的事实标准） */
   message: string
+  /**
+   * 带样式的文本段（仅当 console.log 使用了 %c 占位符时存在）
+   *
+   * DevTools 的 %c 语义：每个 %c 消费一个后续参数作为 CSS 字符串，
+   * 该 CSS 作用于 %c 之后直到下一个 %c（或行尾）的所有文本。
+   * 多个 %c 叠加时，后面的样式覆盖前面的同名属性。
+   *
+   * 前端渲染时有 styledSegments 则渲染 <span style>，否则降级纯文本 message。
+   */
+  styledSegments?: { text: string; style?: string }[]
   /**
    * 连续重复次数（仅当 >1 时存在）
    *
@@ -182,12 +238,63 @@ export interface SourceMapPosition {
   name?: string
 }
 
+/**
+ * 结构化序列化值 —— 用于 exec / console 返回值的可交互对象树展示
+ *
+ * 把任意 JS 值递归序列化为扁平的节点树：
+ * - 基本类型（string/number/boolean/null/undefined）直接存值
+ * - 对象/数组存为 { type, properties/elements }，每个属性值又是 SerializedValue
+ * - 特殊类型（Date/RegExp/Error/Map/Set/Function）有专属 type + preview
+ * - 循环引用用 refId 标记，避免无限递归
+ *
+ * 前端递归渲染为可展开/折叠的对象树（类似 DevTools console）。
+ */
+export interface SerializedValue {
+  /** 值的类型标签 */
+  type:
+    | 'string' | 'number' | 'boolean' | 'null' | 'undefined' | 'bigint'
+    | 'symbol' | 'function'
+    | 'array' | 'object'
+    | 'date' | 'regexp' | 'error' | 'map' | 'set'
+    | 'weakmap' | 'weakset' | 'promise'
+    | 'element' | 'textnode' | 'event'
+    | 'unknown'
+  /** 预览文本（一行摘要，如 Object { a: 1 }、Array(3)、Error: msg） */
+  preview: string
+  /** 原始值（string/number/boolean/bigint 直接用） */
+  value?: string | number | boolean
+  /** 对象/Map 的属性列表（展开时渲染） */
+  properties?: SerializedProperty[]
+  /** 数组的元素列表（展开时渲染） */
+  elements?: SerializedValue[]
+  /** 元素数量（数组/Map/Set，用于 preview 中显示长度） */
+  length?: number
+  /** 构造函数名（如 HTMLDivElement、Headers、URL 等） */
+  constructorName?: string
+  /** 循环引用标记（同一对象多次出现时，第二次起用 { type:'object', refId:N } 替代完整展开） */
+  refId?: number
+}
+
+/** 对象的一个属性 */
+export interface SerializedProperty {
+  /** 属性名 */
+  key: string
+  /** 属性值 */
+  value: SerializedValue
+  /** 是否是 getter（影响是否能深入展开） */
+  isGetter?: boolean
+  /** 是否是 Symbol key */
+  isSymbol?: boolean
+}
+
 /** exec 在远程设备执行 JS 的结果 */
 export interface ExecResult {
   /** 是否执行成功 */
   success: boolean
-  /** 序列化后的返回值 */
+  /** 序列化后的返回值（JSON 字符串，兼容旧消费方） */
   result?: string
+  /** 结构化序列化返回值（可交互对象树用） */
+  resultValue?: SerializedValue
   /** 错误信息 */
   error?: string
   /** exec 期间产生的 console 日志（紧凑格式：[TYPE] message） */

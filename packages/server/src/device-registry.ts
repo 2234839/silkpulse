@@ -240,7 +240,12 @@ export class DeviceRegistry {
   updateInfo(deviceId: string, patch: Partial<DeviceInfo>) {
     const device = this.devices.get(deviceId)
     if (!device) return
-    Object.assign(device.info, patch)
+    /** 过滤 undefined 值（SDK 分多条 update-info 上报不同字段，未带的字段不应覆盖已有值） */
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        ;(device.info as Record<string, unknown>)[key] = value
+      }
+    }
   }
 }
 

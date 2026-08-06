@@ -1,0 +1,513 @@
+<script setup lang="ts">
+/**
+ * ElementPanel —— DOM 元素诊断面板
+ *
+ * 左侧懒加载 DOM 树（递归展开），右侧诊断卡（可见性 / 计算样式 / 盒模型 / 祖先链）。
+ * 点击树节点或祖先链可跳转查看对应元素诊断。
+ *
+ * 复用 server 的 /element/tree（懒加载子元素）和 /element/inspect（诊断单元素）。
+ */
+import { ref, computed, watch, onMounted } from 'vue'
+import ElementTreeNode from './ElementTreeNode.vue'
+
+/** DOM 变化数据（从 useConsoleSocket 传入） */
+interface DomChangeData {
+  parentIdxs: number[]
+  kinds: Array<'added' | 'removed' | 'attributes' | 'text'>
+  timestamp: number
+}
+
+const props = defineProps<{
+  /** 当前选中设备 id */
+  deviceId: string
+  /** DOM 变化版本号（每次推送递增，触发刷新） */
+  domChangeVersion?: number
+  /** 最近一次 DOM 变化的详细数据 */
+  domChangeData?: DomChangeData | null
+}>()
+
+/** 树节点（server 返回的元素信息 + 前端展开状态） */
+interface ElementNode {
+  idx: number
+  tag: string
+  id?: string
+  classes?: string
+  childCount: number
+  text?: string
+  /** shadow host 标记：该元素有 shadowRoot，展开时需请求 shadow 子树 */
+  hasShadow?: boolean
+  /** shadow 子元素数量（server 单独返回，childCount 只统计普通子元素） */
+  shadowChildCount?: number
+  /** 前端状态：是否已展开 / 是否正在加载子节点 / 已加载的子节点 */
+  expanded?: boolean
+  loading?: boolean
+  children?: ElementNode[]
+  /** shadow 子节点（与 children 分开存储，展示时合并） */
+  shadowChildren?: ElementNode[]
+  /** shadow 子树是否已展开 */
+  shadowExpanded?: boolean
+  /** DOM 变化高亮标记（收到 dom-change 后短暂高亮） */
+  flash?: boolean
+}
+
+/** 元素诊断信息（server /element/inspect 返回） */
+interface ElementInspect {
+  idx: number
+  tag: string
+  id?: string
+  classes?: string
+  visibility: {
+    display: string
+    visibility: string
+    opacity: string
+    width: number
+    height: number
+    inViewport: boolean
+    coveredBy?: { tag: string; id?: string; classes?: string } | null
+  }
+  computedStyle: Record<string, string>
+  box: {
+    content: { width: number; height: number }
+    padding: { top: number; right: number; bottom: number; left: number }
+    border: { top: number; right: number; bottom: number; left: number }
+    margin: { top: number; right: number; bottom: number; left: number }
+  }
+  ancestors: Array<{ idx: number; tag: string; id?: string; classes?: string }>
+  error?: string
+}
+
+/** 树根节点（documentElement = <html>） */
+const elementTreeRoot = ref<ElementNode[]>([])
+/** 当前选中的元素 idx */
+const selectedElementIdx = ref<number | null>(null)
+/** 当前选中元素的诊断信息 */
+const elementInspect = ref<ElementInspect | null>(null)
+/** 树/诊断是否正在加载 */
+const elementTreeLoading = ref(false)
+const elementInspectLoading = ref(false)
+
+/** filter 搜索关键词（非空时进入搜索模式） */
+const filterQuery = ref('')
+/** filter 搜索结果（扁平列表，非树结构） */
+const filterResults = ref<ElementNode[]>([])
+/** filter 搜索中 */
+const filterLoading = ref(false)
+/** filter debounce timer */
+let filterTimer: ReturnType<typeof setTimeout> | null = null
+
+/** filter 是否激活 */
+const isFiltering = computed(() => filterQuery.value.trim().length > 0)
+
+/** 拉取某个节点的子元素（懒加载） */
+async function loadElementChildren(node: ElementNode | null, shadow = false): Promise<ElementNode[]> {
+  if (!props.deviceId) return []
+  const params = new URLSearchParams()
+  if (node) params.set('idx', String(node.idx))
+  if (shadow) params.set('shadow', '1')
+  const url = `/api/devices/${props.deviceId}/element/tree?${params}`
+  const res = await fetch(url)
+  if (!res.ok) return []
+  const items: ElementNode[] = await res.json()
+  /** 初始化前端状态字段 */
+  return items.map((n) => ({ ...n, expanded: false, loading: false }))
+}
+
+/** 加载根节点（首次进入面板或刷新时调用） */
+async function loadElementTree() {
+  if (elementTreeLoading.value) return
+  elementTreeLoading.value = true
+  try {
+    const roots = await loadElementChildren(null)
+    /** 根节点 <html> 默认展开，用户直接看到 head + body */
+    for (const root of roots) {
+      if (root.tag === 'html' && root.childCount > 0) {
+        root.expanded = true
+        root.children = await loadElementChildren(root)
+      }
+    }
+    elementTreeRoot.value = roots
+    rebuildIndex(elementTreeRoot.value)
+  } finally {
+    elementTreeLoading.value = false
+  }
+}
+
+/** 切换节点展开/收起（普通子元素） */
+async function toggleElementNode(node: ElementNode) {
+  if (node.childCount === 0) return
+  if (node.expanded) {
+    node.expanded = false
+    return
+  }
+  /** 已加载过子节点：直接展开 */
+  if (node.children) {
+    node.expanded = true
+    return
+  }
+  /** 懒加载子节点 */
+  node.loading = true
+  try {
+    node.children = await loadElementChildren(node)
+    node.expanded = true
+  } finally {
+    node.loading = false
+  }
+}
+
+/** 切换 shadow 子树展开/收起 */
+async function toggleShadowNode(node: ElementNode) {
+  if (node.shadowExpanded) {
+    node.shadowExpanded = false
+    return
+  }
+  if (node.shadowChildren) {
+    node.shadowExpanded = true
+    return
+  }
+  node.loading = true
+  try {
+    node.shadowChildren = await loadElementChildren(node, true)
+    node.shadowExpanded = true
+  } finally {
+    node.loading = false
+  }
+}
+
+/**
+ * 统一 toggle 入口：根据节点状态决定展开普通子树还是 shadow 子树
+ *
+ * childCount 只统计普通子元素，shadowChildCount 单独管理。
+ * 优先级：先展开普通 children，再展开 shadow children
+ */
+async function handleToggle(node: ElementNode) {
+  const hasNormalChildren = node.childCount > 0
+  const hasShadow = node.hasShadow
+
+  /** 情况 1：只有 shadow（无普通子元素）→ 展开 shadow */
+  if (hasShadow && !hasNormalChildren) {
+    await toggleShadowNode(node)
+    return
+  }
+  /** 情况 2：普通 children 已展开 → 检查是否要展开 shadow */
+  if (node.expanded && hasShadow && !node.shadowExpanded) {
+    await toggleShadowNode(node)
+    return
+  }
+  /** 情况 3：shadow 已展开，再次点击 → 收起 shadow */
+  if (node.expanded && node.shadowExpanded) {
+    node.shadowExpanded = false
+    return
+  }
+  /** 情况 4：常规 toggle 普通 children */
+  await toggleElementNode(node)
+}
+
+/** filter 搜索：debounce 触发 */
+function onFilterInput() {
+  if (filterTimer) clearTimeout(filterTimer)
+  const q = filterQuery.value.trim()
+  if (!q) {
+    filterResults.value = []
+    filterLoading.value = false
+    return
+  }
+  filterLoading.value = true
+  filterTimer = setTimeout(async () => {
+    try {
+      const url = `/api/devices/${props.deviceId}/element/tree?filter=${encodeURIComponent(q)}`
+      const res = await fetch(url)
+      if (res.ok) {
+        const items: ElementNode[] = await res.json()
+        /** 初始化前端状态字段 */
+        filterResults.value = items.map((n) => ({ ...n, expanded: false, loading: false }))
+      }
+    } finally {
+      filterLoading.value = false
+    }
+  }, 300)
+}
+
+/** 选中元素：拉诊断信息 */
+async function selectElement(idx: number) {
+  if (!props.deviceId) return
+  selectedElementIdx.value = idx
+  elementInspectLoading.value = true
+  elementInspect.value = null
+  try {
+    const res = await fetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
+    if (res.ok) {
+      elementInspect.value = await res.json()
+    }
+  } finally {
+    elementInspectLoading.value = false
+  }
+}
+
+/** 树节点的显示文本（tag#id.class1.class2 或 text） */
+// ──────── 实时刷新（dom-change 推送） ────────
+
+/**
+ * 所有节点索引（扁平 Map），用于 O(1) 查找受影响的节点
+ *
+ * 每次 loadElementTree / loadElementChildren 后重建。
+ * dom-change 到达时，用 parentIdxs 在此 Map 中查找并刷新。
+ */
+const nodeIndex = new Map<number, ElementNode>()
+
+/** 重建节点索引（递归遍历树） */
+function rebuildIndex(nodes: ElementNode[]): void {
+  for (const n of nodes) {
+    nodeIndex.set(n.idx, n)
+    if (n.children) rebuildIndex(n.children)
+    if (n.shadowChildren) rebuildIndex(n.shadowChildren)
+  }
+}
+
+/** 在整棵树中递归查找指定 idx 的节点 */
+function findNode(nodes: ElementNode[], idx: number): ElementNode | null {
+  for (const n of nodes) {
+    if (n.idx === idx) return n
+    if (n.children) {
+      const found = findNode(n.children, idx)
+      if (found) return found
+    }
+    if (n.shadowChildren) {
+      const found = findNode(n.shadowChildren, idx)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
+ * 刷新已展开的节点（收到 dom-change 后调用）
+ *
+ * 对 parentIdxs 中每个已展开的节点重新拉取子元素，更新 children。
+ * 同时给变化的节点打 flash 高亮标记。
+ */
+async function refreshChangedNodes(changes: DomChangeData) {
+  const refreshed = new Set<number>()
+
+  for (const parentIdx of changes.parentIdxs) {
+    /** 优先在 nodeIndex 里找 */
+    let node = nodeIndex.get(parentIdx) ?? null
+    if (!node) {
+      node = findNode(elementTreeRoot.value, parentIdx)
+      if (node) nodeIndex.set(parentIdx, node)
+    }
+
+    if (!node) continue
+
+    /** 高亮变化的节点 */
+    node.flash = true
+    setTimeout(() => { if (node) node.flash = false }, 1500)
+
+    /** 如果该节点已展开且有 children 已加载，刷新 children */
+    if (node.expanded && !refreshed.has(parentIdx)) {
+      refreshed.add(parentIdx)
+      try {
+        const freshChildren = await loadElementChildren(node)
+        /** 高亮新出现的子节点 */
+        const oldIdxs = new Set((node.children ?? []).map((c) => c.idx))
+        for (const fc of freshChildren) {
+          if (!oldIdxs.has(fc.idx)) {
+            fc.flash = true
+            setTimeout(() => { fc.flash = false }, 1500)
+          }
+        }
+        node.children = freshChildren
+        rebuildIndex(elementTreeRoot.value)
+      } catch {
+        /** 刷新失败静默，下次变化会再试 */
+      }
+    }
+
+    /** shadow 子树也刷新 */
+    if (node.shadowExpanded && !refreshed.has(-parentIdx)) {
+      refreshed.add(-parentIdx)
+      try {
+        node.shadowChildren = await loadElementChildren(node, true)
+      } catch {
+        /** 静默 */
+      }
+    }
+  }
+
+  /** 如果根级别的某个 parentIdx 是 body（idx=0 或 parentIdx 未找到），刷新根 */
+  const rootParents = changes.parentIdxs.filter(
+    (idx) => !nodeIndex.has(idx) && !findNode(elementTreeRoot.value, idx)
+  )
+  if (rootParents.length > 0 && !refreshed.has(-1)) {
+    refreshed.add(-1)
+    /** 有变化但找不到具体节点 → 可能是 body 级变化，刷新根 */
+    elementTreeRoot.value = await loadElementChildren(null)
+    rebuildIndex(elementTreeRoot.value)
+  }
+}
+
+/** watch domChangeVersion 触发刷新 */
+watch(
+  () => props.domChangeVersion,
+  (newVal, oldVal) => {
+    if (newVal === oldVal || !newVal) return
+    if (props.domChangeData && !isFiltering.value) {
+      refreshChangedNodes(props.domChangeData)
+    }
+  }
+)
+
+/** 设备切换时清空树 + 重新加载 */
+watch(
+  () => props.deviceId,
+  () => {
+    nodeIndex.clear()
+    elementTreeRoot.value = []
+    selectedElementIdx.value = null
+    elementInspect.value = null
+    if (props.deviceId) {
+      loadElementTree()
+    }
+  }
+)
+
+/** 首次挂载时自动加载 */
+onMounted(() => {
+  if (props.deviceId) {
+    loadElementTree()
+  }
+})
+</script>
+
+<template>
+  <div class="flex-1 flex overflow-hidden bg-base">
+    <!-- 左：DOM 树 -->
+    <div class="w-2/5 border-r border-base flex flex-col overflow-hidden">
+      <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between">
+        <span class="text-xs font-medium text-secondary">DOM 树</span>
+        <button
+          @click="loadElementTree"
+          :disabled="elementTreeLoading"
+          class="text-xs text-faint hover:text-primary disabled:opacity-50"
+        >{{ elementTreeLoading ? '加载中...' : '刷新' }}</button>
+      </div>
+      <!-- filter 搜索框 -->
+      <div class="px-3 py-2 border-b border-base bg-surface">
+        <input
+          v-model="filterQuery"
+          @input="onFilterInput"
+          type="text"
+          placeholder="搜索元素 (tag/id/class/text)..."
+          spellcheck="false"
+          autocomplete="off"
+          class="w-full text-xs px-2 py-1 bg-base border border-base rounded text-primary placeholder:text-faint focus:outline-none focus:border-primary"
+        />
+      </div>
+      <!-- 树 / 搜索结果 -->
+      <div class="flex-1 overflow-y-auto p-2 font-mono text-xs">
+        <!-- filter 搜索模式 -->
+        <template v-if="isFiltering">
+          <div v-if="filterLoading" class="text-faint text-center py-4">搜索中...</div>
+          <div v-else-if="filterResults.length === 0" class="text-faint text-center py-4">无匹配元素</div>
+          <template v-else>
+            <div class="text-faint text-[10px] mb-2">{{ filterResults.length }} 个匹配</div>
+            <ElementTreeNode
+              v-for="item in filterResults"
+              :key="item.idx"
+              :node="item"
+              :depth="0"
+              :selected-idx="selectedElementIdx"
+              @toggle="handleToggle"
+              @select="selectElement"
+            />
+          </template>
+        </template>
+        <!-- 正常树模式 -->
+        <template v-else>
+          <div v-if="elementTreeLoading && elementTreeRoot.length === 0" class="text-faint text-center py-8">加载中...</div>
+          <div v-else-if="elementTreeRoot.length === 0" class="text-faint text-center py-8">暂无元素</div>
+          <template v-else>
+            <ElementTreeNode
+              v-for="node in elementTreeRoot"
+              :key="node.idx"
+              :node="node"
+              :depth="0"
+              :selected-idx="selectedElementIdx"
+              @toggle="handleToggle"
+              @select="selectElement"
+            />
+          </template>
+        </template>
+      </div>
+    </div>
+
+    <!-- 右：诊断卡 -->
+    <div class="flex-1 overflow-y-auto p-4">
+      <div v-if="elementInspectLoading" class="text-faint text-center py-8 text-sm">诊断中...</div>
+      <div v-else-if="!elementInspect" class="text-faint text-center py-8 text-sm">点击左侧元素查看诊断</div>
+      <template v-else>
+        <!-- 元素标题 -->
+        <div class="mb-4">
+          <div class="text-sm font-semibold text-primary font-mono">
+            {{ elementInspect.tag }}<span v-if="elementInspect.id" class="text-blue-600">#{{ elementInspect.id }}</span>
+          </div>
+          <div v-if="elementInspect.classes" class="text-xs text-muted font-mono mt-1">{{ elementInspect.classes }}</div>
+        </div>
+
+        <!-- 可见性诊断 -->
+        <div class="bg-surface border border-base rounded p-3 mb-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2">可见性</h4>
+          <div class="space-y-1 text-xs font-mono">
+            <div class="flex justify-between"><span class="text-faint">display:</span><span class="text-primary">{{ elementInspect.visibility.display }}</span></div>
+            <div class="flex justify-between"><span class="text-faint">visibility:</span><span class="text-primary">{{ elementInspect.visibility.visibility }}</span></div>
+            <div class="flex justify-between"><span class="text-faint">opacity:</span><span class="text-primary">{{ elementInspect.visibility.opacity }}</span></div>
+            <div class="flex justify-between"><span class="text-faint">尺寸:</span><span class="text-primary">{{ Math.round(elementInspect.visibility.width) }}×{{ Math.round(elementInspect.visibility.height) }}</span></div>
+            <div class="flex justify-between"><span class="text-faint">在视口内:</span><span :class="elementInspect.visibility.inViewport ? 'text-green-600' : 'text-amber-600'">{{ elementInspect.visibility.inViewport ? '✓ 是' : '✗ 否' }}</span></div>
+            <div v-if="elementInspect.visibility.coveredBy" class="pt-1 border-t border-light">
+              <span class="text-red-500">被遮挡:</span>
+              <span class="text-primary">
+                {{ elementInspect.visibility.coveredBy.tag }}<span v-if="elementInspect.visibility.coveredBy.id">#{{ elementInspect.visibility.coveredBy.id }}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 计算样式 -->
+        <div class="bg-surface border border-base rounded p-3 mb-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2">计算样式</h4>
+          <div class="space-y-1 text-xs font-mono">
+            <div v-for="(v, k) in elementInspect.computedStyle" :key="k" class="flex justify-between gap-2">
+              <span class="text-faint shrink-0">{{ k }}:</span>
+              <span class="text-primary text-right break-all">{{ v }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 盒模型 -->
+        <div class="bg-surface border border-base rounded p-3 mb-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2">盒模型</h4>
+          <div class="text-xs font-mono space-y-0.5">
+            <div><span class="text-faint">content:</span> <span class="text-primary">{{ Math.round(elementInspect.box.content.width) }}×{{ Math.round(elementInspect.box.content.height) }}</span></div>
+            <div><span class="text-faint">padding:</span> <span class="text-primary">{{ elementInspect.box.padding.top }} {{ elementInspect.box.padding.right }} {{ elementInspect.box.padding.bottom }} {{ elementInspect.box.padding.left }}</span></div>
+            <div><span class="text-faint">border:</span> <span class="text-primary">{{ elementInspect.box.border.top }} {{ elementInspect.box.border.right }} {{ elementInspect.box.border.bottom }} {{ elementInspect.box.border.left }}</span></div>
+            <div><span class="text-faint">margin:</span> <span class="text-primary">{{ elementInspect.box.margin.top }} {{ elementInspect.box.margin.right }} {{ elementInspect.box.margin.bottom }} {{ elementInspect.box.margin.left }}</span></div>
+          </div>
+        </div>
+
+        <!-- 祖先链 -->
+        <div v-if="elementInspect.ancestors.length > 0" class="bg-surface border border-base rounded p-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2">祖先链</h4>
+          <div class="space-y-1">
+            <button
+              v-for="a in elementInspect.ancestors"
+              :key="a.idx"
+              @click="selectElement(a.idx)"
+              class="block w-full text-left px-2 py-1 text-xs font-mono rounded hover:bg-blue-soft text-primary"
+            >
+              {{ a.tag }}<span v-if="a.id" class="text-blue-600">#{{ a.id }}</span><span v-if="a.classes" class="text-faint">.{{ a.classes.split(' ').join('.') }}</span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</template>

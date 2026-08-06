@@ -19,8 +19,9 @@
 
 import type { ServerToDeviceMessage, ExecResult } from '@clarosight/shared'
 import { startExecCapture, endExecCapture } from './log-collector.js'
-import { takeSnapshot, getElement } from './snapshot.js'
+import { takeSnapshot, getElement, ensureElementIdx } from './snapshot.js'
 import { resolveOriginalPosition, resolveStack } from './source-map-helper.js'
+import { toSerializedValue } from './serialize-value.js'
 
 /** exec 回调类型（由 ws-client 设置，负责 WS 回传） */
 export type ExecHandler = (message: ServerToDeviceMessage) => void
@@ -355,6 +356,25 @@ export function installHelpers(): void {
     }
     return result
   }
+
+  /**
+   * 给任意元素打稳定 idx（Element 面板用）
+   *
+   * snapshot 只给可见/交互元素打 idx，Element 面板要展示全量 DOM 树，
+   * 需要给所有元素打 idx 供后续诊断/操作定位。
+   * 已有 idx 就复用；没有就分配新的（写入 elementsRegistry）。
+   * 返回 -1 表示元素已脱离文档。
+   */
+  w.__clarosight_ensureIdx = (el: Element): number => ensureElementIdx(el)
+
+  /**
+   * 按 idx 取元素（Element 面板的 inspect 代码用）
+   *
+   * 与 getElement 模块内版本一致，挂 window 让 exec 代码可调。
+   * 注意：ensureElementIdx 打的 idx 不写 DOM 属性（避免污染），
+   * 所以不能用 querySelector 反查，必须走 elementsRegistry。
+   */
+  w.__clarosight_getElement = (idx: number): Element | undefined => getElement(idx)
 }
 
 /**
@@ -375,39 +395,42 @@ export async function handleExec(code: string, execId: string): Promise<void> {
   startExecCapture()
   let success = true
   let result: string | undefined
+  let resultValue: import('@clarosight/shared').SerializedValue | undefined
   let error: string | undefined
 
   try {
     /**
-     * 把 code 作为 async 函数体执行 —— AI 可以写多条语句，自己决定 return 什么。
-     * 辅助函数（__clarosight_click 等）已挂到 window，函数体内可直接访问。
-     */
-    const fn = new Function(`"use strict"; return (async () => {\n${code}\n})()`) as () => Promise<unknown>
-    /**
-     * 超时兜底 + 定时器清理
+     * 执行用户/server 代码，兼容两种写法：
      *
-     * 正常完成时必须 clearTimeout，否则：
-     * 1. 定时器句柄泄漏 9s
-     * 2. 超时 promise reject 时无人接住 → 触发 unhandledrejection →
-     *    被 error-catcher 当成设备错误上报，污染 errorCount
+     * 1. 纯表达式（如 `location`、`document.title`）—— eval 直接返回值
+     * 2. 带 return 的代码块（如 server 生成的 `return localStorage...`）—— 需要 new Function
+     * 3. 多条语句（如 `const x = 1; x + 1`）—— eval 返回最后表达式值
+     *
+     * 策略：
+     * - 先检查代码是否含 return 语句 → 有则用 new Function（函数体内 return 合法）
+     * - 无 return → 用间接 eval（全局作用域，自动返回最后表达式值）
+     * - 两种方式都支持 await（eval 返回 Promise 则 await；new Function 包 async 体）
+     *
+     * new Function 在全局作用域执行（和间接 eval 一致），能访问 window 所有全局变量。
      */
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('执行超时（SDK 9s）')), SDK_EXEC_TIMEOUT)
-    })
-    try {
-      const ret = await Promise.race([fn(), timeoutPromise])
-      result = serializeResult(ret)
-    } finally {
-      if (timer) clearTimeout(timer)
+    const hasReturn = /\breturn\b/.test(code)
+    let ret: unknown
+
+    if (hasReturn) {
+      /** server 端生成的代码带 return —— new Function 函数体内合法 */
+      const fn = new Function(`return (async () => {\n${code}\n})()`)
+      ret = await fn()
+    } else {
+      /** 纯表达式 / 多条语句 —— 间接 eval 返回最后表达式值 */
+      const syncRet = (0, eval)(code)
+      ret = syncRet instanceof Promise ? await syncRet : syncRet
     }
+    /** 结构化序列化（可交互对象树） */
+    resultValue = toSerializedValue(ret)
+    /** 兼容旧消费方：JSON 字符串 */
+    result = serializeResult(ret)
   } catch (e) {
     success = false
-    /**
-     * 错误信息增强：运行时错误附带 stack（截断 6 行），帮 AI 定位出错位置。
-     * 语法错误（SyntaxError 无 stack）只返回 name: message。
-     * stack 含压缩代码位置没关系——source map 解析能力已具备，AI 可进一步解析。
-     */
     if (e instanceof Error) {
       error = `${e.name}: ${e.message}`
       if (e.stack) {
@@ -432,5 +455,5 @@ export async function handleExec(code: string, execId: string): Promise<void> {
     }
   }
 
-  resultSender?.(execId, { success, result, error, logs, snapshotText })
+  resultSender?.(execId, { success, result, resultValue, error, logs, snapshotText })
 }

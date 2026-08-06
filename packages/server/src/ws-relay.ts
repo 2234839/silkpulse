@@ -70,6 +70,30 @@ export function setupWebSocket(
     }
   }
 
+  /**
+   * 每个控制台连接的 watcher 偏好（面板级按需采集）
+   *
+   * key = 控制台 ws，value = 该控制台当前观看的设备 + 启用的 watcher 集合。
+   * 控制台切换面板时发 set-watchers 更新此偏好。
+   */
+  const consoleWatcherPrefs = new Map<WebSocket, { deviceId: string; watchers: Set<string> }>()
+
+  /**
+   * 汇总某设备所有订阅控制台的 watcher 偏好，取并集
+   *
+   * 多个控制台可能同时看不同面板（一个看 Storage，一个看 Element），
+   * 设备端需要启用所有控制台请求的 watcher 的并集。
+   */
+  function mergeDeviceWatchers(deviceId: string): string[] {
+    const merged = new Set<string>()
+    for (const [, pref] of consoleWatcherPrefs) {
+      if (pref.deviceId === deviceId) {
+        for (const w of pref.watchers) merged.add(w)
+      }
+    }
+    return [...merged]
+  }
+
   /** 取消某控制台对所有设备的订阅 */
   function unsubscribeAll(ws: WebSocket) {
     const subs = consoleSubscriptions.get(ws)
@@ -82,6 +106,16 @@ export function setupWebSocket(
       }
     }
     consoleSubscriptions.delete(ws)
+    /** 清理 watcher 偏好，并通知设备端更新（可能需要关闭某些 watcher） */
+    const pref = consoleWatcherPrefs.get(ws)
+    consoleWatcherPrefs.delete(ws)
+    if (pref) {
+      const merged = mergeDeviceWatchers(pref.deviceId)
+      const device = registry.get(pref.deviceId)
+      if (device && device.ws.readyState === device.ws.OPEN) {
+        device.ws.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
+      }
+    }
   }
 
   wss.on('connection', (ws, req) => {
@@ -124,11 +158,12 @@ export function setupWebSocket(
             break
           }
           case 'update-info': {
-            /** SPA 路由变化：SDK 上报新 url/title，server 更新元信息并通知控制台 */
+            /** SPA 路由变化：SDK 上报新 url/title/icon，server 更新元信息并通知控制台 */
             if (!device) return
             registry.updateInfo(deviceId, {
               url: msg.device.url,
               title: msg.device.title,
+              icon: msg.device.icon,
               viewportWidth: msg.device.viewportWidth,
               viewportHeight: msg.device.viewportHeight,
               deviceType: msg.device.deviceType,
@@ -137,6 +172,8 @@ export function setupWebSocket(
               type: 'device-online',
               device: device.info,
             })
+            /** 通知所有控制台刷新设备列表（title/icon/url 变化要反映到侧边栏） */
+            notifyDeviceListChanged()
             break
           }
           case 'log': {
@@ -229,6 +266,28 @@ export function setupWebSocket(
             }
             break
           }
+          case 'storage-change': {
+            /** 远程设备 storage 变化（SDK 劫持 setItem/removeItem 触发），转发给控制台实时刷新 */
+            if (!device) return
+            broadcast(deviceId, {
+              type: 'storage-change',
+              deviceId,
+              storageType: msg.storageType,
+              key: msg.key,
+              timestamp: msg.timestamp,
+            })
+            break
+          }
+          case 'dom-change': {
+            /** 远程设备 DOM 变化（SDK MutationObserver 触发），转发给控制台 Element 面板实时刷新 */
+            if (!device) return
+            broadcast(deviceId, {
+              type: 'dom-change',
+              deviceId,
+              changes: msg.changes,
+            })
+            break
+          }
         }
       })
 
@@ -282,6 +341,17 @@ export function setupWebSocket(
             subs.delete(msg.deviceId)
             const watchers = deviceWatchers.get(msg.deviceId)
             watchers?.delete(ws)
+            break
+          }
+          case 'set-watchers': {
+            /** 控制台通知当前打开的面板，server 汇总所有控制台的 watcher 后下发合并结果 */
+            consoleWatcherPrefs.set(ws, { deviceId: msg.deviceId, watchers: new Set(msg.watchers) })
+            /** 重新计算该设备的 watcher 并集 */
+            const merged = mergeDeviceWatchers(msg.deviceId)
+            const device = registry.get(msg.deviceId)
+            if (device && device.ws.readyState === device.ws.OPEN) {
+              device.ws.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
+            }
             break
           }
         }

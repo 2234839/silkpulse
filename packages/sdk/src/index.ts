@@ -16,6 +16,8 @@ import { installNetworkCollector } from './network-collector.js'
 import { installErrorCatcher, getErrorCount, setResourceErrorHandler } from './error-catcher.js'
 import { pushRecentError } from './snapshot.js'
 import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
+import { installStorageWatcher, setStorageWatcherActive } from './storage-watcher.js'
+import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './dom-watcher.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
 const DEVICE_ID_KEY = '__clarosight_device_id__'
@@ -49,12 +51,68 @@ function getDeviceId(): string {
   }
 }
 
+/** 采集页面图标 URL（优先 meta link，兜底 /favicon.ico） */
+function collectPageIconUrl(): string | undefined {
+  /** 优先：<link rel="icon" / "shortcut icon" / "apple-touch-icon"> */
+  const linkSel = 'link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'
+  const linkEl = document.querySelector<HTMLLinkElement>(linkSel)
+  if (linkEl?.href) return linkEl.href
+
+  /** 兜底：/favicon.ico（用绝对路径，避免相对路径解析错误） */
+  try {
+    return new URL('/favicon.ico', location.origin).href
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 异步采集页面图标并转为 base64 data URL
+ *
+ * 直接传 URL 给控制台会遇到跨域 ORB/CORS 阻塞。
+ * 在 SDK 端转成 data URL：优先用同源 /favicon.ico（fetch 无跨域问题），
+ * 不行再试 <link> icon 的 fetch（跨域 CDN 可能失败），都失败兜底返回原始 URL。
+ */
+async function collectPageIconDataUrl(): Promise<string | undefined> {
+  const linkIconUrl = collectPageIconUrl()
+  if (!linkIconUrl) return undefined
+
+  /** 候选 URL 列表：同源 favicon 优先（最可能 fetch 成功），再试 link 指向的 URL */
+  const candidates: string[] = []
+  try {
+    candidates.push(new URL('/favicon.ico', location.origin).href)
+  } catch { /* ignore */ }
+  if (linkIconUrl) candidates.push(linkIconUrl)
+
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) continue
+      const blob = await res.blob()
+      /** 小于 32KB 才转 base64（避免超大图浪费带宽） */
+      if (blob.size > 32 * 1024) continue
+      const dataUrl = await new Promise<string | null>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => resolve(null)
+        reader.readAsDataURL(blob)
+      })
+      if (dataUrl) return dataUrl
+    } catch {
+      /** fetch 失败（跨域/网络）：试下一个候选 */
+    }
+  }
+  /** 所有候选都失败：兜底返回 link URL（至少控制台还能尝试加载） */
+  return linkIconUrl
+}
+
 /** 收集当前设备元信息 */
 function collectDeviceInfo(id: string, tags: string[] = [], note?: string): DeviceInfo {
   return {
     id,
     url: location.href,
     title: document.title,
+    icon: collectPageIconUrl(),
     userAgent: navigator.userAgent,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
@@ -113,23 +171,41 @@ export function init(options: InitOptions): void {
    *  不进 error 流、不计 errorCount，避免一个 404 资源就让设备亮红条误导诊断 */
   setResourceErrorHandler((msg) => pushRecentError(msg))
 
+  /** storage 变化采集：劫持 setItem/removeItem/clear + 跨 tab storage 事件 */
+  installStorageWatcher((storageType, key, timestamp) => send({ type: 'storage-change', storageType, key, timestamp }))
+
+  /** DOM 变化采集：MutationObserver 监听子树增删/属性/文本变化（Element 面板实时刷新用） */
+  installDomWatcher((changes) => send({ type: 'dom-change', changes }))
+
   /** 2. 安装 exec 辅助函数（必须在 connect 前挂到 window） */
   installHelpers()
 
   /** 3. 注册 exec 结果回传器 */
   setResultSender((execId, result) => send({ type: 'exec-result', execId, result }))
 
-  /** 4. 注册 server 消息处理器（目前只有 exec） */
+  /** 4. 注册 server 消息处理器（exec + set-watchers 按需采集） */
   onMessage((msg: ServerToDeviceMessage) => {
     if (msg.type === 'exec') {
       handleExec(msg.code, msg.execId).catch(() => {
         /** handleExec 内部已捕获错误并回传，这里是兜底 */
       })
+    } else if (msg.type === 'set-watchers') {
+      /** 控制台打开对应面板时启用采集器，关闭时停用（按需采集减少不必要的数据传输） */
+      const watchers = msg.watchers
+      setStorageWatcherActive(watchers.includes('storage'))
+      setDomWatcherActive(watchers.includes('dom'))
     }
   })
 
   /** 5. 连接 server */
   connect({ url: wsUrl, info })
+
+  /** 5.1 异步采集 base64 icon（避免跨域 ORB/CORS 拦截，控制台直接渲染 data URL） */
+  collectPageIconDataUrl().then((iconDataUrl) => {
+    if (iconDataUrl) {
+      send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
+    }
+  })
 
   /** 6. SPA 路由变化时上报新 url/title（让 server/AI 看到正确的页面位置） */
   /** 劫持 pushState/replaceState 捕获 SPA 路由跳转，popstate 捕获浏览器前进后退 */
@@ -144,6 +220,12 @@ export function init(options: InitOptions): void {
         viewportHeight: window.innerHeight,
         deviceType: detectDeviceType(navigator.userAgent, window.innerWidth),
       },
+    })
+    /** 路由变化后也异步采集 base64 icon */
+    collectPageIconDataUrl().then((iconDataUrl) => {
+      if (iconDataUrl) {
+        send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
+      }
     })
   }
   for (const method of ['pushState', 'replaceState'] as const) {
@@ -170,9 +252,35 @@ export function init(options: InitOptions): void {
     resizeTimer = setTimeout(reportUrlChange, 300)
   })
 
+  /** 监听 document.title 变化（JS 动态修改 title 时实时上报） */
+  const titleEl = document.querySelector('title')
+  if (titleEl) {
+    const titleObserver = new MutationObserver(() => reportUrlChange())
+    titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true })
+  }
+
+  /** 监听 head 子节点变化（捕获 <link rel="icon"> 动态添加/修改，SPA 切换 icon） */
+  if (document.head) {
+    const headObserver = new MutationObserver((mutations) => {
+      /** 只在有 link/icon 相关节点变化时才上报 */
+      const relevant = mutations.some((m) => {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLLinkElement) return true
+        }
+        if (m.target instanceof HTMLLinkElement) return true
+        return false
+      })
+      if (relevant) reportUrlChange()
+    })
+    headObserver.observe(document.head, { childList: true, subtree: true, attributes: true, attributeFilter: ['href', 'rel'] })
+  }
+
   /** 7. 页面卸载断开 */
   if (options.disconnectOnUnload !== false) {
-    window.addEventListener('beforeunload', () => disconnect())
+    window.addEventListener('beforeunload', () => {
+      disconnectDomWatcher()
+      disconnect()
+    })
   }
 }
 

@@ -334,3 +334,27 @@ export function hasElement(idx: number): boolean {
 export function getElement(idx: number): Element | undefined {
   return elementsRegistry.get(idx)
 }
+/**
+ * 确保元素有稳定 idx（Element 面板用）
+ *
+ * 已有 data-clarosight-idx 就复用；没有就分配新 idx（取当前 registry 最大 idx + 1）
+ * 并写入 elementsRegistry，让 __clarosight_click(idx) 等操作能定位到这个元素。
+ *
+ * 与 processElement 的分配逻辑对齐：不写 data-clarosight-idx 属性（避免污染 DOM，
+ * 该属性只在 snapshot 真正采集时才打），只维护 registry 映射。
+ * 返回 -1 表示元素已脱离文档（isConnected=false）。
+ */
+export function ensureElementIdx(el: Element): number {
+  if (!el.isConnected) return -1
+  /** 复用已有 idx（如果元素已被 snapshot 采集过） */
+  for (const [k, v] of elementsRegistry) {
+    if (v === el) return k
+  }
+  /** 分配新 idx：取当前最大值 + 1（与 processElement 的 maxIdx 策略对齐） */
+  let maxIdx = 0
+  for (const k of elementsRegistry.keys()) {
+    if (k >= maxIdx) maxIdx = k + 1
+  }
+  elementsRegistry.set(maxIdx, el)
+  return maxIdx
+}

@@ -69,6 +69,15 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       return
     }
 
+    /** 3.5 /favicon.ico —— 控制台自身 favicon（SDK demo 页面也能同源 fetch 到） */
+    if (pathname === '/favicon.ico') {
+      /** 1×1 透明 PNG，避免 404 噪音 */
+      const transparentPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' })
+      res.end(transparentPng)
+      return
+    }
+
     /** 4. /demo —— 同源测试页（供无头测试真实验证 network 采集，不跨域） */
     if (pathname === '/demo' || pathname === '/demo.html') {
       const demoPagePath = options.demoPagePath ?? path.resolve(__dirname, '../../../examples/test-page.html')
@@ -80,10 +89,13 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       }
     }
 
-    /** 5. /inject/* —— 多形态注入（bookmarklet / userscript），让不方便改源码的线上站也能接入 */
-    if (pathname === '/inject/bookmarklet' || pathname === '/inject/userscript') {
+    /** 5. /inject/* —— 多形态注入（iife / bookmarklet / userscript），让不方便改源码的线上站也能接入 */
+    if (pathname === '/inject/iife' || pathname === '/inject/bookmarklet' || pathname === '/inject/userscript') {
       const origin = `http://localhost:${port}`
-      if (pathname === '/inject/bookmarklet') {
+      if (pathname === '/inject/iife') {
+        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
+        res.end(injectScriptCode(origin))
+      } else if (pathname === '/inject/bookmarklet') {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
         res.end(buildBookmarklet(origin))
       } else {
