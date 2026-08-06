@@ -12,7 +12,9 @@
     "start": "vp run @clarosight/server#start",
     "typecheck": "pnpm exec tsc --noEmit -p packages/shared/tsconfig.json && pnpm exec tsc --noEmit -p packages/sdk/tsconfig.json && pnpm exec tsc --noEmit -p packages/server/tsconfig.json",
     "test": "node scripts/headless-test.mjs",
-    "check": "vp check"
+    "check": "vp check",
+    "docker:build": "pnpm build && docker build -t gs/clarosight:latest .",
+    "docker:run": "docker run --rm -p 8080:8080 gs/clarosight:latest"
   },
   "devDependencies": {
     "puppeteer-core": "catalog:",
