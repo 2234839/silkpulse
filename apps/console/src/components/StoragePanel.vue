@@ -436,7 +436,7 @@ const isNewValueJson = computed(() => {
     <!-- ==================== 平铺表格视图（local/session/cookie） ==================== -->
     <template v-else>
       <!-- 表格（可滚动区域） -->
-      <div class="flex-1 overflow-y-auto p-4">
+      <div class="flex-1 overflow-y-auto">
         <div v-if="storageLoading" class="text-faint text-center py-8">加载中...</div>
         <table v-else class="w-full text-sm">
           <thead class="bg-surface text-secondary text-xs uppercase sticky top-0 z-10 shadow-[0_1px_0_0_var(--cs-border)]">
@@ -461,7 +461,10 @@ const isNewValueJson = computed(() => {
                   class="px-3 py-2 text-xs font-mono break-all max-w-md cursor-pointer"
                   :class="selectedKey === String(key) ? 'text-primary' : 'text-muted'"
                   @click="selectKey(String(key))"
-                >{{ value }}</td>
+                >
+                  <div v-if="value.length > 200" class="max-h-24 overflow-y-auto">{{ value }}</div>
+                  <template v-else>{{ value }}</template>
+                </td>
                 <td class="px-3 py-2 text-xs text-faint whitespace-nowrap">{{ getKeyTime(String(key)) ?? '' }}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
                   <button
