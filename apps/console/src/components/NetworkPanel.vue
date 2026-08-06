@@ -46,6 +46,37 @@ function formatBody(body: string): string {
 }
 
 /**
+ * 判断响应体是否为 base64 图片（可预览）
+ *
+ * SDK 对 image/* 响应会用 FileReader.readAsDataURL 编码为 data URL，
+ * resBodyEncoding='base64' 标识。
+ */
+function isImagePreview(n: NetworkEntry): boolean {
+  return n.resBodyEncoding === 'base64' && !!n.resBodyMime?.startsWith('image/')
+}
+
+/**
+ * 判断响应体是否为二进制信息（只读类型+大小，无内容）
+ *
+ * 字体/wasm/大图片等用 resBodyEncoding='info' 标识。
+ */
+function isBinaryInfo(n: NetworkEntry): boolean {
+  return n.resBodyEncoding === 'info'
+}
+
+/**
+ * 响应体展示模式：'preview'（智能预览）/ 'raw'（原始文本）
+ *
+ * 图片默认预览，可切到 raw 看完整 base64 字符串。
+ */
+const resBodyViewMode = ref<'preview' | 'raw'>('preview')
+
+/** 响应体展示模式重置：切换请求时回到默认 preview */
+watch(selectedNetwork, () => {
+  resBodyViewMode.value = 'preview'
+})
+
+/**
  * 把 NetworkEntry 转成 cURL 命令
  *
  * 让 AI/开发者能直接在本地复现远程设备的请求。
@@ -289,9 +320,42 @@ watch(() => props.network, () => {
 
           <!-- 响应体 -->
           <div v-if="selectedNetwork.resBody">
-            <div class="text-xs text-faint mb-1">响应体</div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs text-faint">响应体</div>
+              <!-- 视图切换：只在 base64 图片和文本之间切换 -->
+              <div v-if="isImagePreview(selectedNetwork) || isBinaryInfo(selectedNetwork)" class="flex items-center gap-1">
+                <button
+                  @click="resBodyViewMode = 'preview'"
+                  class="px-2 py-0.5 text-xs rounded font-medium transition-colors"
+                  :class="resBodyViewMode === 'preview' ? 'bg-blue-500 text-white' : 'bg-elevated text-secondary bg-elevated-hover'"
+                >预览</button>
+                <button
+                  @click="resBodyViewMode = 'raw'"
+                  class="px-2 py-0.5 text-xs rounded font-medium transition-colors"
+                  :class="resBodyViewMode === 'raw' ? 'bg-blue-500 text-white' : 'bg-elevated text-secondary bg-elevated-hover'"
+                >原始</button>
+              </div>
+            </div>
             <div class="bg-surface p-3 rounded border border-base">
-              <ObjectInspector :json="selectedNetwork.resBody" />
+              <!-- 图片预览模式 -->
+              <template v-if="isImagePreview(selectedNetwork) && resBodyViewMode === 'preview'">
+                <div class="space-y-2">
+                  <img :src="selectedNetwork.resBody" alt="响应预览" class="max-w-full rounded border border-light" style="max-height: 300px;" />
+                  <div class="text-xs text-faint font-mono">{{ selectedNetwork.resBodyMime }} · {{ selectedNetwork.resBody!.length }} chars (base64)</div>
+                </div>
+              </template>
+              <!-- 二进制信息模式 -->
+              <template v-else-if="isBinaryInfo(selectedNetwork) && resBodyViewMode === 'preview'">
+                <div class="text-sm text-secondary font-mono">{{ selectedNetwork.resBody }}</div>
+              </template>
+              <!-- 原始文本 / JSON 文本 -->
+              <template v-else-if="!isBinaryInfo(selectedNetwork)">
+                <ObjectInspector :json="resBodyViewMode === 'raw' && isImagePreview(selectedNetwork) ? selectedNetwork.resBody!.substring(0, 200) + '...' : selectedNetwork.resBody" />
+              </template>
+              <!-- info 模式的原始视图（无内容可显示） -->
+              <template v-else>
+                <div class="text-xs text-faint">无原始内容（二进制未读取）</div>
+              </template>
             </div>
           </div>
 

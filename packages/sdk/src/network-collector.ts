@@ -206,9 +206,9 @@ function installFetchHook(sink: NetworkSink): void {
       const res = await originalFetch(input as RequestInfo, init)
       /** 响应头 */
       const resHeaders = pickKeyHeaders(res.headers, KEY_RES_HEADERS)
-      /** 异步读 body（不阻塞响应链路） */
-      cloneAndRead(res, (resBody) => {
-        sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders, undefined, 'fetch'))
+      /** 异步读 body（不阻塞响应链路），二进制响应智能处理 */
+      cloneAndRead(res, (resBody, encoding, mime) => {
+        sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders, undefined, 'fetch', encoding, mime))
       })
       return res
     } catch (err) {
@@ -457,6 +457,8 @@ function makeEntry(
   resHeaders?: Record<string, string>,
   error?: string,
   kind?: 'fetch' | 'xhr' | 'resource',
+  resBodyEncoding?: 'base64' | 'info',
+  resBodyMime?: string,
 ): NetworkEntry {
   return {
     seq: seq++,
@@ -468,6 +470,8 @@ function makeEntry(
     reqBody,
     resHeaders,
     resBody,
+    resBodyEncoding,
+    resBodyMime,
     duration: duration ?? 0,
     error,
     kind,
@@ -565,9 +569,70 @@ async function readRequestBodyClone(req: Request, maxLen: number): Promise<strin
   return truncate(text, maxLen)
 }
 
-/** 克隆响应并异步读取 body（不消费原始 body） */
-function cloneAndRead(res: Response, cb: (body: string | undefined) => void): void {
+/**
+ * 二进制响应体大小上限（base64 编码后）。
+ * 图片等 base64 体积膨胀约 4/3 倍，适当放大上限保证常见图标/小图可预览。
+ */
+const MAX_BINARY_BODY = 32_000
+
+/** 文本类 MIME 前缀（这些类型用 .text() 读取有诊断价值） */
+const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/x-www-form-urlencoded', 'application/ld+json']
+
+/** 可预览的图片 MIME（读为 base64 data URL 在控制台 <img> 预览） */
+const IMAGE_MIME_PREFIX = 'image/'
+
+/** 判断 content-type 是否为文本类 */
+function isTextContentType(contentType: string): boolean {
+  const ct = contentType.toLowerCase().split(';')[0].trim()
+  return TEXT_MIME_PREFIXES.some((p) => ct.startsWith(p))
+}
+
+/** 判断 content-type 是否为图片类 */
+function isImageContentType(contentType: string): boolean {
+  return contentType.toLowerCase().split(';')[0].trim().startsWith(IMAGE_MIME_PREFIX)
+}
+
+/** 克隆响应并异步读取 body（不消费原始 body），二进制响应智能处理 */
+function cloneAndRead(
+  res: Response,
+  cb: (body: string | undefined, encoding?: 'base64' | 'info', mime?: string) => void,
+): void {
   try {
+    const contentType = res.headers.get('content-type') ?? ''
+
+    /** 图片类：读为 base64 data URL，控制台可直接 <img> 预览 */
+    if (isImageContentType(contentType)) {
+      const mime = contentType.toLowerCase().split(';')[0].trim()
+      res
+        .clone()
+        .blob()
+        .then((blob) => {
+          /** 超大图片不读内容，只报信息（避免 WS 消息过大） */
+          if (blob.size > MAX_BINARY_BODY) {
+            cb(`[图片 ${mime} ${blob.size}b]`, 'info', mime)
+            return
+          }
+          const reader = new FileReader()
+          reader.onload = () => cb(truncate(reader.result as string, MAX_BINARY_BODY), 'base64', mime)
+          reader.onerror = () => cb(`[图片 ${mime} ${blob.size}b]`, 'info', mime)
+          reader.readAsDataURL(blob)
+        })
+        .catch(() => cb(undefined))
+      return
+    }
+
+    /** 非文本二进制（字体/wasm/zip 等）：只报类型+大小信息 */
+    if (contentType && !isTextContentType(contentType)) {
+      const mime = contentType.toLowerCase().split(';')[0].trim()
+      res
+        .clone()
+        .blob()
+        .then((blob) => cb(`[二进制 ${mime} ${blob.size}b]`, 'info', mime))
+        .catch(() => cb(undefined))
+      return
+    }
+
+    /** 文本类：正常 .text() 读取 */
     res
       .clone()
       .text()

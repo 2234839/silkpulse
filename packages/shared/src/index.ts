@@ -196,6 +196,15 @@ export interface NetworkEntry {
   resHeaders?: Record<string, string>
   /** 响应体（截断到 1000 字符） */
   resBody?: string
+  /**
+   * 响应体编码方式
+   * - undefined：默认文本（resBody 是原始文本）
+   * - 'base64'：二进制数据经 base64 编码（resBody 是 base64 字符串，用 resBodyMime 判断具体类型）
+   * - 'info'：二进制但未读取内容（resBody 是描述信息如 "[Blob image/png 1234b]"）
+   */
+  resBodyEncoding?: 'base64' | 'info'
+  /** 响应体 MIME 类型（resBodyEncoding='base64' 时有值，如 image/png） */
+  resBodyMime?: string
   /** 耗时（ms） */
   duration: number
   /** 是否出错 */
