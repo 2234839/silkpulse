@@ -46,8 +46,8 @@ export type ProjectPublic = Omit<Project, 'apiKeyHash' | 'apiKeySalt'>
 
 /** 鉴权上下文（附加到 req 上） */
 export interface AuthContext {
-  /** 鉴权身份类型 */
-  role: 'admin' | 'project' | 'anonymous'
+  /** 鉴权身份类型：admin=超管 | project=项目密钥 | device=设备WS（无密钥，可被管理端查看） | anonymous=未鉴权 */
+  role: 'admin' | 'project' | 'device' | 'anonymous'
   /** 项目 ID（role='project' 时有值，admin 可访问所有项目） */
   projectId?: string
 }
@@ -398,21 +398,23 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 设备 WebSocket：需要项目密钥（超管密钥可不带 projectId）
+    // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
+    // 仍保留 IP 限流防恶意连接
     if (wsPath === '/ws/device') {
       const ip = getClientIp(req)
       if (!this.rateLimiter.check(ip)) return { role: 'anonymous' }
-      /** 超管密钥可连所有设备（不需要 projectId） */
+      /** 如果带了 apiKey + projectId，验证后标记项目归属；不带也放行 */
+      if (apiKey && projectId) {
+        const pid = this.projects.verifyKey(apiKey)
+        if (pid && pid === projectId) {
+          return { role: 'project', projectId: pid }
+        }
+      }
       if (this.adminKey && apiKey && safeEqual(apiKey, this.adminKey)) {
         return { role: 'admin', projectId: projectId || undefined }
       }
-      /** 项目密钥验证：必须有 projectId + apiKey 且匹配 */
-      if (!projectId || !apiKey) return { role: 'anonymous' }
-      const pid = this.projects.verifyKey(apiKey)
-      if (pid && pid === projectId) {
-        return { role: 'project', projectId: pid }
-      }
-      return { role: 'anonymous' }
+      /** 无密钥设备也允许接入（role=device，可被所有管理员看到） */
+      return { role: 'device' }
     }
 
     return { role: 'anonymous' }

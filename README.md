@@ -89,14 +89,14 @@ clarosight server (Node + TS)
 ### 构建
 
 ```bash
-pnpm install
-pnpm build    # 构建所有包并复制产物到 server/public
+vp install
+vp run -r build    # 构建所有包并复制产物到 server/public
 ```
 
 ### 启动 server
 
 ```bash
-pnpm start    # 默认端口 8080
+vp run start    # 默认端口 8080
 # 或 node packages/server/dist/bin/clarosight.mjs --port 3000
 ```
 
@@ -110,7 +110,7 @@ pnpm start    # 默认端口 8080
 #### 方式一：直接用 Node 运行
 
 ```bash
-pnpm build
+vp run -r build
 
 # 上传到服务器
 rsync -avz --delete packages/server/dist/   root@<server>:/app/clarosight/dist/
@@ -123,6 +123,14 @@ CLAROSIGHT_ADMIN_KEY=<你的密钥> node /app/clarosight/dist/bin/clarosight.mjs
 
 #### 方式二：Docker
 
+```bash
+vp run -r build
+docker build -t clarosight .
+docker run -d -p 8080:8080 -e CLAROSIGHT_ADMIN_KEY=<你的密钥> -v ./data:/data clarosight
+```
+
+Dockerfile 示例：
+
 ```dockerfile
 FROM node:24-alpine
 WORKDIR /app
@@ -132,12 +140,6 @@ COPY examples/test-page.html   /app/examples/test-page.html
 ENV NODE_ENV=production
 ENV CLAROSIGHT_DATA_DIR=/data
 CMD ["node", "/app/dist/bin/clarosight.mjs", "--port", "8080"]
-```
-
-```bash
-pnpm build
-docker build -t clarosight .
-docker run -d -p 8080:8080 -e CLAROSIGHT_ADMIN_KEY=<你的密钥> -v ./data:/data clarosight
 ```
 
 #### 环境变量
@@ -256,13 +258,13 @@ clarosight/
 
 ```bash
 # 类型检查
-pnpm typecheck
+vp check
 
 # 启动 server
 node packages/server/dist/bin/clarosight.mjs --port 8083
 
 # 运行无头测试（puppeteer-core + 系统 chromium）
-CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
+CLAROSIGHT_SERVER=http://localhost:8083 vp test
 ```
 
 CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 94 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
