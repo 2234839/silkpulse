@@ -16,7 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
-const { authStatus, userRole, apiKey, projectId } = useAuth()
+const { authStatus, userRole, projectId } = useAuth()
 
 const serverOrigin = location.origin
 
@@ -30,11 +30,11 @@ const scriptSnippet = computed(() => {
   const gt = String.fromCharCode(62)
   const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`
   if (authStatus.value?.authEnabled) {
-    /** 项目密钥登录：自动填入实际密钥 + projectId */
-    if (userRole.value === 'project' && apiKey.value && projectId.value) {
-      return `${base} data-api-key="${apiKey.value}" data-project-id="${projectId.value}"${gt}${lt}/script${gt}`
+    /** 项目密钥登录：只带 projectId（设备端不需要密钥） */
+    if (userRole.value === 'project' && projectId.value) {
+      return `${base} data-project-id="${projectId.value}"${gt}${lt}/script${gt}`
     }
-    return `${base} data-api-key="你的项目密钥" data-project-id="你的项目ID"${gt}${lt}/script${gt}`
+    return `${base} data-project-id="你的项目ID"${gt}${lt}/script${gt}`
   }
   return `${base}${gt}${lt}/script${gt}`
 })
@@ -50,10 +50,9 @@ const userscriptSnippet = ref('')
  * 保证四种方式始终统一：要么都带鉴权信息，要么都不带。
  */
 watchEffect(() => {
-  /** 拼查询参数（项目密钥登录时才带） */
+  /** 项目密钥登录时只带 project_id（设备端不需要密钥，随便接入） */
   const params = new URLSearchParams()
-  if (userRole.value === 'project' && apiKey.value && projectId.value) {
-    params.set('api_key', apiKey.value)
+  if (userRole.value === 'project' && projectId.value) {
     params.set('project_id', projectId.value)
   }
   const qs = params.toString()

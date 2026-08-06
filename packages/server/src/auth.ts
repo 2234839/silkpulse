@@ -379,7 +379,6 @@ export class AuthManager {
   authorizeWsConnection(req: IncomingMessage, wsPath: string): AuthContext {
     const url = req.url ?? ''
     const projectId = extractQueryParam(url, 'projectId')
-    const apiKey = extractQueryParam(url, 'apiKey')
 
     // 未启用鉴权：允许匿名
     if (!this.isAuthEnabled()) return { role: 'admin' }
@@ -403,17 +402,15 @@ export class AuthManager {
     if (wsPath === '/ws/device') {
       const ip = getClientIp(req)
       if (!this.rateLimiter.check(ip)) return { role: 'anonymous' }
-      /** 如果带了 apiKey + projectId，验证后标记项目归属；不带也放行 */
-      if (apiKey && projectId) {
-        const pid = this.projects.verifyKey(apiKey)
-        if (pid && pid === projectId) {
-          return { role: 'project', projectId: pid }
+      /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
+      if (projectId) {
+        /** 验证 projectId 是否存在且启用 */
+        const proj = this.projects.get(projectId)
+        if (proj?.enabled) {
+          return { role: 'project', projectId }
         }
       }
-      if (this.adminKey && apiKey && safeEqual(apiKey, this.adminKey)) {
-        return { role: 'admin', projectId: projectId || undefined }
-      }
-      /** 无密钥设备也允许接入（role=device，可被所有管理员看到） */
+      /** 无 projectId 的设备也允许接入（role=device，可被所有管理员看到） */
       return { role: 'device' }
     }
 
