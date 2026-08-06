@@ -16,6 +16,10 @@ export interface FeatureCheck {
    * 使用 try-catch 包裹执行，抛异常视为不支持。
    */
   test: string
+  /** MDN 文档路径 slug（如 'Web/CSS/grid'，拼接成 https://developer.mozilla.org/zh-CN/docs/<slug>） */
+  mdn?: string
+  /** 简短说明（中文，一句话描述这个特性是干啥的） */
+  desc?: string
 }
 
 /**
@@ -35,10 +39,14 @@ export interface FeatureResult {
   category: FeatureCategory
   /** 检测结果 */
   value: boolean | string
+  /** MDN 文档完整 URL */
+  mdn?: string
+  /** 简短说明 */
+  desc?: string
 }
 
 /** 检测项分类 */
-export type FeatureCategory = 'css' | 'js-api' | 'network' | 'media' | 'storage' | 'device'
+export type FeatureCategory = 'css' | 'js-api' | 'network' | 'media' | 'storage' | 'device' | 'element'
 
 /** 按分类组织的检测结果报告 */
 export interface FeatureReport {
@@ -58,6 +66,7 @@ export interface FeatureReport {
 export const CATEGORY_LABELS: Record<FeatureCategory, string> = {
   css: 'CSS 特性',
   'js-api': 'JS API',
+  element: 'HTML 元素',
   network: '网络能力',
   media: '媒体能力',
   storage: '存储能力',

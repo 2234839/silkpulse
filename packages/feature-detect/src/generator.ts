@@ -16,7 +16,7 @@ import { CATEGORY_LABELS } from './types.js'
 export function generateFeatureDetectScript(): string {
   return `return (function(){
   var checks = ${JSON.stringify(
-    FEATURE_CHECKS.map((c) => ({ id: c.id, label: c.label, category: c.category, test: c.test })),
+    FEATURE_CHECKS.map((c) => ({ id: c.id, label: c.label, category: c.category, test: c.test, mdn: c.mdn ?? '', desc: c.desc ?? '' })),
   )};
   var results = [];
   for (var i = 0; i < checks.length; i++) {
@@ -29,7 +29,7 @@ export function generateFeatureDetectScript(): string {
     } catch(e) {
       value = false;
     }
-    results.push({ id: c.id, label: c.label, category: c.category, value: value });
+    results.push({ id: c.id, label: c.label, category: c.category, value: value, mdn: c.mdn ? 'https://developer.mozilla.org/zh-CN/docs/' + c.mdn : '', desc: c.desc });
   }
   return results;
 })()`

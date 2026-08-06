@@ -14,6 +14,10 @@ interface FeatureResult {
   label: string
   category: string
   value: boolean | string
+  /** MDN 文档完整 URL */
+  mdn?: string
+  /** 简短说明 */
+  desc?: string
 }
 
 const props = defineProps<{
@@ -36,10 +40,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   media: '媒体能力',
   storage: '存储能力',
   device: '设备信息',
+  element: 'HTML 元素',
 }
 
 /** 分类排列顺序 */
-const CATEGORY_ORDER = ['css', 'js-api', 'network', 'media', 'storage', 'device']
+const CATEGORY_ORDER = ['css', 'js-api', 'network', 'media', 'storage', 'device', 'element']
 
 /** 按分类组织的结果 */
 const groupedResults = computed(() => {
@@ -184,8 +189,20 @@ async function copyResults() {
               class="w-2 h-2 rounded-full shrink-0"
               :class="item.value === false ? 'bg-red-500' : typeof item.value === 'string' && item.value !== 'dark' && item.value !== 'light' ? 'bg-amber-400' : 'bg-green-500'"
             />
-            <!-- 特性名称 -->
-            <span class="text-primary truncate flex-1">{{ item.label }}</span>
+            <!-- 特性名称 + 说明 tooltip -->
+            <span
+              class="text-primary truncate flex-1"
+              :title="item.desc || ''"
+            >{{ item.label }}</span>
+            <!-- MDN 文档链接 -->
+            <a
+              v-if="item.mdn"
+              :href="item.mdn"
+              target="_blank"
+              rel="noopener"
+              class="text-blue-400 hover:text-blue-500 text-[10px] shrink-0"
+              title="MDN 文档"
+            >↗</a>
             <!-- 检测值 -->
             <span
               class="font-mono text-[10px] shrink-0"
