@@ -100,6 +100,66 @@ pnpm start    # 默认端口 8080
 # 或 node packages/server/dist/bin/clarosight.mjs --port 3000
 ```
 
+### 部署到生产
+
+构建后只需要三个产物目录，无需 `node_modules`（ws 等依赖已通过 `vite.config.ts` 的 `pack.deps.alwaysBundle` 打包进 bundle）：
+- `packages/server/dist/` — server bundle（含 `bin/clarosight.mjs` 入口）
+- `packages/server/public/` — 控制台 UI + SDK（`sdk.js`）
+- `examples/test-page.html` — demo 测试页
+
+#### 方式一：直接用 Node 运行
+
+```bash
+pnpm build
+
+# 上传到服务器
+rsync -avz --delete packages/server/dist/   root@<server>:/app/clarosight/dist/
+rsync -avz --delete packages/server/public/ root@<server>:/app/clarosight/public/
+rsync -avz examples/test-page.html          root@<server>:/app/clarosight/examples/
+
+# 在服务器上启动（用 PM2 / systemd 管理进程）
+CLAROSIGHT_ADMIN_KEY=<你的密钥> node /app/clarosight/dist/bin/clarosight.mjs --port 8080
+```
+
+#### 方式二：Docker
+
+```dockerfile
+FROM node:24-alpine
+WORKDIR /app
+COPY packages/server/dist/     /app/dist/
+COPY packages/server/public/   /app/public/
+COPY examples/test-page.html   /app/examples/test-page.html
+ENV NODE_ENV=production
+ENV CLAROSIGHT_DATA_DIR=/data
+CMD ["node", "/app/dist/bin/clarosight.mjs", "--port", "8080"]
+```
+
+```bash
+pnpm build
+docker build -t clarosight .
+docker run -d -p 8080:8080 -e CLAROSIGHT_ADMIN_KEY=<你的密钥> -v ./data:/data clarosight
+```
+
+#### 环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `CLAROSIGHT_ADMIN_KEY` | 超管密钥（鉴权用，**必设**） |
+| `CLAROSIGHT_DATA_DIR` | 数据目录（默认 `/data`） |
+| `--port` | 监听端口（默认 `8080`） |
+
+#### 反向代理
+
+Nginx 反代到 server 端口，确保 WebSocket 升级：
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $http_connection;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+> 接入代码（script/bookmarklet/userscript）的 server 地址会**根据请求 Host 头自动生成**，无需手动修改。
+
 ### 接入远程设备
 
 **方式一：script 标签**（最常用，能改源码时）

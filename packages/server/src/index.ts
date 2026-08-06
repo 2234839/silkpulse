@@ -106,7 +106,11 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     if (pathname === '/demo' || pathname === '/demo.html') {
       const demoPagePath = options.demoPagePath ?? path.resolve(__dirname, '../../../examples/test-page.html')
       if (fs.existsSync(demoPagePath)) {
-        let html = fs.readFileSync(demoPagePath, 'utf8').replace(/localhost:8080/g, `localhost:${port}`)
+        /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */
+        const demoHost = req.headers.host || `localhost:${port}`
+        const demoProto = req.headers['x-forwarded-proto'] || 'http'
+        const demoOrigin = `${demoProto}://${demoHost}`
+        let html = fs.readFileSync(demoPagePath, 'utf8').replace(/localhost:8080/g, demoOrigin)
         /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
         if (auth.isAuthEnabled()) {
           /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
@@ -134,7 +138,10 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
 
     /** 5. /inject/* —— 多形态注入（iife / bookmarklet / userscript），让不方便改源码的线上站也能接入 */
     if (pathname === '/inject/iife' || pathname === '/inject/bookmarklet' || pathname === '/inject/userscript') {
-      const origin = `http://localhost:${port}`
+      /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */
+      const injHost = req.headers.host || `localhost:${port}`
+      const injProto = req.headers['x-forwarded-proto'] || 'http'
+      const origin = `${injProto}://${injHost}`
       if (pathname === '/inject/iife') {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
         res.end(injectScriptCode(origin))
