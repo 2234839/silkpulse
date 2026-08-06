@@ -340,7 +340,12 @@ async function main() {
       }
       console.log('')
 
-      const failed = network.filter((n) => n.status >= 400 || n.status === 0)
+      /**
+       * 异常网络请求：排除 WS 条目（WS 的 status 是 readyState 0-3，与 HTTP 状态码语义不同，
+       * status=0(CONNECTING) 会被误判为失败）。WS 单独一段展示。
+       */
+      const httpNet = network.filter((n) => n.protocol !== 'ws')
+      const failed = httpNet.filter((n) => n.status >= 400 || n.status === 0)
       console.log(`## 异常网络请求 (${failed.length})`)
       if (failed.length === 0) {
         console.log('（无）')
@@ -362,7 +367,7 @@ async function main() {
        * duration 数据 SDK 已采集，这里给 AI 排好序直接用，省得 AI 自己算。
        */
       const SLOW_THRESHOLD = 500
-      const byDuration = [...network].sort((a, b) => b.duration - a.duration)
+      const byDuration = [...httpNet].sort((a, b) => b.duration - a.duration)
       const slowTop = byDuration.slice(0, 5).filter((n) => n.duration > 0)
       console.log(`## 慢请求 Top ${slowTop.length}（> ${SLOW_THRESHOLD}ms 标记 ⚠）`)
       if (slowTop.length === 0) {
@@ -371,6 +376,29 @@ async function main() {
         for (const n of slowTop) {
           const mark = n.duration > SLOW_THRESHOLD ? ' ⚠' : ''
           console.log(`- ${n.duration}ms${mark} ${n.method} ${n.status} ${n.url}`)
+        }
+      }
+      console.log('')
+
+      /**
+       * WebSocket 连接 —— 实时推送/IM/游戏类应用的核心通信通道。
+       * AI 诊断这类应用时需看到 WS 连接状态 + 帧摘要（收发是否正常）。
+       */
+      const wsConns = network.filter((n) => n.protocol === 'ws')
+      console.log(`## WebSocket 连接 (${wsConns.length})`)
+      if (wsConns.length === 0) {
+        console.log('（无）')
+      } else {
+        const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']
+        for (const w of wsConns.slice(-10)) {
+          const state = stateNames[w.wsState] ?? '?'
+          const frames = w.frames || []
+          const sendN = frames.filter((f) => f.dir === 'send').length
+          const recvN = frames.filter((f) => f.dir === 'recv').length
+          console.log(`- ${w.method} [${state}] ${w.url}（↑${sendN} ↓${recvN}）`)
+          /** error 事件帧（连接异常的关键信号） */
+          const errFrame = frames.find((f) => f.dir === 'event' && f.data === 'error')
+          if (errFrame) console.log(`  ⚠ 连接 error 事件`)
         }
       }
       console.log('')
