@@ -202,6 +202,12 @@ export interface NetworkEntry {
   error?: string
   /** 标识这是 WebSocket 连接条目（普通 HTTP 请求无此字段） */
   protocol?: 'ws'
+  /** 请求类型：fetch（fetch API）/ xhr（XMLHttpRequest）/ ws（WebSocket）/ resource（<script>/<link>/等静态资源） */
+  kind?: 'fetch' | 'xhr' | 'ws' | 'resource'
+  /** 资源 MIME 类型（仅 resource 类型，如 text/css/application/javascript） */
+  mimeType?: string
+  /** 资源体积（字节，仅 resource 类型） */
+  size?: number
   /** WebSocket readyState（0=CONNECTING/1=OPEN/2=CLOSING/3=CLOSED），仅 WS 条目 */
   wsState?: number
   /** 帧时间线（send/recv/event），仅 WS 条目，上限 50 帧 FIFO */

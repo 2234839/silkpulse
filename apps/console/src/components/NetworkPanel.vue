@@ -87,6 +87,12 @@ const networkSearch = ref('')
  */
 const networkStatusFilter = ref<'all' | 'success' | 'error'>('all')
 /**
+ * 类型筛选：all 全部 / fetch / xhr / ws / resource
+ *
+ * 诊断时需要区分"API 请求"和"静态资源加载"——页面白屏查 resource，接口报错查 fetch/xhr。
+ */
+const networkKindFilter = ref<'all' | 'fetch' | 'xhr' | 'ws' | 'resource'>('all')
+/**
  * 耗时排序：time（默认时间正序）/ desc（耗时降序，慢请求在最上）/ asc（耗时升序）
  *
  * 诊断"页面慢/卡"时，失败请求往往不是根因——真正的瓶颈是那些 status 200
@@ -102,6 +108,10 @@ function toggleDurationSort() {
 }
 const filteredNetwork = computed(() => {
   let result = props.network
+  /** 类型筛选 */
+  if (networkKindFilter.value !== 'all') {
+    result = result.filter((n) => n.kind === networkKindFilter.value)
+  }
   if (networkStatusFilter.value === 'success') {
     result = result.filter((n) => n.status >= 200 && n.status < 400)
   } else if (networkStatusFilter.value === 'error') {
@@ -142,6 +152,18 @@ watch(() => props.network, () => {
           placeholder="搜索请求（URL / 方法 / 状态码）"
           class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
         />
+        <!-- 类型筛选：全部 / Fetch / XHR / WS / 资源 -->
+        <div class="flex items-center gap-1">
+          <button
+            v-for="kf in (['all', 'fetch', 'xhr', 'ws', 'resource'] as const)"
+            :key="kf"
+            @click="networkKindFilter = kf"
+            class="px-2 py-0.5 text-xs rounded font-medium"
+            :class="networkKindFilter === kf
+              ? 'bg-blue-500 text-white'
+              : 'bg-elevated text-secondary bg-elevated-hover'"
+          >{{ kf === 'all' ? '全部' : kf === 'resource' ? '资源' : kf === 'ws' ? 'WS' : kf.toUpperCase() }}</button>
+        </div>
         <!-- 状态筛选：全部 / 成功 / 失败 -->
         <div class="flex items-center gap-1">
           <button

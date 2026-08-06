@@ -162,14 +162,20 @@ export class DeviceRegistry {
     if (existing) {
       /** 重连：保留 logs/network/errors 历史，只换连接和元信息。
        *  tags/note 以 server 侧为准（可能被控制台/API 修改过），不被 SDK 上报覆盖。
+       *  icon 同理：SDK register 时只带 URL，已有的 data URL icon 不被覆盖。
        *  仅当 SDK 上报了非空 tags/note 且 server 侧为空时才采纳（首次带标签接入） */
       const mergedTags = existing.info.tags.length > 0
         ? existing.info.tags
         : (info.tags ?? [])
       const mergedNote = existing.info.note || info.note
+      /** icon：优先保留已有的 data URL（更可靠），否则用新上报的 */
+      const mergedIcon = existing.info.icon?.startsWith('data:')
+        ? existing.info.icon
+        : info.icon
       existing.ws = ws
       existing.info = {
         ...info,
+        icon: mergedIcon,
         onlineAt: existing.info.onlineAt,
         tags: mergedTags,
         note: mergedNote,

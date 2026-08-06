@@ -116,6 +116,62 @@ export function installNetworkCollector(
   installFetchHook(sink)
   installXhrHook(sink)
   installWsHook(sink, wsFrameSink, wsStateSink)
+  installResourceObserver(sink)
+}
+
+/**
+ * 用 PerformanceObserver 采集静态资源加载（<script>/<link>/<img> 等）
+ *
+ * fetch/XHR 劫持只能拿到 API 请求，拿不到浏览器自动发起的资源加载。
+ * PerformanceObserver 的 'resource' 条目包含 URL/initiatorType/duration/transferSize 等，
+ * 填补这个盲区——诊断"页面白屏/样式没加载"时需要看这些。
+ *
+ * 已采集的 fetch/XHR URL 不会重复采集（用 Set 去重）。
+ */
+function installResourceObserver(sink: NetworkSink): void {
+  /** 已采集的 URL 去重（避免 fetch/XHR 劫持的请求被 PerformanceObserver 重复上报） */
+  const seen = new Set<string>()
+
+  const reportEntry = (e: PerformanceResourceTiming) => {
+    /** 只排除 SDK 的 WebSocket 长连接（不是资源加载） */
+    if (e.name.includes('/ws/device')) return
+    if (seen.has(e.name)) return
+    seen.add(e.name)
+    /** Set 上限避免内存泄漏（大量请求的 SPA） */
+    if (seen.size > 500) {
+      const first = seen.values().next().value
+      if (first) seen.delete(first)
+    }
+
+    /** initiatorType: 'link'/'script'/'img'/'css'/'fetch'/'xmlhttprequest'/'navigation' 等 */
+    const initType = e.initiatorType
+    /** fetch/xmlhttprequest 已经被 hook 采集了，不重复 */
+    if (initType === 'fetch' || initType === 'xmlhttprequest' || initType === 'navigation') return
+
+    sink({
+      seq: seq++,
+      timestamp: new Date(e.startTime + performance.timeOrigin).toISOString(),
+      url: e.name,
+      method: 'GET',
+      status: 200,
+      duration: Math.round(e.duration),
+      kind: 'resource',
+      mimeType: initType,
+      size: e.transferSize || e.encodedBodySize || undefined,
+    })
+  }
+
+  try {
+    /** 采集后续新加载的资源 */
+    const observer = new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        reportEntry(e as PerformanceResourceTiming)
+      }
+    })
+    observer.observe({ type: 'resource', buffered: true })
+  } catch {
+    /** PerformanceObserver 不支持（老浏览器）——静默降级 */
+  }
 }
 
 /** 劫持全局 fetch */
@@ -152,11 +208,11 @@ function installFetchHook(sink: NetworkSink): void {
       const resHeaders = pickKeyHeaders(res.headers, KEY_RES_HEADERS)
       /** 异步读 body（不阻塞响应链路） */
       cloneAndRead(res, (resBody) => {
-        sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders))
+        sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders, undefined, 'fetch'))
       })
       return res
     } catch (err) {
-      sink(makeEntry(url, method, 0, reqBody, undefined, Date.now() - start, reqHeaders, undefined, err instanceof Error ? err.message : String(err)))
+      sink(makeEntry(url, method, 0, reqBody, undefined, Date.now() - start, reqHeaders, undefined, err instanceof Error ? err.message : String(err), 'fetch'))
       throw err
     }
   }
@@ -247,7 +303,7 @@ function installXhrHook(sink: NetworkSink): void {
         /** 读响应头失败忽略 */
       }
       const err = this.status === 0 ? '请求未完成' : undefined
-      sink(makeEntry(ctx.url, ctx.method, this.status, ctx.reqBody, resBody, Date.now() - ctx.start, reqHeaders, resHeaders, err))
+      sink(makeEntry(ctx.url, ctx.method, this.status, ctx.reqBody, resBody, Date.now() - ctx.start, reqHeaders, resHeaders, err, 'xhr'))
     })
 
     originalSend.call(this, body)
@@ -308,6 +364,7 @@ function installWsHook(sink: NetworkSink, wsFrameSink: WsFrameSink, wsStateSink:
         status: 0,
         duration: 0,
         protocol: 'ws',
+        kind: 'ws',
         wsState: OriginalWS.CONNECTING,
         frames: [],
       }
@@ -399,6 +456,7 @@ function makeEntry(
   reqHeaders?: Record<string, string>,
   resHeaders?: Record<string, string>,
   error?: string,
+  kind?: 'fetch' | 'xhr' | 'resource',
 ): NetworkEntry {
   return {
     seq: seq++,
@@ -412,6 +470,7 @@ function makeEntry(
     resBody,
     duration: duration ?? 0,
     error,
+    kind,
   }
 }
 
