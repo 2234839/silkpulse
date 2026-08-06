@@ -220,7 +220,11 @@ async function openAiContext() {
 }
 
 /** 当前激活的面板 */
-const activeTab = ref<'console' | 'network' | 'errors' | 'snapshot' | 'exec' | 'element' | 'storage'>('console')
+/**
+ * 面板顺序按使用频率/重要性排列：
+ * Console → Element → Network → Storage → Errors → Snapshot → Exec
+ */
+const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'snapshot' | 'exec'>('console')
 
 /**
  * 面板切换时按需启停远程采集器
@@ -437,7 +441,7 @@ onMounted(() => connect())
           <!-- Tab 栏 -->
           <nav class="flex border-b border-base bg-surface">
             <button
-              v-for="tab in (['console', 'network', 'errors', 'snapshot', 'exec', 'element', 'storage'] as const)"
+              v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'snapshot', 'exec'] as const)"
               :key="tab"
               @click="activeTab = tab"
               class="px-4 py-2 text-sm font-medium border-b-2 flex items-center gap-1.5"
