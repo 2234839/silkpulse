@@ -98,8 +98,6 @@ function serializeObject(
   refMap: Map<object, number>,
   refId: number,
 ): SerializedValue {
-  const obj = val as object
-
   /** 超过最大深度：返回截断标记 */
   if (depth >= MAX_DEPTH) {
     return { type: 'object', preview: '…', refId }
@@ -127,7 +125,7 @@ function serializeObject(
   /** Map */
   if (val instanceof Map) {
     const entries = Array.from(val.entries()).slice(0, MAX_ENTRIES)
-    const props: SerializedProperty[] = entries.map(([k, v], i) => ({
+    const props: SerializedProperty[] = entries.map(([k, v]) => ({
       key: formatKey(k),
       value: toSerializedValue(v, depth + 1, seen, refMap),
     }))
@@ -224,7 +222,8 @@ function serializeObject(
 
   /** TypedArray */
   if (ArrayBuffer.isView(val)) {
-    const arr = val as { length: number; [i: number]: unknown }
+    /** ArrayBufferView（TypedArray / DataView）有 length 和数字索引 */
+    const arr = val as unknown as { length: number; [i: number]: unknown }
     const elements: SerializedValue[] = Array.from({ length: Math.min(arr.length, MAX_ENTRIES) }, (_, i) =>
       toSerializedValue(arr[i], depth + 1, seen, refMap),
     )
@@ -248,7 +247,7 @@ function serializeObject(
   const seenKeys = new Set<string>()
 
   /** 自身可枚举属性 */
-  for (const k of Object.keys(val)) {
+  for (const k of Object.keys(val as Record<string, unknown>)) {
     if (!seenKeys.has(k)) {
       seenKeys.add(k)
       allKeys.push({ key: k, isSymbol: false, isGetter: false })

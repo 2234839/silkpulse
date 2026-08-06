@@ -11,6 +11,7 @@
 import { ref, nextTick } from 'vue'
 import type { SerializedValue } from '@clarosight/shared'
 import { useExecHistory } from '../composables/useExecHistory'
+import { apiFetch } from '../utils/api'
 import ObjectInspector from './ObjectInspector.vue'
 
 const props = defineProps<{
@@ -41,7 +42,7 @@ async function runExec() {
   execOk.value = null
   let ok = false
   try {
-    const res = await fetch(`/api/devices/${props.deviceId}/exec`, {
+    const res = await apiFetch(`/api/devices/${props.deviceId}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: execCode.value }),

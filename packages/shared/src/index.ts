@@ -16,6 +16,7 @@ export type DeviceMessage =
   | { type: 'network'; entry: NetworkEntry }
   | { type: 'ws-frame'; seq: number; frame: WsFrame }
   | { type: 'ws-state'; seq: number; wsState: number }
+  | { type: 'sse-event'; seq: number; event: SseEvent }
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
   | { type: 'exec-result'; execId: string; result: ExecResult }
@@ -53,6 +54,7 @@ export type ServerToConsoleMessage =
   | { type: 'network'; deviceId: string; entry: NetworkEntry }
   | { type: 'ws-frame'; deviceId: string; seq: number; frame: WsFrame }
   | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
+  | { type: 'sse-event'; deviceId: string; seq: number; event: SseEvent }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
@@ -77,6 +79,8 @@ export type WatcherType = 'storage' | 'dom'
 export interface DeviceInfo {
   /** 设备唯一标识（sdk 端生成，sessionStorage 持久化，保证同 tab 刷新不变） */
   id: string
+  /** 所属项目 ID（鉴权模式下由 server 在连接时分配） */
+  projectId?: string
   /** 当前页面 URL */
   url: string
   /** 页面标题 */
@@ -110,6 +114,8 @@ export interface DeviceInfo {
 export interface OfflineDeviceSummary {
   /** 设备 id */
   id: string
+  /** 所属项目 ID */
+  projectId?: string
   /** 最后的页面 URL */
   url: string
   /** 最后的页面标题 */
@@ -176,6 +182,18 @@ export interface WsFrame {
   data: string
 }
 
+/** SSE 事件（Server-Sent Events 流式推送的单条事件） */
+export interface SseEvent {
+  /** ISO 时间戳 */
+  timestamp: string
+  /** 事件类型（event: 字段的值，默认 'message'） */
+  event: string
+  /** 事件 ID（id: 字段的值，断线重连用） */
+  id?: string
+  /** 事件数据（data: 字段的值，多行合并，截断到 500 字符） */
+  data: string
+}
+
 /** network 请求条目（HAR 风格，借鉴 PageSpy） */
 export interface NetworkEntry {
   /** 内部递增序号（环形缓冲区定位用） */
@@ -221,6 +239,13 @@ export interface NetworkEntry {
   wsState?: number
   /** 帧时间线（send/recv/event），仅 WS 条目，上限 50 帧 FIFO */
   frames?: WsFrame[]
+  /**
+   * 标识这是 SSE 连接条目（text/event-stream 流式响应）
+   * SSE 连接在 fetch hook 中检测到后走流式 reader 路径
+   */
+  sseState?: 'open' | 'closed'
+  /** SSE 事件时间线，仅 SSE 条目，上限 50 条 FIFO */
+  events?: SseEvent[]
 }
 
 /** 全局错误条目 */

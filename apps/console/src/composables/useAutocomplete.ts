@@ -13,6 +13,7 @@
  * 缓存策略：property 模式按 expr 缓存（同一对象不重复探测），root 模式每次实时。
  */
 import { ref } from 'vue'
+import { apiFetch } from '../utils/api'
 
 /** 单条补全建议 */
 export interface CompletionItem {
@@ -171,7 +172,7 @@ async function probeRemote(
 
   contextLoading.value = true
   try {
-    const res = await fetch(`/api/devices/${deviceId}/exec`, {
+    const res = await apiFetch(`/api/devices/${deviceId}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),

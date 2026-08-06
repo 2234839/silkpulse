@@ -6,6 +6,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue'
 import { useConsoleSocket } from './composables/useConsoleSocket'
+import { useAuth } from './composables/useAuth'
 import SnapshotPanel from './components/SnapshotPanel.vue'
 import FeaturePanel from './components/FeaturePanel.vue'
 import ErrorsPanel from './components/ErrorsPanel.vue'
@@ -17,6 +18,7 @@ import StoragePanel from './components/StoragePanel.vue'
 import { useAiContext } from './composables/useAiContext'
 import { useTheme } from './composables/useTheme'
 import { copyText } from './utils/clipboard'
+import { apiFetch } from './utils/api'
 
 const { theme, toggleTheme } = useTheme()
 
@@ -30,12 +32,19 @@ const serverOrigin = location.origin
 
 /** script 标签方式（前端自己拼，最简单） */
 /**
- * ⚠️ 不能直接写 script 标签字符串字面量：
- * Vue SFC 解析器扫整个文件找 script 结束标签来定位 script 块结束位置，
- * 字符串里的该标签会被误认为 script 块结束，导致后续 TS 全被当成 HTML 解析。
- * 拆开拼接绕开这个陷阱。
+ * ⚠️ 不能直接写 HTML 标签字符串字面量（含尖括号）：
+ * Vue SFC 解析器会误认为 script 块结束，导致后续 TS 全被当成 HTML 解析。
+ * 用 String.fromCharCode 拼接绕开这个陷阱。
  */
-const scriptSnippet = ['<script src="', serverOrigin, '/sdk.js"></s', 'cript>'].join('')
+const scriptSnippet = computed(() => {
+  const lt = String.fromCharCode(60)   /** < */
+  const gt = String.fromCharCode(62)   /** > */
+  const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`
+  if (authStatus.value?.authEnabled) {
+    return `${base} data-api-key="你的项目密钥" data-project-id="你的项目ID"${gt}${lt}/script${gt}`
+  }
+  return `${base}${gt}${lt}/script${gt}`
+})
 
 /** iife / bookmarklet / userscript 从 server 拉现成代码（前后端一处真相，未来改代码只改 server） */
 const iifeSnippet = ref('')
@@ -56,7 +65,7 @@ const copyingInject = ref<InjectTab | null>(null)
 async function copyInject() {
   const code =
     injectTab.value === 'script'
-      ? scriptSnippet
+      ? scriptSnippet.value
       : injectTab.value === 'iife'
         ? iifeSnippet.value
         : injectTab.value === 'bookmarklet'
@@ -74,7 +83,7 @@ async function copyInject() {
 
 /** 当前 Tab 对应的代码内容（只读展示用） */
 const currentInjectSnippet = computed(() => {
-  if (injectTab.value === 'script') return scriptSnippet
+  if (injectTab.value === 'script') return scriptSnippet.value
   if (injectTab.value === 'iife') return iifeSnippet.value
   if (injectTab.value === 'bookmarklet') return bookmarkletSnippet.value
   return userscriptSnippet.value
@@ -190,7 +199,7 @@ async function saveTags() {
   const tags = tagDraft.value.split(',').map((t) => t.trim()).filter(Boolean)
   const note = noteDraft.value.trim() || undefined
   try {
-    await fetch(`/api/devices/${id}/tags`, {
+    await apiFetch(`/api/devices/${id}/tags`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tags, note }),
@@ -304,11 +313,111 @@ function relativeTime(ts: number): string {
  * 底层走 exec 通道下发 localStorage.setItem 等代码，不新增 WS 协议。
  */
 
-onMounted(() => connect())
+/** ─── 鉴权 ─── */
+const {
+  apiKey,
+  authStatus,
+  saveKey,
+  clearKey,
+  checkAuthStatus,
+  isAuthenticated,
+} = useAuth()
+
+/** 是否需要显示鉴权页面 */
+const needAuth = computed(() => {
+  if (!authStatus.value) return false /** 加载中不显示 */
+  if (!authStatus.value.authEnabled) return false /** 未启用鉴权直接进 */
+  return !isAuthenticated()
+})
+
+/** 密钥输入框值 */
+const authKeyInput = ref('')
+/** 鉴权错误信息 */
+const authError = ref('')
+/** 鉴权加载中 */
+const authLoading = ref(false)
+
+/** 提交密钥鉴权 */
+async function submitAuth() {
+  if (!authKeyInput.value.trim()) return
+  authLoading.value = true
+  authError.value = ''
+  try {
+    /** 验证密钥：用 /api/devices 测试 */
+    const res = await fetch('/api/devices', {
+      headers: { Authorization: `Bearer ${authKeyInput.value.trim()}` },
+    })
+    if (res.status === 401) {
+      authError.value = '密钥无效，请检查后重试'
+      return
+    }
+    if (!res.ok) {
+      authError.value = `服务器错误: ${res.status}`
+      return
+    }
+    /** 验证成功，保存密钥 */
+    saveKey(authKeyInput.value.trim())
+    authKeyInput.value = ''
+    /** 重新连接 WS */
+    connect()
+  } catch {
+    authError.value = '网络错误，请检查服务器连接'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+/** 退出登录（清除密钥） */
+function logout() {
+  clearKey()
+  authKeyInput.value = ''
+  authError.value = ''
+  /** 重新检查鉴权状态 */
+  checkAuthStatus()
+}
+
+onMounted(async () => {
+  await checkAuthStatus()
+  /** 鉴权通过后（或未启用鉴权）才连接 WS */
+  if (!needAuth.value) connect()
+})
 </script>
 
 <template>
-  <div class="h-screen flex flex-col">
+  <!-- 鉴权页面（鉴权启用且未通过时显示） -->
+  <div v-if="needAuth" class="h-screen flex items-center justify-center bg-gray-900 text-white">
+    <div class="w-96 max-w-full mx-4 space-y-6">
+      <div class="text-center">
+        <div class="text-5xl mb-3">🔐</div>
+        <h1 class="text-2xl font-bold mb-1">clarosight</h1>
+        <p class="text-gray-400 text-sm">输入密钥以访问控制台</p>
+      </div>
+      <div class="space-y-3">
+        <input
+          v-model="authKeyInput"
+          type="password"
+          placeholder="超管密钥或项目密钥"
+          class="w-full px-4 py-3 bg-gray-800 text-white rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none text-sm"
+          @keydown.enter="submitAuth"
+          :disabled="authLoading"
+        />
+        <button
+          @click="submitAuth"
+          :disabled="authLoading || !authKeyInput.trim()"
+          class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white rounded-lg font-medium text-sm transition"
+        >{{ authLoading ? '验证中...' : '登录' }}</button>
+        <p v-if="authError" class="text-red-400 text-sm text-center">{{ authError }}</p>
+      </div>
+      <p class="text-xs text-gray-500 text-center leading-relaxed">
+        超管密钥可查看所有项目和设备<br/>
+        项目密钥只能查看对应项目的设备<br/>
+        <span class="text-gray-600">密钥安全存储在浏览器本地</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div v-else class="h-screen flex flex-col">
     <!-- 顶部栏 -->
     <header class="bg-gray-900 text-white px-6 py-3 flex items-center gap-4">
       <h1 class="text-lg font-semibold">clarosight</h1>
@@ -335,6 +444,13 @@ onMounted(() => connect())
         class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
         title="查看三种方式把设备接入到本控制台"
       >➕ 接入新设备</button>
+      <!-- 退出登录（鉴权模式下显示） -->
+      <button
+        v-if="authStatus?.authEnabled && apiKey"
+        @click="logout"
+        class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
+        title="退出登录"
+      >🚪 退出</button>
       <button
         v-if="selectedDevice"
         @click="openAiContext"

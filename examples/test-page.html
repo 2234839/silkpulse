@@ -117,6 +117,11 @@
   </div>
 
   <div class="demo">
+    <h3>SSE（验证 Server-Sent Events 流式采集）</h3>
+    <button id="sse-btn">连接 SSE 接收事件</button>
+  </div>
+
+  <div class="demo">
     <h3>输出</h3>
     <div id="log">（点击按钮试试）</div>
   </div>
@@ -377,6 +382,36 @@
       ws.addEventListener('message', (e) => {
         console.log('WS 收到 echo:', e.data)
         ws.close()
+      })
+    })
+
+    /**
+     * SSE：连接 server 的 /api/sse-test 端点，接收 5 条事件后连接关闭。
+     * 验证 SDK 的 SSE 采集：network 面板应出现带 SSE 标识的 fetch 条目 + 事件时间线。
+     */
+    document.getElementById('sse-btn').addEventListener('click', () => {
+      console.log('SSE 发起: /api/sse-test')
+      const es = new EventSource('/sse-test')
+      es.addEventListener('open', () => {
+        console.log('SSE 已连接')
+      })
+      es.addEventListener('message', (e) => {
+        console.log('SSE message:', e.data)
+      })
+      es.addEventListener('update', (e) => {
+        console.log('SSE update:', e.data)
+      })
+      es.addEventListener('ping', (e) => {
+        console.log('SSE ping:', e.data)
+      })
+      es.addEventListener('done', (e) => {
+        console.log('SSE done:', e.data)
+        es.close()
+      })
+      es.addEventListener('error', () => {
+        /** 连接关闭后 EventSource 会触发 error，es.close 后不再重连 */
+        if (es.readyState === EventSource.CLOSED) return
+        es.close()
       })
     })
 

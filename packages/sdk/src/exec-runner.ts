@@ -414,17 +414,24 @@ export async function handleExec(code: string, execId: string): Promise<void> {
      * new Function 在全局作用域执行（和间接 eval 一致），能访问 window 所有全局变量。
      */
     const hasReturn = /\breturn\b/.test(code)
-    let ret: unknown
+    /** 执行 promise，与超时竞争——异步永不 resolve 的代码不能无限挂起 */
+    const execPromise = (async () => {
+      if (hasReturn) {
+        /** server 端生成的代码带 return —— new Function 函数体内合法 */
+        const fn = new Function(`return (async () => {\n${code}\n})()`)
+        return await fn()
+      } else {
+        /** 纯表达式 / 多条语句 —— 间接 eval 返回最后表达式值 */
+        const syncRet = (0, eval)(code)
+        return syncRet instanceof Promise ? await syncRet : syncRet
+      }
+    })()
 
-    if (hasReturn) {
-      /** server 端生成的代码带 return —— new Function 函数体内合法 */
-      const fn = new Function(`return (async () => {\n${code}\n})()`)
-      ret = await fn()
-    } else {
-      /** 纯表达式 / 多条语句 —— 间接 eval 返回最后表达式值 */
-      const syncRet = (0, eval)(code)
-      ret = syncRet instanceof Promise ? await syncRet : syncRet
-    }
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('SDK_EXEC_TIMEOUT')), SDK_EXEC_TIMEOUT)
+    })
+
+    const ret = await Promise.race([execPromise, timeoutPromise])
     /** 结构化序列化（可交互对象树） */
     resultValue = toSerializedValue(ret)
     /** 兼容旧消费方：JSON 字符串 */

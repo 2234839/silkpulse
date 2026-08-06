@@ -13,6 +13,7 @@
 import { ref, computed, useTemplateRef, watch, nextTick } from 'vue'
 import type { LogEntry, SerializedValue } from '@clarosight/shared'
 import { copyText } from '../utils/clipboard'
+import { apiFetch } from '../utils/api'
 import { useExecHistory } from '../composables/useExecHistory'
 import {
   getCompletions,
@@ -329,7 +330,7 @@ async function runExecInput() {
   let output = ''
   let resultValue: SerializedValue | undefined
   try {
-    const res = await fetch(`/api/devices/${props.deviceId}/exec`, {
+    const res = await apiFetch(`/api/devices/${props.deviceId}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),

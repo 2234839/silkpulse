@@ -207,7 +207,9 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
   /* ==================== 常规级别方法 ==================== */
 
   const levelMethods = ['log', 'info', 'warn', 'error', 'debug'] as const
-  const original = {} as Record<string, (...args: unknown[]) => void>
+  /** console 方法的宽松类型：各方法参数不同，用 any 匹配原生签名 */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const original = {} as Record<string, (...args: any[]) => void>
 
   for (const m of levelMethods) {
     original[m] = console[m].bind(console)

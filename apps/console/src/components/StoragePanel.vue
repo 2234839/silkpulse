@@ -10,6 +10,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import ObjectInspector from './ObjectInspector.vue'
+import { apiFetch } from '../utils/api'
 
 type StorageType = 'local' | 'session' | 'cookie' | 'indexeddb'
 
@@ -78,7 +79,7 @@ async function loadStorage() {
   if (!props.deviceId) return
   storageLoading.value = true
   try {
-    const res = await fetch(`/api/devices/${props.deviceId}/storage?type=${storageType.value}`)
+    const res = await apiFetch(`/api/devices/${props.deviceId}/storage?type=${storageType.value}`)
     if (res.ok) {
       if (storageType.value === 'indexeddb') {
         const data = await res.json()
@@ -140,7 +141,7 @@ function deselectKey() {
 /** 保存选中项 */
 async function saveSelected() {
   if (!props.deviceId || !selectedKey.value) return
-  const res = await fetch(`/api/devices/${props.deviceId}/storage`, {
+  const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -177,7 +178,7 @@ async function saveNewStorage() {
   if (!props.deviceId) return
   const key = storageNewKey.value.trim()
   if (!key) return
-  const res = await fetch(`/api/devices/${props.deviceId}/storage`, {
+  const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -197,7 +198,7 @@ async function saveNewStorage() {
 /** 删除某条 */
 async function deleteStorage(key: string) {
   if (!props.deviceId) return
-  const res = await fetch(`/api/devices/${props.deviceId}/storage`, {
+  const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -238,7 +239,7 @@ function isStoreExpanded(dbName: string, storeName: string): boolean {
 /** IndexedDB 删除单条 record（通过 exec 通道） */
 async function deleteIndexedDBRecord(dbName: string, storeName: string, key: string) {
   if (!props.deviceId) return
-  const res = await fetch(`/api/devices/${props.deviceId}/storage`, {
+  const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

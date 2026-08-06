@@ -4,6 +4,7 @@
  * 调用 HTTP API GET /api/devices/:id/snapshot，返回 AI 友好的 compact 文本
  */
 import { ref } from 'vue'
+import { apiFetch } from '../utils/api'
 
 export function useSnapshot() {
   const snapshotText = ref('')
@@ -14,7 +15,7 @@ export function useSnapshot() {
     loading.value = true
     error.value = null
     try {
-      const res = await fetch(`/api/devices/${deviceId}/snapshot`)
+      const res = await apiFetch(`/api/devices/${deviceId}/snapshot`)
       if (!res.ok) {
         error.value = `HTTP ${res.status}`
         snapshotText.value = ''

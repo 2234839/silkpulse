@@ -240,7 +240,11 @@ watch(() => props.network, () => {
               <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
                 {{ n.status || '—' }}
               </td>
-              <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">{{ n.url.split('/').pop() || n.url }}</td>
+              <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">
+                <span v-if="n.sseState" class="inline-block px-1 mr-1 text-[10px] rounded bg-purple-key/20 text-purple-key align-middle">SSE</span>
+                <span v-if="n.protocol === 'ws'" class="inline-block px-1 mr-1 text-[10px] rounded bg-blue-key/20 text-blue-key align-middle">WS</span>
+                {{ n.url.split('/').pop() || n.url }}
+              </td>
               <td
                 class="px-3 py-2 text-right text-xs font-mono"
                 :class="n.duration > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'"
@@ -295,6 +299,28 @@ watch(() => props.network, () => {
                 <span v-if="f.dir !== 'event'" class="text-primary break-all">{{ f.data }}</span>
               </div>
               <div v-if="!selectedNetwork.frames?.length" class="text-faint text-center py-4 text-xs">暂无帧（连接已建立，等待收发消息）</div>
+            </div>
+          </div>
+
+          <!-- SSE 事件时间线（仅 SSE 连接条目，对齐 DevTools 的 EventStream 面板） -->
+          <div v-if="selectedNetwork.sseState">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs text-faint">SSE 事件流</span>
+              <span class="text-xs" :class="selectedNetwork.sseState === 'open' ? 'text-green-600' : 'text-faint'">
+                {{ selectedNetwork.sseState === 'open' ? '● 连接中' : '○ 已关闭' }}
+              </span>
+              <span class="text-xs text-faint">({{ selectedNetwork.events?.length ?? 0 }} 事件)</span>
+            </div>
+            <div class="bg-surface border border-base rounded p-2 space-y-0.5 max-h-80 overflow-y-auto">
+              <div v-for="(e, ei) in selectedNetwork.events" :key="ei" class="text-xs font-mono">
+                <div class="flex gap-2">
+                  <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
+                  <span class="shrink-0 text-purple-key">{{ e.event }}</span>
+                  <span v-if="e.id" class="shrink-0 text-faint">id:{{ e.id }}</span>
+                </div>
+                <div class="text-primary break-all pl-4">{{ e.data }}</div>
+              </div>
+              <div v-if="!selectedNetwork.events?.length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
             </div>
           </div>
 

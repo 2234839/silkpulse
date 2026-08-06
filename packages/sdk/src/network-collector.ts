@@ -6,13 +6,15 @@
  * 平衡 AI 复现请求所需信息与隐私/体积。
  */
 
-import type { NetworkEntry, WsFrame } from '@clarosight/shared'
+import type { NetworkEntry, WsFrame, SseEvent } from '@clarosight/shared'
 
 type NetworkSink = (entry: NetworkEntry) => void
 /** WebSocket 帧追加回调（seq 关联连接条目，frame 新帧） */
 type WsFrameSink = (seq: number, frame: WsFrame) => void
 /** WebSocket 状态变更回调（readyState 变化） */
 type WsStateSink = (seq: number, wsState: number) => void
+/** SSE 事件追加回调（seq 关联 fetch 条目，event 新 SSE 事件） */
+type SseEventSink = (seq: number, event: SseEvent) => void
 
 /** 内部序号计数器 */
 let seq = 0
@@ -107,15 +109,18 @@ function parseRawHeaders(raw: string): Headers {
  * @param sink HTTP 请求/WS 连接条目 sink（新连接/新请求时触发）
  * @param wsFrameSink WS 帧追加（send/recv/event，seq 关联连接）
  * @param wsStateSink WS readyState 变化（OPEN/CLOSING/CLOSED）
+ * @param sseEventSink SSE 事件追加（text/event-stream 流式响应的逐事件）
  */
 export function installNetworkCollector(
   sink: NetworkSink,
   wsFrameSink: WsFrameSink,
   wsStateSink: WsStateSink,
+  sseEventSink?: SseEventSink,
 ): void {
-  installFetchHook(sink)
+  installFetchHook(sink, sseEventSink)
   installXhrHook(sink)
   installWsHook(sink, wsFrameSink, wsStateSink)
+  installEventSourceHook(sink, sseEventSink)
   installResourceObserver(sink)
 }
 
@@ -135,6 +140,8 @@ function installResourceObserver(sink: NetworkSink): void {
   const reportEntry = (e: PerformanceResourceTiming) => {
     /** 只排除 SDK 的 WebSocket 长连接（不是资源加载） */
     if (e.name.includes('/ws/device')) return
+    /** EventSource 被 installEventSourceHook 采集，排除其 URL（不重复上报为 resource） */
+    if (sseUrls.has(e.name)) return
     if (seen.has(e.name)) return
     seen.add(e.name)
     /** Set 上限避免内存泄漏（大量请求的 SPA） */
@@ -174,8 +181,68 @@ function installResourceObserver(sink: NetworkSink): void {
   }
 }
 
-/** 劫持全局 fetch */
-function installFetchHook(sink: NetworkSink): void {
+/** 判断 content-type 是否为 SSE 流（text/event-stream） */
+function isSseContentType(contentType: string): boolean {
+  return contentType.toLowerCase().split(';')[0].trim() === 'text/event-stream'
+}
+
+/**
+ * 解析 SSE 协议文本块，提取事件对象
+ *
+ * SSE 协议（RFC 8895 简化版）：
+ * - 事件之间用空行（\n\n）分隔
+ * - 每行格式 `field: value`，标准字段：data / event / id / retry
+ * - `data:` 行可多行，最终用 \n 拼接
+ * - `event:` 缺省为 'message'
+ * - `:` 开头的行是注释，忽略
+ */
+function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string } {
+  const events: SseEvent[] = []
+  /** 按双换行切分，最后不完整的块留在 remaining */
+  const blocks = buffer.split('\n\n')
+  /** 最后一块可能不完整（无尾随 \n\n），留到下次拼接 */
+  const remaining = blocks.pop() ?? ''
+
+  for (const block of blocks) {
+    if (!block.trim()) continue
+    let data: string[] = []
+    let eventType = 'message'
+    let id: string | undefined
+    for (const line of block.split('\n')) {
+      /** 空行/注释行（:开头）忽略 */
+      if (!line || line.startsWith(':')) continue
+      const colonIdx = line.indexOf(':')
+      const field = colonIdx > 0 ? line.slice(0, colonIdx) : line
+      /** 值去掉冒号后一个可选空格（SSE 规范：`: ` 或 `:`） */
+      const value = colonIdx > 0 ? line.slice(colonIdx + 1).replace(/^ /, '') : ''
+      if (field === 'data') {
+        data.push(value)
+      } else if (field === 'event') {
+        eventType = value
+      } else if (field === 'id') {
+        id = value
+      }
+      /** retry 字段忽略（重连间隔，无诊断价值） */
+    }
+    /** data 为空的块跳过（可能是心跳注释或 retry 行） */
+    if (data.length === 0) continue
+    events.push({
+      timestamp: new Date().toISOString(),
+      event: eventType,
+      id,
+      data: truncate(data.join('\n'), MAX_WS_FRAME),
+    })
+  }
+  return { events, remaining }
+}
+
+/**
+ * 劫持全局 fetch
+ *
+ * @param sink HTTP 请求条目 sink
+ * @param sseEventSink SSE 事件增量 sink（可选，不传则 SSE 响应不采集事件）
+ */
+function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink): void {
   const originalFetch = globalThis.fetch
   if (!originalFetch) return
 
@@ -206,7 +273,78 @@ function installFetchHook(sink: NetworkSink): void {
       const res = await originalFetch(input as RequestInfo, init)
       /** 响应头 */
       const resHeaders = pickKeyHeaders(res.headers, KEY_RES_HEADERS)
-      /** 异步读 body（不阻塞响应链路），二进制响应智能处理 */
+
+      /**
+       * SSE 流式响应：检测到 text/event-stream 时走流式 reader 路径。
+       *
+       * SSE 是长连接流式推送，不能等 body 结束才读（永远不结束）。
+       * 用 res.body.tee() 拆出两条流：一条给业务代码用（return tee[0]），
+       * 一条给采集器逐块解析 SSE 事件。
+       *
+       * 如果 body.tee() 不可用（老浏览器/已 locked），降级为 clone +
+       * 一次性读取（只拿到响应头信息，采不到事件流）。
+       */
+      const contentType = res.headers.get('content-type') ?? ''
+      if (sseEventSink && res.body && isSseContentType(contentType)) {
+        /** 创建 SSE 连接条目（类似 WS 连接条目，带 sseState 标识） */
+        const sseEntrySeq = seq++
+        sink({
+          seq: sseEntrySeq,
+          timestamp: new Date().toISOString(),
+          url,
+          method,
+          status: res.status,
+          duration: Date.now() - start,
+          reqHeaders,
+          resHeaders,
+          kind: 'fetch',
+          sseState: 'open',
+          events: [],
+        })
+
+        /** tee 拆流：[0] 给业务代码，[1] 给采集器解析 */
+        const [bodyForCaller, bodyForCollect] = res.body.tee()
+
+        /** 后台逐块解析 SSE 事件（不阻塞业务代码消费流） */
+        ;(async () => {
+          const reader = bodyForCollect.getReader()
+          let buffer = ''
+          try {
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              /** Uint8Array → UTF-8 文本，追加到缓冲区 */
+              buffer += new TextDecoder().decode(value, { stream: true })
+              /** 尝试解析完整事件（按 \n\n 分隔） */
+              const { events, remaining } = parseSseChunk(buffer)
+              buffer = remaining
+              for (const event of events) {
+                sseEventSink(sseEntrySeq, event)
+              }
+            }
+            /** flush 缓冲区剩余数据 */
+            if (buffer.trim()) {
+              const { events } = parseSseChunk(buffer + '\n\n')
+              for (const event of events) {
+                sseEventSink(sseEntrySeq, event)
+              }
+            }
+          } catch {
+            /** reader 读取失败（连接中断等）：静默，关闭事件会通过 sink 通知 */
+          }
+          /** 流结束：上报 closed 状态（用 ws-state 复用关闭信号路径不行，这里用特殊事件） */
+          sseEventSink(sseEntrySeq, { timestamp: new Date().toISOString(), event: '__closed__', data: '' })
+        })()
+
+        /** 返回拆流后的 Response（业务代码正常消费，不受采集影响） */
+        return new Response(bodyForCaller, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers,
+        })
+      }
+
+      /** 非 SSE：异步读 body（不阻塞响应链路），二进制响应智能处理 */
       cloneAndRead(res, (resBody, encoding, mime) => {
         sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders, undefined, 'fetch', encoding, mime))
       })
@@ -312,6 +450,9 @@ function installXhrHook(sink: NetworkSink): void {
 
 /** WS 帧数据最大截断长度 */
 const MAX_WS_FRAME = 500
+
+/** EventSource 连接的完整 URL 集合（供 resource observer 去重） */
+const sseUrls = new Set<string>()
 
 /**
  * 劫持全局 WebSocket，采集连接生命周期 + send/recv 帧
@@ -443,6 +584,117 @@ function installWsHook(sink: NetworkSink, wsFrameSink: WsFrameSink, wsStateSink:
   HookedWebSocket.prototype.constructor = HookedWebSocket
 
   globalThis.WebSocket = HookedWebSocket as unknown as typeof WebSocket
+}
+
+/**
+ * 劫持全局 EventSource，采集 SSE 连接生命周期 + message 事件
+ *
+ * EventSource 是浏览器原生 SSE 客户端，不走 fetch/XHR，必须单独 hook。
+ * 与 WS hook 同模式：extends 原生类保持原型链，连接建立时 sink 一个 SSE 条目，
+ * 后续 message 事件通过 sseEventSink 增量上报。
+ */
+function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink): void {
+  const OriginalES = globalThis.EventSource
+  if (!OriginalES || !sseEventSink) return
+
+  /** 非 optional 局部引用，避免 TS 在 class constructor 内不能推断 narrowed type */
+  const emitSseEvent: SseEventSink = sseEventSink
+
+  /**
+   * 每个 HookedEventSource 实例与其 seq 的映射
+   * WeakMap 不阻止 GC，连接释放后自动清理
+   */
+  const esSeqMap = new WeakMap<EventSource, number>()
+  /** 已注册 message 采集代理的实例集合（避免重复注册） */
+  const messageHooked = new WeakSet<EventSource>()
+
+  /** 记录 EventSource 连接的完整 URL，供 resource observer 去重 */
+  const trackUrl = (url: string) => {
+    try { sseUrls.add(new URL(url, location.href).href) } catch { sseUrls.add(url) }
+  }
+
+  /**
+   * 在原型上一次性包装 addEventListener，拦截所有事件类型
+   *
+   * EventSource 遇到 `event: update` 触发 type='update' 的事件，不走 message。
+   * 重写 prototype.addEventListener 对业务注册的每种事件类型额外注册采集代理。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const origAdd: any = OriginalES.prototype.addEventListener
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OriginalES.prototype.addEventListener = function (this: any, type: string, listener: any, options?: any) {
+    const s = esSeqMap.get(this)
+    /** 跳过 open/error/message —— message 在 constructor 里已默认采集，open/error 无诊断价值 */
+    if (s !== undefined && type !== 'open' && type !== 'error' && type !== 'message') {
+      origAdd.call(this, type, (ev: Event) => {
+        const msgEv = ev as MessageEvent
+        emitSseEvent(s, {
+          timestamp: new Date().toISOString(),
+          event: type,
+          id: msgEv.lastEventId || undefined,
+          data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_WS_FRAME) : String(msgEv.data ?? ''),
+        })
+      })
+    }
+    return origAdd.call(this, type, listener, options)
+  }
+
+  class HookedEventSource extends OriginalES {
+    constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
+      super(url, eventSourceInitDict)
+      const urlStr = typeof url === 'string' ? url : url.href
+
+      /** 创建 SSE 连接条目（与 fetch SSE 同结构） */
+      const sseEntrySeq = seq++
+      esSeqMap.set(this, sseEntrySeq)
+      sink({
+        seq: sseEntrySeq,
+        timestamp: new Date().toISOString(),
+        url: urlStr,
+        method: 'GET',
+        status: 200,
+        duration: 0,
+        kind: 'fetch',
+        sseState: 'open',
+        events: [],
+      })
+      trackUrl(urlStr)
+
+      /** 默认 message 事件采集（业务代码可能用 onmessage 而非 addEventListener） */
+      if (!messageHooked.has(this)) {
+        messageHooked.add(this)
+        origAdd.call(this, 'message', (ev: Event) => {
+          const msgEv = ev as MessageEvent
+          emitSseEvent(sseEntrySeq, {
+            timestamp: new Date().toISOString(),
+            event: 'message',
+            id: msgEv.lastEventId || undefined,
+            data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_WS_FRAME) : String(msgEv.data ?? ''),
+          })
+        })
+      }
+
+      /** error/close：readyState=CLOSED 时标记 SSE 流结束 */
+      origAdd.call(this, 'error', () => {
+        if (this.readyState === OriginalES.CLOSED) {
+          emitSseEvent(sseEntrySeq, { timestamp: new Date().toISOString(), event: '__closed__', data: '' })
+        }
+      })
+    }
+  }
+
+  /** 透传静态常量（CONNECTING/OPEN/CLOSED） */
+  for (const k of ['CONNECTING', 'OPEN', 'CLOSED'] as const) {
+    Object.defineProperty(HookedEventSource, k, {
+      value: OriginalES[k],
+      writable: false,
+      configurable: true,
+      enumerable: true,
+    })
+  }
+  HookedEventSource.prototype.constructor = HookedEventSource
+
+  globalThis.EventSource = HookedEventSource as unknown as typeof EventSource
 }
 
 /** 构造 NetworkEntry */

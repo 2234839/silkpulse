@@ -7,6 +7,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
+import type { AuthManager, AuthContext } from './auth.js'
 import { sendSnapshot } from './snapshot-text.js'
 import { generateFeatureDetectScript } from '@clarosight/feature-detect'
 
@@ -77,7 +78,11 @@ export async function handleApiRoute(
   req: IncomingMessage,
   res: ServerResponse,
   registry: DeviceRegistry,
-  onDeviceListChanged?: () => void
+  onDeviceListChanged?: () => void,
+  /** 鉴权管理器（可选，未传时不做项目过滤） */
+  _auth?: AuthManager,
+  /** 当前请求的鉴权上下文 */
+  authCtx: AuthContext = { role: 'admin' },
 ): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const pathname = url.pathname
@@ -87,8 +92,8 @@ export async function handleApiRoute(
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     })
     res.end()
     return true
@@ -109,9 +114,15 @@ export async function handleApiRoute(
 
   /** /api/devices —— 列出所有在线设备 + 最近下线设备（供 AI 判断接入状态） */
   if (pathname === '/api/devices' && req.method === 'GET') {
+    /** 鉴权：匿名拒绝，项目级只看自己项目的设备 */
+    if (authCtx.role === 'anonymous') {
+      sendJson(res, { error: '未授权' }, 401)
+      return true
+    }
+    const projectId = authCtx.role === 'project' ? authCtx.projectId : undefined
     sendJson(res, {
-      devices: registry.list(),
-      recentlyOffline: registry.listOffline(),
+      devices: registry.listByProject(projectId),
+      recentlyOffline: registry.listOfflineByProject(projectId),
     })
     return true
   }
@@ -126,6 +137,16 @@ export async function handleApiRoute(
   const device = registry.get(deviceId)
   if (!device) {
     sendJson(res, { error: `设备 ${deviceId} 不在线` }, 404)
+    return true
+  }
+
+  /** 鉴权：检查是否有权限访问此设备（项目隔离） */
+  if (authCtx.role === 'anonymous') {
+    sendJson(res, { error: '未授权' }, 401)
+    return true
+  }
+  if (authCtx.role === 'project' && device.info.projectId !== authCtx.projectId) {
+    sendJson(res, { error: '无权访问此设备' }, 403)
     return true
   }
 
@@ -265,7 +286,10 @@ export async function handleApiRoute(
       }
 
       if (req.method === 'GET') {
-        const code = buildStorageReadCode(type)
+        /** indexeddb 走专门的异步读代码，不走 buildStorageReadCode */
+        const code = type === 'indexeddb'
+          ? buildIndexedDBReadCode()
+          : buildStorageReadCode(type as 'local' | 'session' | 'cookie')
         const result = await execOnDevice(registry, deviceId, code)
         if (!result.success) {
           sendJson(res, { error: result.error }, 500)
@@ -279,7 +303,7 @@ export async function handleApiRoute(
       if (req.method === 'POST') {
         const { body, oversize } = await readBody(req)
         if (oversize) { sendJson(res, { error: 'storage body 超过 2MB 上限' }, 413); return true }
-        let parsed: { action?: string; type?: string; key?: string; value?: string; path?: string; expires?: string }
+        let parsed: { action?: string; type?: string; key?: string; value?: string; path?: string; expires?: string; store?: string }
         try {
           parsed = JSON.parse(body)
         } catch {

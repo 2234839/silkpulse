@@ -10,7 +10,7 @@
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createServer } from '../dist/index.mjs'
+import { createServer } from '../src/index.ts'
 
 function parseArgs(args: string[]): { port?: number } {
   const result: { port?: number } = {}

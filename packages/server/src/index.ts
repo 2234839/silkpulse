@@ -16,6 +16,7 @@ import { WebSocketServer } from 'ws'
 import { DeviceRegistry } from './device-registry.js'
 import { setupWebSocket } from './ws-relay.js'
 import { handleApiRoute } from './api.js'
+import { AuthManager, ProjectStore, handleProjectApiRoute, readAndCacheBody, type AuthContext } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -26,6 +27,8 @@ export interface ClarosightServerOptions {
   staticRoot?: string
   /** demo 测试页路径（/demo 路由 serve），默认 dist 同级的 ../../../examples/test-page.html */
   demoPagePath?: string
+  /** 项目数据文件路径（默认 ~/.clarosight/projects.json） */
+  projectDataPath?: string
 }
 
 /**
@@ -33,14 +36,35 @@ export interface ClarosightServerOptions {
  */
 export function createServer(options: ClarosightServerOptions = {}): http.Server {
   const port = options.port ?? 8080
+
+  /** 项目数据持久化路径：优先 options，否则用环境变量，最后默认 ~/.clarosight/projects.json */
+  const defaultDataDir = process.env.CLAROSIGHT_DATA_DIR ?? path.join(process.env.HOME ?? '/tmp', '.clarosight')
+  const projectDataPath = options.projectDataPath ?? path.join(defaultDataDir, 'projects.json')
+  const projectStore = new ProjectStore(projectDataPath)
+  const auth = new AuthManager(projectStore)
   const registry = new DeviceRegistry()
 
   /** 静态资源目录：优先用 options.staticRoot，否则用 ../public（console-ui 构建产物 + sdk） */
   const staticRoot = options.staticRoot ?? path.resolve(__dirname, '../public')
 
   const server = http.createServer(async (req, res) => {
-    /** 1. 先交给 API 路由 */
-    if (await handleApiRoute(req, res, registry, notifyDeviceListChanged)) return
+    /** 安全响应头 */
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+
+    /** 缓存请求体（项目管理 + 鉴权 API 需要） */
+    if (req.url?.startsWith('/api/projects') || req.url?.startsWith('/api/auth')) {
+      await readAndCacheBody(req)
+      /** 项目管理 API + 鉴权状态 API */
+      if (handleProjectApiRoute(req, res, auth)) return
+    }
+
+    /** 1. 鉴权上下文（附加到 req 上，后续 API 路由使用） */
+    const authCtx = auth.authorizeHttpRequest(req)
+    ;(req as unknown as { __authCtx?: AuthContext }).__authCtx = authCtx
+
+    /** 1.5 先交给 API 路由 */
+    if (await handleApiRoute(req, res, registry, notifyDeviceListChanged, auth, authCtx)) return
 
     const url = new URL(req.url ?? '/', 'http://localhost')
     const pathname = url.pathname
@@ -82,7 +106,26 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     if (pathname === '/demo' || pathname === '/demo.html') {
       const demoPagePath = options.demoPagePath ?? path.resolve(__dirname, '../../../examples/test-page.html')
       if (fs.existsSync(demoPagePath)) {
-        const html = fs.readFileSync(demoPagePath, 'utf8').replace(/localhost:8080/g, `localhost:${port}`)
+        let html = fs.readFileSync(demoPagePath, 'utf8').replace(/localhost:8080/g, `localhost:${port}`)
+        /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
+        if (auth.isAuthEnabled()) {
+          /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
+          const qApiKey = url.searchParams.get('apiKey')
+          const qProjectId = url.searchParams.get('projectId')
+          /** 默认用超管密钥（demo 页面是 server 本地测试页，用超管密钥直连） */
+          const envAdminKey = process.env.CLAROSIGHT_ADMIN_KEY
+          const injectAttrs = qApiKey && qProjectId
+            ? `data-api-key="${qApiKey}" data-project-id="${qProjectId}"`
+            : envAdminKey
+              ? `data-api-key="${envAdminKey}"`
+              : ''
+          if (injectAttrs) {
+            html = html.replace(
+              /(<script\s+src="[^"]*sdk\.js"\s+data-server="[^"]*")/,
+              `$1 ${injectAttrs}`,
+            )
+          }
+        }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
         res.end(html)
         return
@@ -131,6 +174,46 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       return
     }
 
+    /**
+     * /sse-test —— SSE 测试端点（text/event-stream）
+     *
+     * 推送 5 条事件（含 event/id/data 字段），每条间隔 500ms，推完关闭连接。
+     * 供 demo 页面的 SSE 测试按钮调用，验证 SDK 的 SSE 流式采集。
+     * 注意：路径不能以 /api/ 开头，否则会被 handleApiRoute 的 404 兜底拦截。
+     */
+    if (pathname === '/sse-test') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      })
+      const events = [
+        { event: 'message', data: 'SSE 连接已建立' },
+        { event: 'update', id: '1', data: JSON.stringify({ count: 1, msg: '第一条更新' }) },
+        { event: 'update', id: '2', data: JSON.stringify({ count: 2, msg: '第二条更新' }) },
+        { event: 'ping', data: 'heartbeat' },
+        { event: 'done', id: '3', data: 'SSE 流结束' },
+      ]
+      let idx = 0
+      const timer = setInterval(() => {
+        if (idx >= events.length) {
+          clearInterval(timer)
+          res.end()
+          return
+        }
+        const { event, id, data } = events[idx++]
+        let chunk = ''
+        if (id) chunk += `id: ${id}\n`
+        chunk += `event: ${event}\n`
+        chunk += `data: ${data}\n\n`
+        res.write(chunk)
+      }, 500)
+      /** 客户端断开时清理定时器 */
+      req.on('close', () => clearInterval(timer))
+      return
+    }
+
     /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
@@ -152,11 +235,22 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
   const wss = new WebSocketServer({ noServer: true })
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
-    if (url.pathname === '/ws/device' || url.pathname === '/ws/console') {
+    const pathname = url.pathname
+
+    if (pathname === '/ws/device' || pathname === '/ws/console') {
+      /** WebSocket 连接鉴权 */
+      const wsAuthCtx = auth.authorizeWsConnection(req, pathname)
+      if (wsAuthCtx.role === 'anonymous' && auth.isAuthEnabled()) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+        socket.destroy()
+        return
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
+        /** 把鉴权上下文附在 ws 上，ws-relay 用来做项目隔离 */
+        ;(ws as unknown as { __authCtx?: AuthContext }).__authCtx = wsAuthCtx
         wss.emit('connection', ws, req)
       })
-    } else if (url.pathname === '/ws/test-ws') {
+    } else if (pathname === '/ws/test-ws') {
       /** 测试用 echo WS：收到什么回什么，验证 SDK 的 WS 采集（连接/send/recv/close） */
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.on('message', (data) => ws.send(data))
@@ -171,7 +265,13 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     console.log(`\n  clarosight 服务已启动 → http://localhost:${port}`)
     console.log(`  控制台：浏览器打开 http://localhost:${port}`)
     console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
-    console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices\n`)
+    console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
+    if (auth.isAuthEnabled()) {
+      console.log(`  🔒 鉴权已启用（${auth.hasAdminKey() ? '超管密钥 + ' : ''}${projectStore.list().length} 个项目）`)
+    } else {
+      console.log(`  ⚠️  鉴权未启用（设置 CLAROSIGHT_ADMIN_KEY 环境变量来开启）`)
+    }
+    console.log('')
   })
 
   return server

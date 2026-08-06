@@ -9,6 +9,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue'
 import ElementTreeNode from './ElementTreeNode.vue'
+import { apiFetch } from '../utils/api'
 
 /** DOM 变化数据（从 useConsoleSocket 传入） */
 interface DomChangeData {
@@ -277,10 +278,10 @@ async function selectElement(idx: number) {
   elementStyles.value = null
   expandedRules.value = new Set([0])
   /** 并行拉取 inspect 和 styles */
-  const inspectPromise = fetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
+  const inspectPromise = apiFetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
     .then((res) => res.ok ? res.json() : null)
     .finally(() => { elementInspectLoading.value = false })
-  const stylesPromise = fetch(`/api/devices/${props.deviceId}/element/styles?idx=${idx}`)
+  const stylesPromise = apiFetch(`/api/devices/${props.deviceId}/element/styles?idx=${idx}`)
     .then((res) => res.ok ? res.json() : null)
     .finally(() => { elementStylesLoading.value = false })
   const [inspectData, stylesData] = await Promise.all([inspectPromise, stylesPromise])

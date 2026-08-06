@@ -32,6 +32,10 @@ export interface InitOptions {
   tags?: string[]
   /** 预设备注（一句话描述设备身份） */
   note?: string
+  /** 项目密钥（鉴权模式下必填，用于设备连接鉴权） */
+  apiKey?: string
+  /** 项目 ID（鉴权模式下必填，标识设备归属） */
+  projectId?: string
 }
 
 /**
@@ -149,9 +153,14 @@ export function init(options: InitOptions): void {
   const deviceId = getDeviceId()
   const info = collectDeviceInfo(deviceId, options.tags, options.note)
 
-  /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port */
-  const wsBase = options.server.replace(/^http/, 'ws')
-  const wsUrl = `${wsBase.replace(/\/$/, '')}/ws/device`
+  /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port
+   *  鉴权模式下在 URL query 中携带 projectId + apiKey */
+  const wsBase = options.server.replace(/^http/, 'ws').replace(/\/$/, '')
+  const wsParams = new URLSearchParams()
+  if (options.projectId) wsParams.set('projectId', options.projectId)
+  if (options.apiKey) wsParams.set('apiKey', options.apiKey)
+  const queryStr = wsParams.toString()
+  const wsUrl = `${wsBase}/ws/device${queryStr ? '?' + queryStr : ''}`
 
   /** 1. 装配采集器，每个 collector 的 sink → WS 上报 */
   installLogCollector(
@@ -162,6 +171,7 @@ export function init(options: InitOptions): void {
     (entry: NetworkEntry) => send({ type: 'network', entry }),
     (seq, frame) => send({ type: 'ws-frame', seq, frame }),
     (seq, wsState) => send({ type: 'ws-state', seq, wsState }),
+    (seq, event) => send({ type: 'sse-event', seq, event }),
   )
   installErrorCatcher((entry: ErrorEntry) => {
     pushRecentError(entry.message)
@@ -298,8 +308,11 @@ function autoInit(): void {
   const tagsRaw = script?.dataset.tags ?? ''
   const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
   const note = script?.dataset.note || undefined
+  /** 鉴权参数：data-api-key + data-project-id */
+  const apiKey = script?.dataset.apiKey || undefined
+  const projectId = script?.dataset.projectId || undefined
 
-  const start = () => init({ server, tags, note })
+  const start = () => init({ server, tags, note, apiKey, projectId })
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start)
   } else {

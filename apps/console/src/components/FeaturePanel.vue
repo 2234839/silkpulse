@@ -8,6 +8,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { copyText } from '../utils/clipboard'
+import { apiFetch } from '../utils/api'
 
 interface FeatureResult {
   id: string
@@ -91,7 +92,7 @@ async function fetchFeatures() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch(`/api/devices/${props.deviceId}/feature-detect`)
+    const res = await apiFetch(`/api/devices/${props.deviceId}/feature-detect`)
     if (!res.ok) {
       const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
       error.value = data.error ?? `HTTP ${res.status}`

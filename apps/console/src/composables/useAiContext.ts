@@ -8,6 +8,7 @@
 import { ref } from 'vue'
 import type { LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
 import { copyText } from '../utils/clipboard'
+import { apiFetch } from '../utils/api'
 
 interface AiContextInput {
   /** 设备 id */
@@ -37,7 +38,7 @@ export function useAiContext() {
   async function generate(input: AiContextInput) {
     generating.value = true
     try {
-      const snapRes = await fetch(`/api/devices/${input.deviceId}/snapshot`)
+      const snapRes = await apiFetch(`/api/devices/${input.deviceId}/snapshot`)
       const snapshot = snapRes.ok ? await snapRes.text() : '（快照不可用）'
       contextText.value = buildContext({ ...input, snapshot })
     } finally {

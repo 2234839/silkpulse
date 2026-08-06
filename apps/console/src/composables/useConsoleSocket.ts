@@ -13,8 +13,11 @@ import type {
   ErrorEntry,
   ServerToConsoleMessage,
 } from '@clarosight/shared'
+import { useAuth } from './useAuth'
+import { apiFetch } from '../utils/api'
 
 export function useConsoleSocket() {
+  const { apiKey } = useAuth()
   /** 所有在线设备 */
   const devices = ref<DeviceInfo[]>([])
   /** 当前选中设备的实时日志 */
@@ -81,9 +84,9 @@ export function useConsoleSocket() {
     /** 同时拉取 server 端环形缓冲区的历史数据，让用户立即看到选中前的请求/日志 */
     try {
       const [logsRes, netRes, errRes] = await Promise.all([
-        fetch(`/api/devices/${id}/logs`),
-        fetch(`/api/devices/${id}/network`),
-        fetch(`/api/devices/${id}/errors`),
+        apiFetch(`/api/devices/${id}/logs`),
+        apiFetch(`/api/devices/${id}/network`),
+        apiFetch(`/api/devices/${id}/errors`),
       ])
       logs.value = await logsRes.json()
       network.value = await netRes.json()
@@ -109,7 +112,11 @@ export function useConsoleSocket() {
   /** 连接 server */
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}/ws/console`
+    /** 鉴权模式下在 WS URL query 中携带 token */
+    const wsParams = new URLSearchParams()
+    if (apiKey.value) wsParams.set('token', apiKey.value)
+    const queryStr = wsParams.toString()
+    const url = `${proto}//${location.host}/ws/console${queryStr ? '?' + queryStr : ''}`
     ws = new WebSocket(url)
 
     ws.onopen = () => {
@@ -205,6 +212,24 @@ export function useConsoleSocket() {
           if (entry && entry.protocol === 'ws') {
             const idx = arr.indexOf(entry)
             arr[idx] = { ...entry, wsState: msg.wsState, status: msg.wsState }
+            network.value = arr
+          }
+        }
+        break
+      }
+      case 'sse-event': {
+        /** SSE 事件追加：按 seq 找到 SSE 连接条目，追加事件（浅拷贝触发响应式） */
+        if (msg.deviceId === selectedDeviceId.value) {
+          const arr = network.value.slice()
+          const entry = arr.find((n) => n.seq === msg.seq)
+          if (entry && entry.sseState) {
+            const idx = arr.indexOf(entry)
+            if (msg.event.event === '__closed__') {
+              arr[idx] = { ...entry, sseState: 'closed' as const }
+            } else {
+              const events = [...(entry.events ?? []), msg.event].slice(-50)
+              arr[idx] = { ...entry, events }
+            }
             network.value = arr
           }
         }

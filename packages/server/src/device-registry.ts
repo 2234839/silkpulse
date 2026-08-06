@@ -212,6 +212,7 @@ export class DeviceRegistry {
     /** 记录下线摘要（供 AI 判断"接入过但掉了"），环形缓冲防膨胀 */
     this.offlineHistory.push({
       id: device.info.id,
+      projectId: device.info.projectId,
       url: device.info.url,
       title: device.info.title,
       deviceType: device.info.deviceType,
@@ -237,6 +238,18 @@ export class DeviceRegistry {
     return Array.from(this.devices.values()).map((d) => d.info)
   }
 
+  /** 按项目过滤的在线设备信息（鉴权模式下，控制台只能看自己项目的设备） */
+  listByProject(projectId?: string): DeviceInfo[] {
+    return Array.from(this.devices.values())
+      .filter((d) => projectId === undefined || d.info.projectId === projectId)
+      .map((d) => d.info)
+  }
+
+  /** 按项目过滤的最近下线设备摘要 */
+  listOfflineByProject(projectId?: string): OfflineDeviceSummary[] {
+    return this.offlineHistory.filter((o) => projectId === undefined || o.projectId === projectId)
+  }
+
   /** 最近下线设备摘要（用于 AI 判断"接入过但掉了"） */
   listOffline(): OfflineDeviceSummary[] {
     return [...this.offlineHistory]
@@ -249,7 +262,7 @@ export class DeviceRegistry {
     /** 过滤 undefined 值（SDK 分多条 update-info 上报不同字段，未带的字段不应覆盖已有值） */
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined) {
-        ;(device.info as Record<string, unknown>)[key] = value
+        ;(device.info as unknown as Record<string, unknown>)[key] = value
       }
     }
   }

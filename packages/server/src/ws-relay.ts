@@ -12,6 +12,7 @@
 
 import type { WebSocketServer, WebSocket } from 'ws'
 import type { DeviceRegistry, Device } from './device-registry.js'
+import type { AuthContext } from './auth.js'
 import type {
   DeviceMessage,
   ServerToConsoleMessage,
@@ -54,9 +55,15 @@ export function setupWebSocket(
   function broadcast(deviceId: string, msg: ServerToConsoleMessage) {
     const watchers = deviceWatchers.get(deviceId)
     if (!watchers) return
+    /** 获取设备所属项目，用于控制台权限过滤 */
+    const targetDevice = registry.get(deviceId)
+    const deviceProjectId = targetDevice?.info.projectId
     const text = JSON.stringify(msg)
     for (const ws of watchers) {
       if (ws.readyState !== ws.OPEN) continue
+      /** 项目隔离：项目级控制台只能收到自己项目设备的数据 */
+      const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+      if (ctx?.role === 'project' && ctx.projectId !== deviceProjectId) continue
       /** 背压保护：积压超限的连接直接关闭，不再塞数据 */
       if (ws.bufferedAmount > MAX_BUFFERED) {
         ws.close(1011, 'backpressure: send buffer overflow')
@@ -139,9 +146,13 @@ export function setupWebSocket(
           case 'register': {
             /** 设备首次注册：分配/复用 id，建立映射 */
             deviceId = msg.device.id || generateDeviceId()
+            /** 从 WS 连接的鉴权上下文获取 projectId */
+            const wsAuthCtx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
             const info: DeviceInfo = {
               ...msg.device,
               id: deviceId,
+              /** 鉴权模式下，projectId 由 server 从鉴权上下文注入（不由 SDK 决定） */
+              projectId: wsAuthCtx?.projectId ?? msg.device.projectId,
               onlineAt: Date.now(),
               /** 兼容未上报 tags 的旧 SDK */
               tags: msg.device.tags ?? [],
@@ -235,6 +246,27 @@ export function setupWebSocket(
             }
             break
           }
+          case 'sse-event': {
+            /**
+             * SSE 事件追加：按 seq 找到 SSE 连接条目，追加事件到 events（上限 50 FIFO），
+             * 广播让 console 增量更新。与 ws-frame 同模式。
+             *
+             * 特殊事件 `__closed__` 表示 SSE 流结束（reader done），更新 sseState。
+             */
+            if (!device) return
+            const sseEntry = device.network.findBySeq(msg.seq)
+            if (sseEntry && sseEntry.sseState) {
+              if (msg.event.event === '__closed__') {
+                sseEntry.sseState = 'closed'
+              } else {
+                if (!sseEntry.events) sseEntry.events = []
+                sseEntry.events.push(msg.event)
+                if (sseEntry.events.length > 50) sseEntry.events.shift()
+              }
+              broadcast(deviceId, { type: 'sse-event', deviceId, seq: msg.seq, event: msg.event })
+            }
+            break
+          }
           case 'error': {
             if (!device) return
             device.errors.push(msg.error)
@@ -308,11 +340,13 @@ export function setupWebSocket(
     if (pathname === '/ws/console') {
       consoleSubscriptions.set(ws, new Set())
 
-      /** 控制台连上后立即推送当前设备列表 */
+      /** 控制台连上后立即推送当前设备列表（按项目过滤） */
+      const consoleAuthCtx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+      const consoleProjectId = consoleAuthCtx?.role === 'project' ? consoleAuthCtx.projectId : undefined
       ws.send(
         JSON.stringify({
           type: 'device-list',
-          devices: registry.list(),
+          devices: registry.listByProject(consoleProjectId),
         } satisfies ServerToConsoleMessage)
       )
 
@@ -361,13 +395,15 @@ export function setupWebSocket(
     }
   })
 
-  /** 设备列表变化时推送给所有控制台 */
+  /** 设备列表变化时推送给所有控制台（按项目隔离） */
   function notifyDeviceListChanged() {
-    const devices = registry.list()
-    const msg: ServerToConsoleMessage = { type: 'device-list', devices }
-    const text = JSON.stringify(msg)
     for (const ws of consoleSubscriptions.keys()) {
-      if (ws.readyState === ws.OPEN) ws.send(text)
+      if (ws.readyState !== ws.OPEN) continue
+      /** 每个控制台只收到它有权访问的设备列表 */
+      const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+      const pid = ctx?.role === 'project' ? ctx.projectId : undefined
+      const msg: ServerToConsoleMessage = { type: 'device-list', devices: registry.listByProject(pid) }
+      ws.send(JSON.stringify(msg))
     }
   }
 
