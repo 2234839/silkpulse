@@ -295,8 +295,20 @@ export async function handleApiRoute(
           sendJson(res, { error: result.error }, 500)
           return true
         }
+        /**
+         * 验证 result.result 是合法 JSON。
+         * exec 通道有 20K 截断，极端情况（海量 key）可能截断为不合法 JSON，
+         * 此时返回错误而非让前端 res.json() 崩溃。
+         */
+        const raw = result.result ?? '{}'
+        try {
+          JSON.parse(raw)
+        } catch {
+          sendJson(res, { error: 'Storage 数据过大，exec 结果被截断为不合法 JSON' }, 500)
+          return true
+        }
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-        res.end(result.result ?? '{}')
+        res.end(raw)
         return true
       }
 
@@ -903,9 +915,17 @@ return {
  * 生成"读 storage"的 exec 代码
  *
  * 直接 return 对象（serializeResult 会 JSON.stringify，不要再 stringify 一次）。
- * 不截断 value（console UI 编辑需要完整值；AI 走 __clarosight_storage 截断版）。
+ * 单个 value 截断到 1000 字符：防止大量 key 的 SPA（如 DeepSeek）总量超 exec 20K 限制。
+ * 截断值加 `…(N chars)` 后缀，前端检测到此标记后点击编辑时走单独 exec 获取完整值。
  */
 function buildStorageReadCode(type: 'local' | 'session' | 'cookie'): string {
+  /**
+   * 单个 value 最大长度：超长截断（JWT/base64 图片等可能很长）
+   * 1000 字符够看到 token/配置的关键头部，同时控制总大小在 exec 20K 限制内
+   */
+  const MAX_VAL = 1000
+  const truncateExpr = (s: string): string =>
+    `${s}.length > ${MAX_VAL} ? ${s}.slice(0, ${MAX_VAL}) + '…(' + ${s}.length + ' chars)' : ${s}`
   if (type === 'cookie') {
     return `
 const result = {}
@@ -913,7 +933,8 @@ for (const part of document.cookie.split(';')) {
   const eq = part.indexOf('=')
   if (eq > 0) {
     const k = part.slice(0, eq).trim()
-    result[k] = part.slice(eq + 1).trim()
+    const v = part.slice(eq + 1).trim()
+    result[k] = ${truncateExpr('v')}
   }
 }
 return result
@@ -924,7 +945,10 @@ return result
 const result = {}
 for (let i = 0; i < ${store}.length; i++) {
   const k = ${store}.key(i)
-  if (k) result[k] = ${store}.getItem(k) || ''
+  if (k) {
+    const v = ${store}.getItem(k) || ''
+    result[k] = ${truncateExpr('v')}
+  }
 }
 return result
 `

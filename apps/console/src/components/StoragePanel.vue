@@ -73,26 +73,73 @@ const storageAdding = ref(false)
 const storageNewValue = ref('')
 /** 操作反馈（"已保存" / "已删除"） */
 const storageFeedback = ref('')
+/**
+ * 竞态保护策略
+ *
+ * 问题：高频 storage-change 推送（如 DeepSeek SPA 每秒多次写 localStorage）
+ * 会频繁触发 loadStorage。如果上一次请求还没返回（设备端 exec 慢），
+ * 新请求会和旧请求并发，设备端同时执行两个 exec → 可能返回空结果。
+ *
+ * 方案：「单飞 + 待重载」
+ * - storageVersion 触发的刷新：如果正在加载，只标记 needsReload，等当前完成后再加载
+ * - 设备/type 切换：force=true，不等当前请求，立即开始新的（旧请求结果会被忽略）
+ * - 这样保证 storageVersion 的高频推送不会产生并发 exec
+ */
+let isLoading = false
+let needsReload = false
+/** 当前加载对应的设备+类型签名，用于判断旧请求是否还有效 */
+let currentLoadSignature = ''
+/** storageVersion 防抖定时器 */
+let storageVersionTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 加载当前类型的 storage */
-async function loadStorage() {
+/**
+ * 加载当前类型的 storage
+ *
+ * @param force 设备/type 切换时传 true：不等当前请求，立即开始新的。
+ *              旧请求返回时签名不匹配会被忽略。
+ */
+async function loadStorage(force = false) {
   if (!props.deviceId) return
+
+  /** 如果正在加载，根据 force 决定行为 */
+  if (isLoading && !force) {
+    needsReload = true
+    return
+  }
+
+  /** 记录本次加载的签名，旧请求返回时如果签名不匹配则忽略结果 */
+  const signature = `${props.deviceId}:${storageType.value}`
+  currentLoadSignature = signature
+  isLoading = true
   storageLoading.value = true
-  /** 先清空旧数据，避免切换设备/type 时残留上一个的数据 */
-  storageData.value = {}
-  indexedDBData.value = []
   try {
     const res = await apiFetch(`/api/devices/${props.deviceId}/storage?type=${storageType.value}`)
+    /** 签名不匹配说明期间发生了设备/type 切换，忽略本次结果 */
+    if (currentLoadSignature !== signature) return
     if (res.ok) {
       if (storageType.value === 'indexeddb') {
         const data = await res.json()
+        if (currentLoadSignature !== signature) return
         indexedDBData.value = data.databases ?? []
       } else {
-        storageData.value = await res.json()
+        const data = await res.json()
+        if (currentLoadSignature !== signature) return
+        storageData.value = data
       }
     }
+  } catch {
+    /** 静默错误，保留已有数据 */
   } finally {
-    storageLoading.value = false
+    /** 只在签名匹配（没有更新的 force 请求接手）时更新状态 */
+    if (currentLoadSignature === signature) {
+      isLoading = false
+      storageLoading.value = false
+      /** 如果在本次加载期间有新的 storageVersion 变更到达，自动再加载一次 */
+      if (needsReload) {
+        needsReload = false
+        loadStorage()
+      }
+    }
   }
 }
 
@@ -102,27 +149,44 @@ async function loadStorage() {
  * immediate: true 确保面板被 v-if 渲染时就拉取
  */
 watch(() => props.deviceId, () => {
+  /** 切换设备时立即清空旧数据 */
+  storageData.value = {}
+  indexedDBData.value = []
   selectedKey.value = null
   editDraft.value = ''
   storageAdding.value = false
-  loadStorage()
+  loadStorage(true)
 }, { immediate: true })
 /**
  * storageVersion 变化时自动刷新（SDK 实时推送 storage-change → 版本号递增）
  *
- * 只刷新当前激活的类型：local 类型变化只刷 local，不刷 cookie/indexeddb
+ * 加 500ms 防抖：高频 SPA（如 DeepSeek）可能频繁修改 localStorage，
+ * 避免每次变化都发请求导致竞态和性能问题。
  */
 watch(() => props.storageVersion, () => {
-  loadStorage()
+  if (storageVersionTimer) clearTimeout(storageVersionTimer)
+  storageVersionTimer = setTimeout(() => {
+    storageVersionTimer = null
+    loadStorage()
+  }, 500)
 })
 
-/** 切换 storage 类型 */
+/**
+ * 切换 storage 类型
+ *
+ * 切换时立即清空旧数据 + 重置选中状态，
+ * 让用户在 loadStorage 的 await 期间看到空表格而非上一个 type 的残留。
+ */
 function switchStorageType(t: StorageType) {
+  if (storageType.value === t) return
   storageType.value = t
+  /** 切换类型时清空旧数据（类型级别切换，不会有竞态问题） */
+  storageData.value = {}
+  indexedDBData.value = []
   selectedKey.value = null
   editDraft.value = ''
   storageAdding.value = false
-  loadStorage()
+  loadStorage(true)
 }
 
 /** 选中某条 → 底部展示可视化编辑面板 */
