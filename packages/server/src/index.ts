@@ -71,10 +71,10 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
 
     /** 3.5 /favicon.ico —— 控制台自身 favicon（SDK demo 页面也能同源 fetch 到） */
     if (pathname === '/favicon.ico') {
-      /** 1×1 透明 PNG，避免 404 噪音 */
-      const transparentPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+      /** 32×32 蓝底白圆 PNG（有视觉内容，验证 Network 面板图片预览效果） */
+      const faviconPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAXUlEQVR4nGOwbvpGU8QwasGoBTD0HwNQzQJMo0myBp8F+I0m0hqcFhBvOn47BsgCUk3HY8dAWECe6bjsGLVgZFow9PMBPYoKelhA8+KaSGsIah8EVSaFaNSCEWABAEdJY9GqZCFVAAAAAElFTkSuQmCC', 'base64')
       res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' })
-      res.end(transparentPng)
+      res.end(faviconPng)
       return
     }
 
