@@ -78,6 +78,9 @@ const storageFeedback = ref('')
 async function loadStorage() {
   if (!props.deviceId) return
   storageLoading.value = true
+  /** 先清空旧数据，避免切换设备/type 时残留上一个的数据 */
+  storageData.value = {}
+  indexedDBData.value = []
   try {
     const res = await apiFetch(`/api/devices/${props.deviceId}/storage?type=${storageType.value}`)
     if (res.ok) {
@@ -104,7 +107,6 @@ watch(() => props.deviceId, () => {
   storageAdding.value = false
   loadStorage()
 }, { immediate: true })
-
 /**
  * storageVersion 变化时自动刷新（SDK 实时推送 storage-change → 版本号递增）
  *
