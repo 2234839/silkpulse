@@ -501,6 +501,27 @@ export function handleProjectApiRoute(
     return true
   }
 
+  /** 验证密钥并返回角色信息（前端登录后调用，拿 role + projectId） */
+  if (url === '/api/auth/verify' && method === 'GET') {
+    const ctx = auth.authorizeHttpRequest(req)
+    if (ctx.role === 'anonymous') {
+      jsonResponse(res, 401, { error: '密钥无效' })
+      return true
+    }
+    /** 项目密钥：附带项目名称供前端展示 */
+    let projectName: string | undefined
+    if (ctx.role === 'project' && ctx.projectId) {
+      const proj = auth.projects.get(ctx.projectId)
+      projectName = proj?.name
+    }
+    jsonResponse(res, 200, {
+      role: ctx.role,
+      projectId: ctx.projectId,
+      projectName,
+    })
+    return true
+  }
+
   // 项目管理路由需要超管权限
   if (!url.startsWith('/api/projects')) return false
 

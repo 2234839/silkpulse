@@ -15,6 +15,10 @@ const authStatus = ref<{
   authEnabled: boolean
   hasAdminKey: boolean
 } | null>(null)
+/** 当前用户角色信息（verify 后填充） */
+const userRole = ref<'admin' | 'project' | null>(null)
+const projectId = ref<string | undefined>(undefined)
+const projectName = ref<string | undefined>(undefined)
 
 /** 从 localStorage 恢复密钥 */
 function restoreKey(): void {
@@ -33,9 +37,12 @@ function saveKey(key: string): void {
   } catch { /** localStorage 不可用时忽略 */ }
 }
 
-/** 清除密钥 */
+/** 清除密钥和角色信息 */
 function clearKey(): void {
   apiKey.value = ''
+  userRole.value = null
+  projectId.value = undefined
+  projectName.value = undefined
   try { localStorage.removeItem(STORAGE_KEY) } catch { /** */ }
 }
 
@@ -46,6 +53,35 @@ async function checkAuthStatus(): Promise<void> {
     authStatus.value = await res.json()
   } catch {
     authStatus.value = null
+  }
+}
+
+/** 向 server 验证当前密钥，拿角色 + projectId */
+async function verifyKey(): Promise<boolean> {
+  if (!apiKey.value) {
+    userRole.value = null
+    return false
+  }
+  try {
+    const res = await fetch('/api/auth/verify', {
+      headers: { Authorization: `Bearer ${apiKey.value}` },
+    })
+    if (!res.ok) {
+      userRole.value = null
+      return false
+    }
+    const data: { role: string; projectId?: string; projectName?: string } = await res.json()
+    if (data.role === 'admin' || data.role === 'project') {
+      userRole.value = data.role
+      projectId.value = data.projectId
+      projectName.value = data.projectName
+      return true
+    }
+    userRole.value = null
+    return false
+  } catch {
+    userRole.value = null
+    return false
   }
 }
 
@@ -62,9 +98,13 @@ export function useAuth() {
   return {
     apiKey: readonly(apiKey),
     authStatus: readonly(authStatus),
+    userRole: readonly(userRole),
+    projectId: readonly(projectId),
+    projectName: readonly(projectName),
     saveKey,
     clearKey,
     checkAuthStatus,
+    verifyKey,
     isAuthenticated,
   }
 }
