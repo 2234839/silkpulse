@@ -76,6 +76,40 @@ interface ElementInspect {
   error?: string
 }
 
+/** CSS 属性值（含 !important 标记） */
+interface CSSPropInfo {
+  value: string
+  important: boolean
+}
+
+/** 匹配的 CSS 规则（DevTools Styles 面板风格） */
+interface MatchedRule {
+  /** 选择器（单条，已从逗号分隔的选择器列表中拆出） */
+  selector: string
+  /** 原始完整选择器（如有多选择器逗号分隔） */
+  selectors?: string
+  /** 属性列表 */
+  props: Record<string, CSSPropInfo>
+  /** 特异性 [a, b, c] */
+  specificity: [number, number, number]
+  /** 是否含 !important */
+  important: boolean
+  /** 来源（文件名 / <style>[N]） */
+  source: string
+  /** @media 条件（如果有） */
+  media?: string
+  /** 跨域不可读 */
+  crossOrigin?: boolean
+}
+
+/** 样式检查器数据（server /element/styles 返回） */
+interface ElementStyles {
+  matchedRules: MatchedRule[]
+  inlineStyle: Record<string, CSSPropInfo>
+  inherited: Array<{ from: string; props: Record<string, string> }>
+  error?: string
+}
+
 /** 树根节点（documentElement = <html>） */
 const elementTreeRoot = ref<ElementNode[]>([])
 /** 当前选中的元素 idx */
@@ -85,6 +119,12 @@ const elementInspect = ref<ElementInspect | null>(null)
 /** 树/诊断是否正在加载 */
 const elementTreeLoading = ref(false)
 const elementInspectLoading = ref(false)
+/** 样式检查器数据 */
+const elementStyles = ref<ElementStyles | null>(null)
+/** 样式检查器加载中 */
+const elementStylesLoading = ref(false)
+/** 展开的规则（规则索引 → 是否展开），默认第一条展开 */
+const expandedRules = ref<Set<number>>(new Set([0]))
 
 /** filter 搜索关键词（非空时进入搜索模式） */
 const filterQuery = ref('')
@@ -227,20 +267,36 @@ function onFilterInput() {
   }, 300)
 }
 
-/** 选中元素：拉诊断信息 */
+/** 选中元素：拉诊断信息 + 样式规则 */
 async function selectElement(idx: number) {
   if (!props.deviceId) return
   selectedElementIdx.value = idx
   elementInspectLoading.value = true
   elementInspect.value = null
-  try {
-    const res = await fetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
-    if (res.ok) {
-      elementInspect.value = await res.json()
-    }
-  } finally {
-    elementInspectLoading.value = false
+  elementStylesLoading.value = true
+  elementStyles.value = null
+  expandedRules.value = new Set([0])
+  /** 并行拉取 inspect 和 styles */
+  const inspectPromise = fetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
+    .then((res) => res.ok ? res.json() : null)
+    .finally(() => { elementInspectLoading.value = false })
+  const stylesPromise = fetch(`/api/devices/${props.deviceId}/element/styles?idx=${idx}`)
+    .then((res) => res.ok ? res.json() : null)
+    .finally(() => { elementStylesLoading.value = false })
+  const [inspectData, stylesData] = await Promise.all([inspectPromise, stylesPromise])
+  elementInspect.value = inspectData
+  elementStyles.value = stylesData
+}
+
+/** 切换规则展开/收起 */
+function toggleRule(idx: number) {
+  if (expandedRules.value.has(idx)) {
+    expandedRules.value.delete(idx)
+  } else {
+    expandedRules.value.add(idx)
   }
+  /** 触发响应式更新 */
+  expandedRules.value = new Set(expandedRules.value)
 }
 
 /** 树节点的显示文本（tag#id.class1.class2 或 text） */
@@ -469,6 +525,79 @@ onMounted(() => {
               </span>
             </div>
           </div>
+        </div>
+
+        <!-- 样式规则（DevTools Styles 面板风格） -->
+        <div class="bg-surface border border-base rounded p-3 mb-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2 flex items-center gap-2">
+            样式规则
+            <span v-if="elementStylesLoading" class="text-faint font-normal">加载中...</span>
+            <span v-else-if="elementStyles" class="text-faint font-normal">{{ elementStyles.matchedRules.length }} 条规则</span>
+          </h4>
+
+          <div v-if="elementStylesLoading" class="text-faint text-center py-4 text-xs">获取匹配的 CSS 规则...</div>
+
+          <template v-else-if="elementStyles && !elementStyles.error">
+            <!-- 内联样式（优先级最高） -->
+            <div v-if="Object.keys(elementStyles.inlineStyle).length > 0" class="mb-2">
+              <div class="text-[10px] text-amber-600 font-semibold mb-1 flex items-center gap-1">
+                <span>Inline Style</span>
+                <span class="text-faint font-normal">(element.style)</span>
+              </div>
+              <div class="bg-base rounded px-2 py-1 text-xs font-mono space-y-0.5">
+                <div v-for="(info, prop) in elementStyles.inlineStyle" :key="prop" class="flex justify-between gap-2">
+                  <span class="text-blue-600 shrink-0">{{ prop }}:</span>
+                  <span class="text-primary text-right break-all">{{ info.value }}<span v-if="info.important" class="text-red-500"> !important</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 匹配的 CSS 规则（按优先级排序） -->
+            <div v-for="(rule, ri) in elementStyles.matchedRules" :key="ri" class="mb-2">
+              <!-- 规则头部：选择器 + 来源（可点击展开/收起） -->
+              <button
+                @click="toggleRule(ri)"
+                class="w-full text-left flex items-center gap-1 text-[10px] mb-0.5 group"
+              >
+                <span class="text-faint w-3">{{ expandedRules.has(ri) ? '▾' : '▸' }}</span>
+                <span class="text-purple-600 font-semibold">{{ rule.selector }}</span>
+                <span class="text-faint">← {{ rule.source }}</span>
+                <span v-if="rule.media" class="text-blue-500">@media {{ rule.media }}</span>
+                <span v-if="rule.crossOrigin" class="text-amber-600">⚠ 跨域不可读</span>
+              </button>
+              <!-- 规则属性（展开时显示） -->
+              <div v-if="expandedRules.has(ri) && Object.keys(rule.props).length > 0" class="bg-base rounded px-2 py-1 text-xs font-mono space-y-0.5 ml-4">
+                <div v-for="(info, prop) in rule.props" :key="prop" class="flex justify-between gap-2">
+                  <span class="text-blue-600 shrink-0">{{ prop }}:</span>
+                  <span class="text-primary text-right break-all">{{ info.value }}<span v-if="info.important" class="text-red-500"> !important</span></span>
+                </div>
+              </div>
+              <div v-else-if="expandedRules.has(ri) && Object.keys(rule.props).length === 0" class="text-faint text-[10px] ml-4 italic">
+                {{ rule.crossOrigin ? '跨域样式表无法读取规则内容' : '无属性' }}
+              </div>
+            </div>
+
+            <!-- 继承属性 -->
+            <div v-if="elementStyles.inherited.length > 0" class="mt-3 pt-2 border-t border-light">
+              <div class="text-[10px] text-faint font-semibold mb-1">继承属性</div>
+              <div v-for="(inh, ii) in elementStyles.inherited" :key="ii" class="mb-1.5">
+                <div class="text-[10px] text-green-600">← {{ inh.from }}</div>
+                <div class="bg-base rounded px-2 py-0.5 text-[11px] font-mono space-y-0.5 ml-2">
+                  <div v-for="(val, prop) in inh.props" :key="prop" class="flex justify-between gap-2">
+                    <span class="text-faint shrink-0">{{ prop }}:</span>
+                    <span class="text-secondary text-right">{{ val }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-if="elementStyles.matchedRules.length === 0 && Object.keys(elementStyles.inlineStyle).length === 0" class="text-faint text-center py-2 text-xs">
+              无匹配的 CSS 规则
+            </div>
+          </template>
+
+          <div v-else-if="elementStyles?.error" class="text-red-500 text-xs">{{ elementStyles.error }}</div>
         </div>
 
         <!-- 计算样式 -->

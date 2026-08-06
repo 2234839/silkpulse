@@ -221,6 +221,30 @@ export async function handleApiRoute(
     }
 
     /**
+     * /api/devices/:id/element/styles?idx=N —— 获取元素匹配的 CSS 规则（DevTools 风格）
+     *
+     * 返回 JSON：{matchedRules: [...], inlineStyle: {...}, inherited: [...]}
+     * 遍历 document.styleSheets + el.matches() 收集匹配的规则，
+     * 标注每条规则的来源（文件名 / <style> 标签序号）。
+     */
+    case 'element/styles': {
+      const idx = url.searchParams.get('idx')
+      if (!idx) {
+        sendJson(res, { error: '缺少 idx 参数' }, 400)
+        return true
+      }
+      const code = buildElementStylesCode(Number(idx))
+      const result = await execOnDevice(registry, deviceId, code)
+      if (!result.success) {
+        sendJson(res, { error: result.error }, 500)
+        return true
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
+      res.end(result.result ?? '{}')
+      return true
+    }
+
+    /**
      * /api/devices/:id/storage —— 读写远程设备存储
      *
      * GET ?type=local|session|cookie → 返回完整 { key: value }（不截断，console UI 编辑用）
@@ -680,6 +704,174 @@ const rect = el.getBoundingClientRect()
     box,
     ancestors,
   }
+`
+}
+
+/**
+ * 生成"获取元素匹配 CSS 规则"的 exec 代码（DevTools 风格样式检查器）
+ *
+ * 遍历 document.styleSheets + cssRules，用 el.matches(selector) 筛选匹配的规则。
+ * 对每条匹配规则，记录：选择器、属性列表、来源（href / <style> 标签序号）、优先级。
+ * 同时收集内联样式 + 继承属性。
+ *
+ * 限制：
+ * - 跨域样式表 cssRules 会抛 SecurityError，try-catch 跳过
+ * - CSSOM 不暴露行号，无法像 DevTools 那样显示来源行号
+ * - @media / @supports 规则需要递归遍历其嵌套的 cssRules
+ */
+function buildElementStylesCode(idx: number): string {
+  return `
+const el = __clarosight_getElement(${idx})
+if (!el) return { error: '元素不存在或已脱离文档' }
+
+/**
+ * 计算 CSS 选择器的特异性（specificity），用于规则排序
+ * 返回 [a, b, c] 三元组：ID 数 / class+attr+pseudo-class 数 / type+pseudo-element 数
+ */
+function calcSpecificity(selector) {
+  var a = 0, b = 0, c = 0
+  // 去掉 :not() / :is() / :where() 的包裹，提取内部选择器
+  var s = selector.replace(/:[a-z-]+\\([^)]*\\)/gi, function(m) { return m.slice(m.indexOf('(')+1, -1) })
+  a += (s.match(/#[\\w-]+/g) || []).length
+  b += (s.match(/\\.[\\w-]+/g) || []).length
+  b += (s.match(/\\[[^\\]]+\\]/g) || []).length
+  b += (s.match(/:(?!:)[\\w-]+/g) || []).length
+  c += (s.match(/(^|[\\s>+~])(?![.#\\[:])([a-z][\\w-]*)/gi) || []).length
+  c += (s.match(/::[\\w-]+/g) || []).length
+  return [a, b, c]
+}
+
+var matchedRules = []
+
+/**
+ * 递归遍历 CSSRuleList，收集匹配 el 的 CSSStyleRule
+ * @media / @supports 等条件规则需要递归遍历子规则
+ */
+function walkRules(rules, el, context) {
+  for (var i = 0; i < rules.length; i++) {
+    var rule = rules[i]
+    if (rule instanceof CSSStyleRule) {
+      // 多选择器拆开逐个检测（如 "a, .b" 需要分别匹配）
+      var selectors = rule.selectorText.split(',').map(function(s) { return s.trim() })
+      for (var j = 0; j < selectors.length; j++) {
+        var sel = selectors[j]
+        try {
+          if (el.matches(sel)) {
+            var props = {}
+            for (var k = 0; k < rule.style.length; k++) {
+              var prop = rule.style[k]
+              props[prop] = {
+                value: rule.style.getPropertyValue(prop),
+                important: rule.style.getPropertyPriority(prop) === 'important',
+              }
+            }
+            matchedRules.push({
+              selector: sel,
+              selectors: selectors.length > 1 ? rule.selectorText : undefined,
+              props: props,
+              specificity: calcSpecificity(sel),
+              important: Object.values(props).some(function(p) { return p.important }),
+              source: context.source,
+              media: context.media || undefined,
+            })
+            break // 同一规则匹配一次即可
+          }
+        } catch(e) { continue }
+      }
+    } else if (rule.cssRules) {
+      // @media / @supports / @container 等容器规则 → 递归
+      var childContext = Object.assign({}, context)
+      if (rule instanceof CSSMediaRule) {
+        childContext.media = rule.media.mediaText
+      }
+      try { walkRules(rule.cssRules, el, childContext) } catch(e) {}
+    }
+  }
+}
+
+// 遍历所有样式表
+for (var si = 0; si < document.styleSheets.length; si++) {
+  var sheet = document.styleSheets[si]
+  var source
+  if (sheet.href) {
+    // 外部样式表：取文件名
+    try { source = sheet.href.split('/').pop().split('?')[0] } catch(e) { source = sheet.href }
+  } else {
+    // 内联 <style>：尝试找 ownerNode 并给个序号
+    var owner = sheet.ownerNode
+    if (owner) {
+      var allStyles = document.querySelectorAll('style')
+      var styleIdx = -1
+      for (var st = 0; st < allStyles.length; st++) {
+        if (allStyles[st] === owner) { styleIdx = st; break }
+      }
+      source = styleIdx >= 0 ? '<style>[' + styleIdx + ']' : '<style>'
+    } else {
+      source = '(unknown)'
+    }
+  }
+  try {
+    walkRules(sheet.cssRules, el, { source: source })
+  } catch(e) {
+    // 跨域样式表无法访问 cssRules
+    matchedRules.push({
+      selector: '(跨域样式表无法读取)',
+      props: {},
+      source: source,
+      crossOrigin: true,
+    })
+  }
+}
+
+// 按特异性排序（important 优先，然后按 specificity 降序）
+matchedRules.sort(function(a, b) {
+  if (a.important !== b.important) return a.important ? -1 : 1
+  for (var d = 0; d < 3; d++) {
+    if (a.specificity[d] !== b.specificity[d]) return b.specificity[d] - a.specificity[d]
+  }
+  return 0
+})
+
+// 内联样式
+var inlineStyle = {}
+if (el.style && el.style.length > 0) {
+  for (var ii = 0; ii < el.style.length; ii++) {
+    var iprop = el.style[ii]
+    inlineStyle[iprop] = {
+      value: el.style.getPropertyValue(iprop),
+      important: el.style.getPropertyPriority(iprop) === 'important',
+    }
+  }
+}
+
+// 继承属性（从父元素收集可继承的 computed style）
+var inheritedProps = ['font', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'color', 'lineHeight', 'letterSpacing', 'textAlign', 'textDecoration', 'textTransform', 'whiteSpace', 'wordSpacing', 'direction', 'visibility', 'cursor', 'opacity']
+var inherited = []
+var cur = el.parentElement
+for (var depth = 0; depth < 3 && cur; depth++) {
+  var pcs = getComputedStyle(cur)
+  var inheritedFromCur = {}
+  for (var ip = 0; ip < inheritedProps.length; ip++) {
+    var pn = inheritedProps[ip]
+    var val = pcs[pn]
+    if (val && val !== 'normal' && val !== 'none' && val !== 'auto' && val !== '') {
+      inheritedFromCur[pn] = val
+    }
+  }
+  if (Object.keys(inheritedFromCur).length > 0) {
+    inherited.push({
+      from: cur.tagName.toLowerCase() + (cur.id ? '#' + cur.id : '') + (cur.className && typeof cur.className === 'string' ? '.' + cur.className.split(/\\s+/).filter(Boolean).join('.') : ''),
+      props: inheritedFromCur,
+    })
+  }
+  cur = cur.parentElement
+}
+
+return {
+  matchedRules: matchedRules,
+  inlineStyle: inlineStyle,
+  inherited: inherited,
+}
 `
 }
 
