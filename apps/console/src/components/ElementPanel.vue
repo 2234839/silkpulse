@@ -146,7 +146,7 @@ async function loadElementChildren(node: ElementNode | null, shadow = false): Pr
   if (node) params.set('idx', String(node.idx))
   if (shadow) params.set('shadow', '1')
   const url = `/api/devices/${props.deviceId}/element/tree?${params}`
-  const res = await fetch(url)
+  const res = await apiFetch(url)
   if (!res.ok) return []
   const items: ElementNode[] = await res.json()
   /** 初始化前端状态字段 */
@@ -256,7 +256,7 @@ function onFilterInput() {
   filterTimer = setTimeout(async () => {
     try {
       const url = `/api/devices/${props.deviceId}/element/tree?filter=${encodeURIComponent(q)}`
-      const res = await fetch(url)
+      const res = await apiFetch(url)
       if (res.ok) {
         const items: ElementNode[] = await res.json()
         /** 初始化前端状态字段 */
