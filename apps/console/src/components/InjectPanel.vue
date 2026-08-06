@@ -5,7 +5,7 @@
  * 展示四种接入方式（Script 标签 / IIFE / Bookmarklet / Userscript）的代码 + 复制按钮。
  * 既用于未选设备时的空状态卡片，也用于"接入新设备"弹窗。
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { copyText } from '../utils/clipboard'
 
@@ -44,10 +44,24 @@ const iifeSnippet = ref('')
 const bookmarkletSnippet = ref('')
 const userscriptSnippet = ref('')
 
-onMounted(() => {
-  fetch('/inject/iife').then((r) => r.text()).then((t) => { iifeSnippet.value = t })
-  fetch('/inject/bookmarklet').then((r) => r.text()).then((t) => { bookmarkletSnippet.value = t })
-  fetch('/inject/userscript').then((r) => r.text()).then((t) => { userscriptSnippet.value = t })
+/**
+ * 拉取三种注入代码，项目密钥登录时自动带上 api_key + project_id 查询参数。
+ * 用 watchEffect 让 userRole/apiKey/projectId 变化后自动重新拉取，
+ * 保证四种方式始终统一：要么都带鉴权信息，要么都不带。
+ */
+watchEffect(() => {
+  /** 拼查询参数（项目密钥登录时才带） */
+  const params = new URLSearchParams()
+  if (userRole.value === 'project' && apiKey.value && projectId.value) {
+    params.set('api_key', apiKey.value)
+    params.set('project_id', projectId.value)
+  }
+  const qs = params.toString()
+  const suffix = qs ? `?${qs}` : ''
+
+  fetch(`/inject/iife${suffix}`).then((r) => r.text()).then((t) => { iifeSnippet.value = t })
+  fetch(`/inject/bookmarklet${suffix}`).then((r) => r.text()).then((t) => { bookmarkletSnippet.value = t })
+  fetch(`/inject/userscript${suffix}`).then((r) => r.text()).then((t) => { userscriptSnippet.value = t })
 })
 
 type InjectTab = 'script' | 'iife' | 'bookmarklet' | 'userscript'

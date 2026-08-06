@@ -154,15 +154,18 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       const injHost = req.headers.host || `localhost:${port}`
       const injProto = req.headers['x-forwarded-proto'] || 'http'
       const origin = `${injProto}://${injHost}`
+      /** 可选：携带 api_key + project_id 查询参数，拼入 inject 代码 */
+      const apiKey = url.searchParams.get('api_key') ?? undefined
+      const projectId = url.searchParams.get('project_id') ?? undefined
       if (pathname === '/inject/iife') {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
-        res.end(injectScriptCode(origin))
+        res.end(injectScriptCode(origin, apiKey, projectId))
       } else if (pathname === '/inject/bookmarklet') {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
-        res.end(buildBookmarklet(origin))
+        res.end(buildBookmarklet(origin, apiKey, projectId))
       } else {
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
-        res.end(buildUserscript(origin))
+        res.end(buildUserscript(origin, apiKey, projectId))
       }
       return
     }
@@ -368,16 +371,23 @@ function controlUnavailableHtml(): string {
 /**
  * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
  * 防重复注入（同页面多次点 bookmarklet 只生效一次）
+ * 鉴权模式下携带 apiKey + projectId，让设备自动归属正确项目
  */
-function injectScriptCode(origin: string): string {
-  return `(function(){var k='__clarosight_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';s.dataset.server='${origin}';document.head.appendChild(s);})();`
+function injectScriptCode(origin: string, apiKey?: string, projectId?: string): string {
+  /** 动态拼 data-* 属性 */
+  const dataAttrs = [
+    `s.dataset.server='${origin}'`,
+    apiKey ? `s.dataset.apiKey='${apiKey}'` : '',
+    projectId ? `s.dataset.projectId='${projectId}'` : '',
+  ].filter(Boolean).join(';')
+  return `(function(){var k='__clarosight_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
 }
 
 /**
  * 构建 bookmarklet —— 拖到书签栏，在任意页面点击即注入
  */
-function buildBookmarklet(origin: string): string {
-  const code = injectScriptCode(origin)
+function buildBookmarklet(origin: string, apiKey?: string, projectId?: string): string {
+  const code = injectScriptCode(origin, apiKey, projectId)
   /** bookmarklet 需要 URL 编码特殊字符 */
   return `javascript:${encodeURIComponent(code)}`
 }
@@ -385,8 +395,8 @@ function buildBookmarklet(origin: string): string {
 /**
  * 构建 Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入
  */
-function buildUserscript(origin: string): string {
-  const code = injectScriptCode(origin)
+function buildUserscript(origin: string, apiKey?: string, projectId?: string): string {
+  const code = injectScriptCode(origin, apiKey, projectId)
   return `// ==UserScript==
 // @name         clarosight 远程调试注入
 // @namespace    clarosight
