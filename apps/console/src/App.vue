@@ -875,6 +875,19 @@ onMounted(() => connect())
                     <div class="text-sm text-red-key font-mono">{{ selectedNetwork.error }}</div>
                   </div>
 
+                  <!-- WebSocket 帧时间线（仅 WS 连接条目，对齐 DevTools 的 Messages 面板） -->
+                  <div v-if="selectedNetwork.protocol === 'ws'">
+                    <div class="text-xs text-faint mb-1">帧时间线 <span class="ml-1">({{ selectedNetwork.frames?.length ?? 0 }} 帧)</span></div>
+                    <div class="bg-surface border border-base rounded p-2 space-y-0.5 max-h-80 overflow-y-auto">
+                      <div v-for="(f, fi) in selectedNetwork.frames" :key="fi" class="text-xs font-mono flex gap-2">
+                        <span class="text-faint shrink-0">{{ new Date(f.timestamp).toLocaleTimeString() }}</span>
+                        <span class="shrink-0" :class="f.dir === 'send' ? 'text-blue-key' : f.dir === 'recv' ? 'text-green-600' : 'text-red-500'">{{ f.dir === 'send' ? '↑ send' : f.dir === 'recv' ? '↓ recv' : '⚠ ' + f.data }}</span>
+                        <span v-if="f.dir !== 'event'" class="text-primary break-all">{{ f.data }}</span>
+                      </div>
+                      <div v-if="!selectedNetwork.frames?.length" class="text-faint text-center py-4 text-xs">暂无帧（连接已建立，等待收发消息）</div>
+                    </div>
+                  </div>
+
                   <!-- 请求头 -->
                   <div v-if="selectedNetwork.reqHeaders">
                     <div class="text-xs text-faint mb-1">请求头</div>

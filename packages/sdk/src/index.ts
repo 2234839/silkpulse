@@ -100,7 +100,11 @@ export function init(options: InitOptions): void {
     (entry: LogEntry) => send({ type: 'log', log: entry }),
     () => send({ type: 'log-repeat' }),
   )
-  installNetworkCollector((entry: NetworkEntry) => send({ type: 'network', entry }))
+  installNetworkCollector(
+    (entry: NetworkEntry) => send({ type: 'network', entry }),
+    (seq, frame) => send({ type: 'ws-frame', seq, frame }),
+    (seq, wsState) => send({ type: 'ws-state', seq, wsState }),
+  )
   installErrorCatcher((entry: ErrorEntry) => {
     pushRecentError(entry.message)
     send({ type: 'error', error: entry })

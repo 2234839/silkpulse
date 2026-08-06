@@ -139,6 +139,33 @@ export function useConsoleSocket() {
           network.value = [...network.value, msg.entry].slice(-50)
         }
         break
+      case 'ws-frame': {
+        /** WebSocket 帧追加：按 seq 找到 WS 连接条目，追加帧（浅拷贝触发响应式） */
+        if (msg.deviceId === selectedDeviceId.value) {
+          const arr = network.value.slice()
+          const entry = arr.find((n) => n.seq === msg.seq)
+          if (entry && entry.protocol === 'ws') {
+            const frames = [...(entry.frames ?? []), msg.frame].slice(-50)
+            const idx = arr.indexOf(entry)
+            arr[idx] = { ...entry, frames }
+            network.value = arr
+          }
+        }
+        break
+      }
+      case 'ws-state': {
+        /** WebSocket readyState 变化：更新条目 wsState + status */
+        if (msg.deviceId === selectedDeviceId.value) {
+          const arr = network.value.slice()
+          const entry = arr.find((n) => n.seq === msg.seq)
+          if (entry && entry.protocol === 'ws') {
+            const idx = arr.indexOf(entry)
+            arr[idx] = { ...entry, wsState: msg.wsState, status: msg.wsState }
+            network.value = arr
+          }
+        }
+        break
+      }
       case 'error':
         if (msg.deviceId === selectedDeviceId.value) {
           errors.value = [...errors.value, msg.error].slice(-50)

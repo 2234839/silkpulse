@@ -233,6 +233,22 @@ async function main() {
       }
       const display = tail ? entries.slice(-tail) : entries
       for (const e of display) {
+        /** WebSocket 连接条目：status 用 readyState 文字，展示帧摘要 + 最近帧 */
+        if (e.protocol === 'ws') {
+          const stateName = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][e.wsState] || String(e.status)
+          const frames = e.frames || []
+          const sendN = frames.filter((f) => f.dir === 'send').length
+          const recvN = frames.filter((f) => f.dir === 'recv').length
+          console.log(`[${fmtTime(e.timestamp)}] ${e.method.padEnd(6)} ${stateName.padEnd(12)} —          ${e.url}`)
+          console.log(`          帧: ↑${sendN} send  ↓${recvN} recv  (${frames.length} 帧)`)
+          /** 最近 5 帧（时间线，AI 诊断 WS 通信内容） */
+          for (const f of frames.slice(-5)) {
+            const arrow = f.dir === 'send' ? '↑ send' : f.dir === 'recv' ? '↓ recv' : `⚠ ${f.data}`
+            const body = f.dir === 'event' ? '' : ` ${f.data}`
+            console.log(`          ${fmtTime(f.timestamp)} ${arrow}${body}`)
+          }
+          continue
+        }
         const status = e.status || '—'
         console.log(`[${fmtTime(e.timestamp)}] ${e.method.padEnd(6)} ${String(status).padEnd(4)} ${e.duration}ms  ${e.url}`)
         if (e.error) console.log(`          ⚠ ${e.error}`)

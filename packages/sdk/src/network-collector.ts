@@ -6,9 +6,13 @@
  * 平衡 AI 复现请求所需信息与隐私/体积。
  */
 
-import type { NetworkEntry } from '@clarosight/shared'
+import type { NetworkEntry, WsFrame } from '@clarosight/shared'
 
 type NetworkSink = (entry: NetworkEntry) => void
+/** WebSocket 帧追加回调（seq 关联连接条目，frame 新帧） */
+type WsFrameSink = (seq: number, frame: WsFrame) => void
+/** WebSocket 状态变更回调（readyState 变化） */
+type WsStateSink = (seq: number, wsState: number) => void
 
 /** 内部序号计数器 */
 let seq = 0
@@ -98,11 +102,20 @@ function parseRawHeaders(raw: string): Headers {
 }
 
 /**
- * 安装 network 采集（fetch + xhr 双劫持）
+ * 安装 network 采集（fetch + xhr + websocket 三重劫持）
+ *
+ * @param sink HTTP 请求/WS 连接条目 sink（新连接/新请求时触发）
+ * @param wsFrameSink WS 帧追加（send/recv/event，seq 关联连接）
+ * @param wsStateSink WS readyState 变化（OPEN/CLOSING/CLOSED）
  */
-export function installNetworkCollector(sink: NetworkSink): void {
+export function installNetworkCollector(
+  sink: NetworkSink,
+  wsFrameSink: WsFrameSink,
+  wsStateSink: WsStateSink,
+): void {
   installFetchHook(sink)
   installXhrHook(sink)
+  installWsHook(sink, wsFrameSink, wsStateSink)
 }
 
 /** 劫持全局 fetch */
@@ -239,6 +252,140 @@ function installXhrHook(sink: NetworkSink): void {
 
     originalSend.call(this, body)
   }
+}
+
+/** WS 帧数据最大截断长度 */
+const MAX_WS_FRAME = 500
+
+/**
+ * 劫持全局 WebSocket，采集连接生命周期 + send/recv 帧
+ *
+ * 用 class extends 保持原型链，readyState/bufferedAmount 等原生 getter 正常工作，
+ * instanceof WebSocket 仍成立。静态常量 CONNECTING/OPEN/CLOSING/CLOSED 透传。
+ *
+ * 连接建立时 sink 一个 WS NetworkEntry（protocol:'ws'），获得稳定 seq，
+ * 后续 send/recv/close 通过 wsFrameSink/wsStateSink 增量更新（seq 关联），
+ * 与 log-repeat 同模式，避免重发整个 entry。
+ */
+function installWsHook(sink: NetworkSink, wsFrameSink: WsFrameSink, wsStateSink: WsStateSink): void {
+  const OriginalWS = globalThis.WebSocket
+  if (!OriginalWS) return
+
+  /** 连接 → 条目 seq 关联（WeakMap 不阻止 GC，连接释放后自动清理） */
+  const wsSeqMap = new WeakMap<WebSocket, number>()
+
+  /** 序列化帧 data：文本截断，二进制标记类型+大小 */
+  const stringifyWsData = (data: unknown): string => {
+    if (typeof data === 'string') {
+      return data.length > MAX_WS_FRAME ? data.slice(0, MAX_WS_FRAME) + `…(${data.length})` : data
+    }
+    if (data instanceof ArrayBuffer) {
+      return `[binary ${data.byteLength}B]`
+    }
+    if (ArrayBuffer.isView(data)) {
+      return `[binary ${data.byteLength}B]`
+    }
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      return `[blob ${data.size}B]`
+    }
+    return String(data).slice(0, MAX_WS_FRAME)
+  }
+
+  class HookedWebSocket extends OriginalWS {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url as string, protocols)
+      const urlStr = typeof url === 'string' ? url : url.href
+      /**
+       * 排除 SDK 自身的 device 连接（/ws/device）——它是调试通道不是业务请求，
+       * hook 它会采集到大量 exec/result 噪声，且可能干扰 SDK 的 WS 生命周期。
+       */
+      if (urlStr.includes('/ws/device')) return
+      const entry: NetworkEntry = {
+        seq: seq++,
+        timestamp: new Date().toISOString(),
+        url: urlStr,
+        method: urlStr.startsWith('wss') ? 'WSS' : 'WS',
+        status: 0,
+        duration: 0,
+        protocol: 'ws',
+        wsState: OriginalWS.CONNECTING,
+        frames: [],
+      }
+      wsSeqMap.set(this, entry.seq)
+      sink(entry)
+
+      /** recv 帧：收到服务端消息 */
+      this.addEventListener('message', (ev: MessageEvent) => {
+        /**
+         * Blob 消息（binaryType='blob' 时的文本/二进制）异步读取再上报，
+         * 否则只能标记大小看不到内容（诊断 WS 通信最需要看的就是收到的消息）。
+         * ArrayBuffer/Blob 的二进制仍只标记大小（真正的二进制数据文本展示无意义）。
+         */
+        if (typeof Blob !== 'undefined' && ev.data instanceof Blob) {
+          ev.data.text().then(
+            (text) => wsFrameSink(entry.seq, {
+              timestamp: new Date().toISOString(),
+              dir: 'recv',
+              data: stringifyWsData(text),
+            }),
+          )
+          return
+        }
+        wsFrameSink(entry.seq, {
+          timestamp: new Date().toISOString(),
+          dir: 'recv',
+          data: stringifyWsData(ev.data),
+        })
+      })
+      /** close 事件：更新 readyState + 记录事件帧 */
+      this.addEventListener('close', () => {
+        wsStateSink(entry.seq, OriginalWS.CLOSED)
+        wsFrameSink(entry.seq, {
+          timestamp: new Date().toISOString(),
+          dir: 'event',
+          data: 'close',
+        })
+      })
+      /** error 事件：记录（不暴露 error 详情，浏览器安全限制） */
+      this.addEventListener('error', () => {
+        wsFrameSink(entry.seq, {
+          timestamp: new Date().toISOString(),
+          dir: 'event',
+          data: 'error',
+        })
+      })
+      /** open 事件：CONNECTING → OPEN */
+      this.addEventListener('open', () => {
+        wsStateSink(entry.seq, OriginalWS.OPEN)
+      })
+    }
+
+    /** 劫持 send：先调原始 send，成功后追加 send 帧 */
+    send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+      super.send(data as string)
+      const s = wsSeqMap.get(this)
+      if (s !== undefined) {
+        wsFrameSink(s, {
+          timestamp: new Date().toISOString(),
+          dir: 'send',
+          data: stringifyWsData(data),
+        })
+      }
+    }
+  }
+
+  /** 透传静态常量（CONNECTING/OPEN/CLOSING/CLOSED 是 readonly，用 defineProperty 绕过） */
+  for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'] as const) {
+    Object.defineProperty(HookedWebSocket, k, {
+      value: OriginalWS[k],
+      writable: false,
+      configurable: true,
+      enumerable: true,
+    })
+  }
+  HookedWebSocket.prototype.constructor = HookedWebSocket
+
+  globalThis.WebSocket = HookedWebSocket as unknown as typeof WebSocket
 }
 
 /** 构造 NetworkEntry */

@@ -893,6 +893,35 @@ async function main() {
       }
     }
 
+    /**
+     * 8.8 WebSocket 采集（连接 + send/recv/close 帧）
+     *
+     * 点击 ws-btn 连接 echo 端点 → SDK 采集 WS 连接条目 + 帧时间线。
+     * 验证 server network 含 WS 条目（protocol=ws），frames 含 send + recv + event(close)。
+     */
+    {
+      await testPage.evaluate(() => document.getElementById('ws-btn')?.click())
+      /** 轮询等待 WS 连接 → send → recv echo → close（异步流程，不依赖固定延时） */
+      let wsEntry = null
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise((r) => setTimeout(r, 150))
+        const net = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+        wsEntry = net.find((n) => n.protocol === 'ws')
+        /** 等 close 事件帧出现（完整生命周期已采集） */
+        if (wsEntry?.frames?.some((f) => f.dir === 'event' && f.data === 'close')) break
+      }
+      const hasWs = !!wsEntry
+      const hasSend = wsEntry?.frames?.some((f) => f.dir === 'send' && f.data.includes('ws 测试消息'))
+      const hasRecv = wsEntry?.frames?.some((f) => f.dir === 'recv' && f.data.includes('ws 测试消息'))
+      const hasClose = wsEntry?.frames?.some((f) => f.dir === 'event' && f.data === 'close')
+      const wsClosed = wsEntry?.wsState === 3
+      if (hasWs && hasSend && hasRecv && hasClose && wsClosed) {
+        ok(`WebSocket 采集生效（连接 ✓ send ✓ recv ✓ close ✓ readyState=CLOSED，${wsEntry.frames.length} 帧）`)
+      } else {
+        fail(`WebSocket 采集异常：ws=${hasWs} send=${hasSend} recv=${hasRecv} close=${hasClose} closed=${wsClosed}（frames=${JSON.stringify(wsEntry?.frames?.map((f) => f.dir + ':' + f.data.slice(0, 20)))}）`)
+      }
+    }
+
     /** 9. 控制台 WS 实时推送（选中设备后能看到日志） */
     const seen = await consolePage.evaluate(async (deviceId) => {
       const ws = new WebSocket(`ws://${location.host}/ws/console`)
@@ -1915,6 +1944,60 @@ async function main() {
         ok(`network 详情 JSON 响应体格式化生效（${resBodyText.split('\n').length} 行缩进美化）`)
       } else {
         fail(`network 详情 JSON 格式化异常：found=${formatted.found} body=${resBodyText ? resBodyText.slice(0, 80) : 'null'}`)
+      }
+    }
+
+    /**
+     * 20.6 network 详情面板 WebSocket 帧时间线
+     *
+     * 点击 WS 连接条目，详情面板应展示帧时间线（↑send/↓recv/⚠close），
+     * 而非 HTTP 的请求体/响应体。对齐 DevTools 的 WS Messages 面板。
+     * 先确保 console 已选设备 + 在 network 面板，再触发新 WS 连接（实时推送，可靠拿到）。
+     */
+    {
+      /** 确保 console 选中设备 + 切到 network 面板（前面测试可能切走） */
+      await consolePage.evaluate(() => {
+        const li = document.querySelector('ul li')
+        if (li) li.click()
+        const tabs = Array.from(document.querySelectorAll('nav button'))
+        const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
+        if (netTab) netTab.click()
+      })
+      await new Promise((r) => setTimeout(r, 600))
+      /** 触发新 WS 连接（console 已订阅，WS 条目实时推送过来） */
+      await testPage.evaluate(() => document.getElementById('ws-btn')?.click())
+      await new Promise((r) => setTimeout(r, 1500))
+      /** 找 WS 连接行（method 列含 WSS 或 WS，与 HTTP 的 GET/POST 区分），点击展开详情 */
+      const wsClicked = await consolePage.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tbody tr'))
+        /** WS 条目的 method 列显示 WSS 或 WS（全大写、独立单元格） */
+        const wsRow = rows.find((r) => {
+          const cells = r.querySelectorAll('td')
+          const methodCell = cells[1]?.textContent.trim() || ''
+          return methodCell === 'WSS' || methodCell === 'WS'
+        })
+        if (!wsRow) return { found: false }
+        wsRow.click()
+        return { found: true }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      /** 详情面板应含"帧时间线"标题 + ↑send/↓recv 帧内容 */
+      const wsPanel = await consolePage.evaluate(() => {
+        const labels = Array.from(document.querySelectorAll('.text-xs.text-faint'))
+        const frameLabel = labels.find((l) => l.textContent.includes('帧时间线'))
+        if (!frameLabel) return { hasFrames: false }
+        /** 帧时间线容器内的文本（含 ↑ send / ↓ recv / ⚠） */
+        const container = frameLabel.nextElementSibling
+        return {
+          hasFrames: true,
+          hasSend: container ? !!container.textContent.match(/↑|send/) : false,
+          hasRecv: container ? !!container.textContent.match(/↓|recv/) : false,
+        }
+      })
+      if (wsClicked.found && wsPanel.hasFrames && wsPanel.hasSend && wsPanel.hasRecv) {
+        ok(`network 详情 WebSocket 帧时间线展示生效（↑send ✓ ↓recv ✓）`)
+      } else {
+        fail(`network 详情 WS 帧时间线异常：clicked=${wsClicked.found} frames=${wsPanel.hasFrames} send=${wsPanel.hasSend} recv=${wsPanel.hasRecv}`)
       }
     }
 

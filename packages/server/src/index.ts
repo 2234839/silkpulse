@@ -144,6 +144,11 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req)
       })
+    } else if (url.pathname === '/ws/test-ws') {
+      /** 测试用 echo WS：收到什么回什么，验证 SDK 的 WS 采集（连接/send/recv/close） */
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.on('message', (data) => ws.send(data))
+      })
     } else {
       socket.destroy()
     }

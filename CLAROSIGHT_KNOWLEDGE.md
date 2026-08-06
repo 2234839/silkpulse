@@ -206,6 +206,7 @@ git add -A && git commit -m "feat(xxx): 描述"
 - **资源加载失败**（404 图片/脚本）不计入 errorCount，降级为快照提示
 - **日志限流**：滑动窗口 50 条/秒（error 级不限流）
 - **最近下线设备历史**：`recentlyOffline`（上限 10），AI 区分"从未接入"vs"接入过但掉了"
+- **WebSocket 采集**：WS 连接作为 NetworkEntry（protocol:'ws'），帧增量更新（seq 关联，与 log-repeat 同模式）；单连接帧上限 50 FIFO，单帧 data 截断 500，Blob 消息异步读 text；排除 SDK 自身 /ws/device 连接（避免采集调试通道）
 
 ---
 
@@ -225,9 +226,10 @@ git add -A && git commit -m "feat(xxx): 描述"
 
 ## 10. 当前状态（截至 2026-08-06）
 
-- 分支：`master`，已迭代至 52+ 轮
-- 最近提交：连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__clarosight_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__clarosight_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
-- 测试：无头测试 **92 项**全通过
+- 分支：`master`，已迭代至 53+ 轮
+- 最近提交：WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__clarosight_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__clarosight_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
+- 测试：无头测试 **94 项**全通过
+- network 面板支持 WebSocket：WS 连接作为 network 条目，点击展示 send/recv/event 帧时间线（对齐 DevTools WS Messages）
 - `__clarosight_setValue` 已支持 checkbox/radio（含 radio 同组互斥，合成事件下手动取消同组）
 - `__clarosight_click` 触发 mouseover→mousedown→mouseup→click 完整序列（覆盖 div[role=button] 监听 mousedown 的自定义组件）
 

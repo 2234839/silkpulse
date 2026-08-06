@@ -169,6 +169,35 @@ export function setupWebSocket(
             })
             break
           }
+          case 'ws-frame': {
+            /**
+             * WebSocket 帧追加（send/recv/event）：按 seq 找到 WS 连接条目，
+             * 追加帧到 frames（上限 50 FIFO），广播让 console 增量更新。
+             * 与 log-repeat 同模式：seq 稳定，只发增量，不重发整个 entry。
+             */
+            if (!device) return
+            const wsEntry = device.network.findBySeq(msg.seq)
+            if (wsEntry && wsEntry.protocol === 'ws') {
+              if (!wsEntry.frames) wsEntry.frames = []
+              wsEntry.frames.push(msg.frame)
+              /** 上限 50 帧 FIFO，超出移除最早（防长连接刷爆体积） */
+              if (wsEntry.frames.length > 50) wsEntry.frames.shift()
+              broadcast(deviceId, { type: 'ws-frame', deviceId, seq: msg.seq, frame: msg.frame })
+            }
+            break
+          }
+          case 'ws-state': {
+            /** WebSocket readyState 变化（CONNECTING→OPEN→CLOSING→CLOSED） */
+            if (!device) return
+            const wsEntry = device.network.findBySeq(msg.seq)
+            if (wsEntry && wsEntry.protocol === 'ws') {
+              wsEntry.wsState = msg.wsState
+              /** status 字段同步 readyState，列表展示一致 */
+              wsEntry.status = msg.wsState
+              broadcast(deviceId, { type: 'ws-state', deviceId, seq: msg.seq, wsState: msg.wsState })
+            }
+            break
+          }
           case 'error': {
             if (!device) return
             device.errors.push(msg.error)

@@ -14,6 +14,8 @@ export type DeviceMessage =
   | { type: 'log'; log: LogEntry }
   | { type: 'log-repeat' }
   | { type: 'network'; entry: NetworkEntry }
+  | { type: 'ws-frame'; seq: number; frame: WsFrame }
+  | { type: 'ws-state'; seq: number; wsState: number }
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
   | { type: 'exec-result'; execId: string; result: ExecResult }
@@ -30,6 +32,8 @@ export type ServerToConsoleMessage =
   | { type: 'log'; deviceId: string; log: LogEntry }
   | { type: 'log-repeat'; deviceId: string }
   | { type: 'network'; deviceId: string; entry: NetworkEntry }
+  | { type: 'ws-frame'; deviceId: string; seq: number; frame: WsFrame }
+  | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
 
 /** 控制台 → server 的消息类型 */
@@ -106,6 +110,16 @@ export interface LogEntry {
   repeat?: number
 }
 
+/** WebSocket 帧（send/recv/event） */
+export interface WsFrame {
+  /** ISO 时间戳 */
+  timestamp: string
+  /** 方向：send 发出 / recv 收到 / event 连接事件（close/error） */
+  dir: 'send' | 'recv' | 'event'
+  /** 帧数据（截断到 500 字符，二进制标记类型+大小） */
+  data: string
+}
+
 /** network 请求条目（HAR 风格，借鉴 PageSpy） */
 export interface NetworkEntry {
   /** 内部递增序号（环形缓冲区定位用） */
@@ -114,9 +128,9 @@ export interface NetworkEntry {
   timestamp: string
   /** 请求 URL */
   url: string
-  /** HTTP 方法 */
+  /** HTTP 方法（WS 连接用 'WS'/'WSS'） */
   method: string
-  /** 响应状态码（请求未完成时为 0） */
+  /** 响应状态码（请求未完成时为 0；WS 连接用 readyState 0-3） */
   status: number
   /** 请求头（截断） */
   reqHeaders?: Record<string, string>
@@ -130,6 +144,12 @@ export interface NetworkEntry {
   duration: number
   /** 是否出错 */
   error?: string
+  /** 标识这是 WebSocket 连接条目（普通 HTTP 请求无此字段） */
+  protocol?: 'ws'
+  /** WebSocket readyState（0=CONNECTING/1=OPEN/2=CLOSING/3=CLOSED），仅 WS 条目 */
+  wsState?: number
+  /** 帧时间线（send/recv/event），仅 WS 条目，上限 50 帧 FIFO */
+  frames?: WsFrame[]
 }
 
 /** 全局错误条目 */

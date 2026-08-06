@@ -58,6 +58,11 @@ class RingBuffer<T> {
     return this.items[this.items.length - 1]
   }
 
+  /** 按 seq 查找条目（WS 帧追加/状态更新用，找不到返回 undefined） */
+  findBySeq(seq: number): T | undefined {
+    return this.items.find((it) => (it as { seq?: number }).seq === seq)
+  }
+
   /** 返回序号 > since 的所有条目 */
   since(since: number): T[] {
     if (!since) return this.all()
