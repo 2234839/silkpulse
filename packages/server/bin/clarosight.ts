@@ -29,11 +29,10 @@ function parseArgs(args: string[]): { port?: number } {
 /**
  * 路径定位：bundle 后此文件位于 <pkg>/dist/bin/clarosight.mjs
  * - staticRoot: <pkg>/public（sdk.js + 控制台 UI）
- * - demoPagePath: <monorepo>/examples/test-page.html（/demo 路由用）
+ * - demoPagePath 由 createServer 内部多路径查找（bundle 后 __dirname 不可靠）
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const staticRoot = path.resolve(__dirname, '../../public')
-const demoPagePath = path.resolve(__dirname, '../../../../examples/test-page.html')
 
 const { port } = parseArgs(process.argv.slice(2))
-createServer({ port, staticRoot, demoPagePath })
+createServer({ port, staticRoot })

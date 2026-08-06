@@ -104,13 +104,25 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
 
     /** 4. /demo —— 同源测试页（供无头测试真实验证 network 采集，不跨域） */
     if (pathname === '/demo' || pathname === '/demo.html') {
-      const demoPagePath = options.demoPagePath ?? path.resolve(__dirname, '../../../examples/test-page.html')
-      if (fs.existsSync(demoPagePath)) {
+      /** bundle 后 __dirname 不可靠，从多个候选路径查找 demo 页面 */
+      const demoPagePath = options.demoPagePath ?? [
+        /** 本地 dev：packages/server/dist/bin/ → ../../../../examples/ */
+        path.resolve(__dirname, '../../../../examples/test-page.html'),
+        /** 容器部署 dist/bin/ → ../../../examples/ */
+        path.resolve(__dirname, '../../../examples/test-page.html'),
+        /** 容器部署 dist/bin/ → ../../examples/ */
+        path.resolve(__dirname, '../../examples/test-page.html'),
+        /** Docker /app/dist/bin/ → ../examples/ */
+        path.resolve(__dirname, '../examples/test-page.html'),
+        /** 1Panel 容器固定路径 */
+        '/app/examples/test-page.html',
+      ].find(p => fs.existsSync(p))
+      if (demoPagePath && fs.existsSync(demoPagePath)) {
         /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */
         const demoHost = req.headers.host || `localhost:${port}`
         const demoProto = req.headers['x-forwarded-proto'] || 'http'
         const demoOrigin = `${demoProto}://${demoHost}`
-        let html = fs.readFileSync(demoPagePath, 'utf8').replace(/localhost:8080/g, demoOrigin)
+        let html = fs.readFileSync(demoPagePath, 'utf8').replace(/https?:\/\/localhost:8080/g, demoOrigin)
         /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
         if (auth.isAuthEnabled()) {
           /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
