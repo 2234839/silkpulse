@@ -555,25 +555,28 @@ onMounted(() => {
               class="relative mx-auto bg-white dark:bg-gray-900 border border-base"
               :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
             >
-              <!-- 元素色块：点击选中 → 右侧诊断卡联动 -->
+              <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
               <div
                 v-for="el in rectElements"
                 :key="el.idx"
                 @click="selectElement(el.idx)"
-                class="absolute border overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
+                class="absolute overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
                 :class="[
-                  elementColor(el),
-                  isContainer(el) ? 'border-dashed bg-transparent' : 'rounded-sm',
+                  /** 有真实样式的元素不需要 Tailwind 色块类，只加基础轮廓 */
+                  el.style ? '' : elementColor(el),
+                  /** 无 style 的容器用虚线框 */
+                  !el.style && isContainer(el) ? 'border-dashed bg-transparent' : '',
                   /** 选中的元素用橙色高亮边框 + 提升层级 */
-                  selectedElementIdx === el.idx ? 'ring-2 ring-orange-500 z-20' : '',
-                  canShowLabel(el) ? '' : 'opacity-70',
+                  selectedElementIdx === el.idx ? 'ring-2 ring-orange-500 !z-20' : '',
                 ]"
                 :style="elementStyle(el)"
                 :title="`${el.tag} #${el.idx}${el.text ? ' | ' + el.text : ''}${el.value ? ' | val=' + el.value : ''}${el.disabled ? ' | disabled' : ''}${el.focused ? ' | focused' : ''}`"
               >
-                <span v-if="canShowLabel(el)" class="text-[9px] font-mono leading-tight truncate pointer-events-none">
-                  {{ elementLabel(el) }}
-                </span>
+                <span
+                  v-if="canShowLabel(el)"
+                  class="text-[9px] font-mono leading-tight truncate pointer-events-none"
+                  :class="el.style ? '' : elementColor(el)"
+                >{{ elementLabel(el) }}</span>
                 <span
                   v-if="el.focused"
                   class="absolute -top-px -right-px w-1.5 h-1.5 rounded-full bg-orange-500"
@@ -582,12 +585,7 @@ onMounted(() => {
             </div>
             <!-- 图例 -->
             <div class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted">
-              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-blue-500/25 border border-blue-500/60"></span>btn</span>
-              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/50"></span>link</span>
-              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-500/20 border border-purple-500/50"></span>h</span>
-              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 border border-dashed border-gray-400/50"></span>容器</span>
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>focused</span>
-              <span class="text-faint italic">点击色块 → 查看诊断</span>
+              <span class="text-faint italic">点击元素 → 查看诊断 · 真实样式高保真渲染</span>
             </div>
           </template>
         </div>

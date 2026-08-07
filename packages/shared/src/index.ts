@@ -411,5 +411,22 @@ export interface SnapshotElement {
   frame?: string
   /** 元素相对视口的位置和尺寸（用于控制台侧渲染布局框图预览） */
   rect?: { x: number; y: number; w: number; h: number }
+  /** 关键视觉样式（控制台侧高保真预览用） */
+  style?: {
+    /** 背景色（rgba/hex，透明色不采集） */
+    bg?: string
+    /** 文字颜色 */
+    color?: string
+    /** 字号 px */
+    fs?: number
+    /** 字重 */
+    fw?: string
+    /** 圆角 px */
+    radius?: number
+    /** 边框（简写，如 1px solid #e5e7eb） */
+    border?: string
+    /** 文字对齐 */
+    align?: string
+  }
   [k: string]: unknown
 }

@@ -63,13 +63,17 @@ export function elementColor(el: SnapshotElement): string {
   return LEAF_COLORS[el.tag] ?? DEFAULT_LEAF
 }
 
-/** 获取色块内显示的标签文字 */
+/** 获取色块内显示的标签文字（优先显示真实文字内容） */
 export function elementLabel(el: SnapshotElement): string {
+  /** 有文字内容时优先显示文字（截断） */
+  if (el.text && el.text.length > 0) {
+    return el.text.length > 25 ? el.text.slice(0, 25) + '…' : el.text
+  }
+  if (el.placeholder) return el.placeholder.slice(0, 20)
+  if (el.value) return el.value.slice(0, 20)
+  /** 无文字时回退到 tag + idx */
   const parts: string[] = [el.tag]
   if (el.idx !== undefined) parts.push(`#${el.idx}`)
-  if (el.text && el.text.length <= 20) parts.push(el.text)
-  else if (el.placeholder) parts.push(el.placeholder.slice(0, 15))
-  else if (el.value) parts.push(el.value.slice(0, 15))
   return parts.join(' ')
 }
 
@@ -110,18 +114,43 @@ export function useLayoutPreview(
     return Math.round(vh * scale.value)
   })
 
-  /** 根据 rect 返回色块 CSS 定位样式 */
+  /**
+   * 根据 rect + style 返回完整的 CSS 定位 + 视觉样式
+   *
+   * 优先使用采集到的真实样式（style.bg / style.color / style.fs 等），
+   * 没有 style 数据时 fallback 到色块分类（elementColor）。
+   */
   function elementStyle(el: SnapshotElement): Record<string, string> {
     if (!el.rect) return {}
     const s = scale.value
     const w = Math.max(2, Math.round(el.rect.w * s))
     const h = Math.max(2, Math.round(el.rect.h * s))
-    return {
+    const styles: Record<string, string> = {
       left: `${Math.round(el.rect.x * s)}px`,
       top: `${Math.round(el.rect.y * s)}px`,
       width: `${w}px`,
       height: `${h}px`,
     }
+
+    const vs = el.style
+    if (vs) {
+      /** 有真实视觉样式 → 高保真渲染 */
+      if (vs.bg) styles.backgroundColor = vs.bg
+      if (vs.color) styles.color = vs.color
+      if (vs.border) styles.border = vs.border
+      else {
+        /** 无显式 border 时加细微轮廓以便辨识边界 */
+        styles.border = '1px solid rgba(128,128,128,0.15)'
+      }
+      if (vs.radius) styles.borderRadius = `${Math.max(1, Math.round(vs.radius * s))}px`
+      if (vs.align) styles.textAlign = vs.align
+      /** 字号缩放，但不小于 8px（太小看不见） */
+      if (vs.fs) styles.fontSize = `${Math.max(8, Math.round(vs.fs * s))}px`
+      if (vs.fw) styles.fontWeight = vs.fw
+      styles.overflow = 'hidden'
+    }
+
+    return styles
   }
 
   /** 色块是否够大可以显示文字 */

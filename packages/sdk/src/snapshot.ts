@@ -47,6 +47,69 @@ const STATE_RE = /(active|selected|current|checked|open|expanded)/i
 /** 元素注册表：idx → element（exec 操作时用 idx 取回元素） */
 const elementsRegistry = new Map<number, Element>()
 
+/**
+ * 采集元素的关键视觉样式（控制台侧高保真预览用）
+ *
+ * 只提取对视觉还原影响最大的属性，跳过 transparent/默认值以节省体积。
+ * 返回 null 表示没有有意义的视觉信息。
+ */
+function captureVisualStyle(el: HTMLElement): SnapshotElement['style'] | null {
+  const cs = getComputedStyle(el)
+  const s: NonNullable<SnapshotElement['style']> = {}
+
+  /** 背景色：跳过 transparent 和纯白（太常见） */
+  const bg = cs.backgroundColor
+  if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+    const rgb = bg.match(/rgba?\(([^)]+)\)/)
+    if (rgb) {
+      const parts = rgb[1].split(',').map((p) => parseFloat(p.trim()))
+      /** alpha < 0.05 视为透明 */
+      if (parts.length >= 3 && (parts.length < 4 || parts[3] >= 0.05)) {
+        s.bg = bg
+      }
+    }
+  }
+
+  /** 文字颜色：跳过纯黑（默认色） */
+  const color = cs.color
+  if (color && color !== 'rgb(0, 0, 0)') {
+    s.color = color
+  }
+
+  /** 字号：跳过 16px（浏览器默认） */
+  const fs = parseFloat(cs.fontSize)
+  if (fs && Math.abs(fs - 16) > 0.5) {
+    s.fs = Math.round(fs)
+  }
+
+  /** 字重：跳过 400（normal） */
+  const fw = cs.fontWeight
+  if (fw && fw !== '400' && fw !== 'normal') {
+    s.fw = fw
+  }
+
+  /** 圆角：跳过 0 */
+  const radius = parseFloat(cs.borderTopLeftRadius)
+  if (radius && radius > 0) {
+    s.radius = Math.round(radius)
+  }
+
+  /** 边框：有实线边框才采集 */
+  const bw = cs.borderWidth
+  const bstyle = cs.borderStyle
+  if (bstyle && bstyle !== 'none' && bstyle !== 'hidden' && parseFloat(bw) > 0) {
+    s.border = `${Math.round(parseFloat(bw))}px ${bstyle} ${cs.borderColor}`
+  }
+
+  /** 文字对齐：非 left 才采集 */
+  const align = cs.textAlign
+  if (align && align !== 'left' && align !== 'start') {
+    s.align = align
+  }
+
+  return Object.keys(s).length > 0 ? s : null
+}
+
 /** 判断元素是否为叶子（无可见子元素） */
 function isLeaf(el: Element): boolean {
   if (el.tagName in ALWAYS_NONLEAF) return false
@@ -186,6 +249,10 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
     w: Math.round(rect.width),
     h: Math.round(rect.height),
   }
+
+  /** 关键视觉样式（控制台侧高保真预览用） */
+  const vs = captureVisualStyle(el as HTMLElement)
+  if (vs) entry.style = vs
 
   /** 交互元素的状态标记 */
   if (isInteractive) {
