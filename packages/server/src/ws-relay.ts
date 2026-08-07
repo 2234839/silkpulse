@@ -388,6 +388,13 @@ export function setupWebSocket(
             }
             break
           }
+          case 'ping': {
+            /** 应用层心跳响应（浏览器 WebSocket 无法发 ping 帧） */
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({ type: 'pong' } satisfies ServerToConsoleMessage))
+            }
+            break
+          }
         }
       })
 
@@ -403,7 +410,8 @@ export function setupWebSocket(
       const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
       const pid = ctx?.role === 'project' ? ctx.projectId : undefined
       const msg: ServerToConsoleMessage = { type: 'device-list', devices: registry.listByProject(pid) }
-      ws.send(JSON.stringify(msg))
+      /** 加错误回调防 send 抛异常中断循环（与 broadcast 保持一致） */
+      ws.send(JSON.stringify(msg), () => {})
     }
   }
 

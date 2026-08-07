@@ -60,6 +60,8 @@ export type ServerToConsoleMessage =
   | { type: 'error'; deviceId: string; error: ErrorEntry }
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
+  /** server → 控制台的心跳响应 */
+  | { type: 'pong' }
 
 /** 控制台 → server 的消息类型 */
 export type ConsoleMessage =
@@ -67,6 +69,8 @@ export type ConsoleMessage =
   | { type: 'unsubscribe'; deviceId: string }
   /** 控制台通知 server 当前启用的 watcher（按需采集，减少不必要的数据传输） */
   | { type: 'set-watchers'; deviceId: string; watchers: WatcherType[] }
+  /** 控制台 → server 的应用层心跳（检测半开连接） */
+  | { type: 'ping' }
 
 /**
  * 可按需启停的采集器类型

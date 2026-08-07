@@ -121,8 +121,8 @@ curl -s "${PLACEHOLDER_SERVER_URL}/api/skill/clarosight?key=${PLACEHOLDER_API_KE
  */
 export function renderSkillPrompt(serverUrl: string, apiKey: string): string {
   return SKILL_PROMPT_TEMPLATE
-    .replaceAll(PLACEHOLDER_SERVER_URL, serverUrl)
-    .replaceAll(PLACEHOLDER_API_KEY, apiKey)
+    .split(PLACEHOLDER_SERVER_URL).join(serverUrl)
+    .split(PLACEHOLDER_API_KEY).join(apiKey)
 }
 
 /**
@@ -134,6 +134,6 @@ export function renderSkillPrompt(serverUrl: string, apiKey: string): string {
  */
 export function renderSkillSystemPrompt(serverUrl: string, apiKey: string): string {
   return SKILL_SYSTEM_PROMPT_TEMPLATE
-    .replaceAll(PLACEHOLDER_SERVER_URL, serverUrl)
-    .replaceAll(PLACEHOLDER_API_KEY, apiKey)
+    .split(PLACEHOLDER_SERVER_URL).join(serverUrl)
+    .split(PLACEHOLDER_API_KEY).join(apiKey)
 }

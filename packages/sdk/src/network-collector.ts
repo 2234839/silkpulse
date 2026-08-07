@@ -772,11 +772,75 @@ function stringifyXhrResponse(xhr: XMLHttpRequest, maxLen: number): string | und
   return undefined
 }
 
+/**
+ * 敏感字段名匹配正则：password / passwd / pwd / secret / token / access_token /
+ * refresh_token / api_key / apikey / credit / card / cvv / ssn / idcard
+ */
+const SENSITIVE_KEY_RE = /(?:pass(?:word|wd)?|pwd|secret|token|access_?token|refresh_?token|api_?key|apikey|credit(?:card)?|card(?:number)?|cvv|ssn|idcard)/i
+
+/**
+ * 对 JSON 字符串中的敏感字段值做脱敏
+ *
+ * 尝试 JSON.parse → 遍历字段 → 对匹配 SENSITIVE_KEY_RE 的 key 的值替换为 ***。
+ * parse 失败则用正则兜底（覆盖 `{"password":"xxx"}` 这类常见模式）。
+ */
+function redactSensitiveJson(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return raw
+    const redacted = redactObject(parsed)
+    return JSON.stringify(redacted)
+  } catch {
+    /** 非 JSON 或超大字符串，用正则兜底替换敏感字段 */
+    return raw.replace(
+      /("(?:pass(?:word|wd)?|pwd|secret|token|access_?token|refresh_?token|api_?key|apikey)"\s*:\s*")[^"]*(")/gi,
+      '$1***$2',
+    )
+  }
+}
+
+/** 递归脱敏对象中的敏感字段值 */
+function redactObject<T>(obj: T): T {
+  if (Array.isArray(obj)) return obj.map(redactObject) as unknown as T
+  if (typeof obj === 'object' && obj !== null) {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj)) {
+      if (SENSITIVE_KEY_RE.test(key) && typeof value === 'string') {
+        result[key] = '***'
+      } else {
+        result[key] = redactObject(value)
+      }
+    }
+    return result as unknown as T
+  }
+  return obj
+}
+
+/** 对 URLSearchParams 字符串中的敏感参数值做脱敏 */
+function redactUrlSearchParams(qs: string): string {
+  try {
+    const params = new URLSearchParams(qs)
+    let changed = false
+    for (const key of params.keys()) {
+      if (SENSITIVE_KEY_RE.test(key)) {
+        params.set(key, '***')
+        changed = true
+      }
+    }
+    return changed ? params.toString() : qs
+  } catch {
+    return qs
+  }
+}
+
 /** 安全 stringify 请求体 */
 function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | Document, maxLen: number): string {
   try {
-    if (typeof body === 'string') return truncate(body, maxLen)
-    if (body instanceof URLSearchParams) return truncate(body.toString(), maxLen)
+    if (typeof body === 'string') {
+      /** 对 JSON body 中的敏感字段做脱敏（密码、token 等） */
+      return truncate(redactSensitiveJson(body), maxLen)
+    }
+    if (body instanceof URLSearchParams) return truncate(redactUrlSearchParams(body.toString()), maxLen)
     if (body instanceof FormData) return stringifyFormData(body, maxLen)
     if (body instanceof Blob) return `[Blob ${body.type}]`
     if (body instanceof ArrayBuffer) return `[ArrayBuffer ${(body as ArrayBuffer).byteLength}b]`

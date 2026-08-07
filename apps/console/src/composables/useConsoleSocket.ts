@@ -69,6 +69,28 @@ export function useConsoleSocket() {
    * 与 SDK ws-client 的同类修复一致：定时器生命周期要显式管理。
    */
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  /**
+   * 重连退避计数器
+   *
+   * 连续失败时延迟递增（2→4→8→16→30s 上限），避免 server 恢复瞬间连接风暴。
+   * 成功连接后重置为 0。
+   */
+  let reconnectAttempts = 0
+  /**
+   * 应用层心跳定时器
+   *
+   * 浏览器 WebSocket API 无法发 ping 帧，只能靠应用层消息做心跳。
+   * 每 25s 发 {type:'ping'}，server 回 {type:'pong'}，
+   * 超过 35s 未收到 pong → 主动 close 触发重连（检测半开连接）。
+   */
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined
+  /** 上次收到 pong 的时间戳 */
+  let lastPongTime = Date.now()
+  /** 是否主动关闭（组件卸载），避免 close 后重连 */
+  let intentionalClose = false
+
+  /** 上次选中的设备 ID（切换设备时先 unsubscribe 旧设备） */
+  let lastSubscribedDeviceId: string | null = null
 
   /** 切换选中的设备（订阅实时数据 + 拉取历史缓冲区） */
   async function selectDevice(id: string | null) {
@@ -77,6 +99,11 @@ export function useConsoleSocket() {
     network.value = []
     errors.value = []
     storageKeyTimes.value = {}
+    /** 先取消订阅旧设备，避免带宽浪费（server 会保留旧订阅） */
+    if (ws && ws.readyState === WebSocket.OPEN && lastSubscribedDeviceId && lastSubscribedDeviceId !== id) {
+      ws.send(JSON.stringify({ type: 'unsubscribe', deviceId: lastSubscribedDeviceId }))
+    }
+    lastSubscribedDeviceId = id
     if (!id) return
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe', deviceId: id }))
@@ -117,19 +144,40 @@ export function useConsoleSocket() {
     if (apiKey.value) wsParams.set('token', apiKey.value)
     const queryStr = wsParams.toString()
     const url = `${proto}//${location.host}/ws/console${queryStr ? '?' + queryStr : ''}`
+    intentionalClose = false
     ws = new WebSocket(url)
 
     ws.onopen = () => {
       connected.value = true
+      /** 重置退避计数器 */
+      reconnectAttempts = 0
+      /** 重连后恢复之前选中的设备订阅 */
+      if (lastSubscribedDeviceId) {
+        ws!.send(JSON.stringify({ type: 'subscribe', deviceId: lastSubscribedDeviceId }))
+      }
+      /** 启动应用层心跳（每 25s 发 ping） */
+      lastPongTime = Date.now()
+      startHeartbeat()
     }
 
     ws.onclose = () => {
       connected.value = false
-      /** 断线 2s 重连（跟踪句柄，卸载时清理防幽灵连接） */
+      stopHeartbeat()
+      /** 组件卸载时主动关闭，不再重连 */
+      if (intentionalClose) return
+      /** 指数退避重连：2→4→8→16→30s 上限 */
+      const delay = Math.min(2000 * 2 ** reconnectAttempts, 30000)
+      reconnectAttempts++
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined
         connect()
-      }, 2000)
+      }, delay)
+    }
+
+    ws.onerror = () => {
+      /** onerror 后必然触发 onclose，这里不做重连逻辑，
+       *  但如果鉴权失败（403），onclose 的 wasClean 为 false 会继续重连 → 死循环。
+       *  通过 onclose 里的退避机制限制频率，不额外处理。 */
     }
 
     ws.onmessage = (ev) => {
@@ -139,7 +187,34 @@ export function useConsoleSocket() {
       } catch {
         return
       }
+      /** 收到 pong 更新心跳时间戳 */
+      if ((msg as { type?: string }).type === 'pong') {
+        lastPongTime = Date.now()
+        return
+      }
       handleMessage(msg)
+    }
+  }
+
+  /** 启动应用层心跳 */
+  function startHeartbeat() {
+    stopHeartbeat()
+    heartbeatTimer = setInterval(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      /** 检查上次 pong 是否超时（35s 未收到 → 半开连接） */
+      if (Date.now() - lastPongTime > 35000) {
+        ws.close()
+        return
+      }
+      ws.send(JSON.stringify({ type: 'ping' }))
+    }, 25000)
+  }
+
+  /** 停止心跳定时器 */
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = undefined
     }
   }
 
@@ -266,11 +341,14 @@ export function useConsoleSocket() {
   }
 
   onUnmounted(() => {
+    /** 标记主动关闭，阻止 onclose 重连 */
+    intentionalClose = true
     /** 清理重连定时器，防止卸载后建立幽灵 WS 连接 */
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = undefined
     }
+    stopHeartbeat()
     ws?.close()
   })
 

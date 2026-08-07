@@ -233,9 +233,14 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
         )
       }
     } else {
-      if (htmlEl.value) entry.value = htmlEl.value.slice(0, 60)
-      if (htmlEl.placeholder) entry.placeholder = htmlEl.placeholder.slice(0, 60)
-      if (type && type !== 'text') entry.type = type
+      /** 密码框不采集 value（隐私保护——密码明文不上报） */
+      if (type === 'password') {
+        entry.type = 'password'
+      } else {
+        if (htmlEl.value) entry.value = htmlEl.value.slice(0, 60)
+        if (htmlEl.placeholder) entry.placeholder = htmlEl.placeholder.slice(0, 60)
+        if (type && type !== 'text') entry.type = type
+      }
     }
   }
 
