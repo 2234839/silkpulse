@@ -11,6 +11,7 @@ import type { AuthManager, AuthContext } from './auth.js'
 import { sendSnapshot } from './snapshot-text.js'
 import { generateFeatureDetectScript } from '@clarosight/feature-detect'
 import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
+import { renderSkillPrompt } from '@clarosight/shared'
 
 /**
  * POST body 最大字节数
@@ -122,6 +123,36 @@ export async function handleApiRoute(
       try { received = JSON.parse(body) } catch { /** 非 JSON，保留原始文本 */ }
     }
     sendJson(res, { ok: true, received, time: Date.now() })
+    return true
+  }
+
+  /**
+   * /api/skill/:name —— 渐进式 skill 文档拉取
+   *
+   * Agent 在系统提示词中只放极短的引导（~50 token），
+   * 需要时 curl 这个端点拉取完整 API 文档。
+   * 支持 ?key= query 或 Authorization header 鉴权。
+   */
+  const skillMatch = pathname.match(/^\/api\/skill\/([^/]+)$/)
+  if (skillMatch && req.method === 'GET') {
+    const [, skillName] = skillMatch
+    if (skillName !== 'clarosight') {
+      sendJson(res, { error: `未知的 skill: ${skillName}` }, 404)
+      return true
+    }
+    /** 鉴权：匿名拒绝 */
+    if (authCtx.role === 'anonymous') {
+      sendJson(res, { error: '未授权' }, 401)
+      return true
+    }
+    /** 从请求 Host 推断服务地址 */
+    const host = req.headers.host || ''
+    const proto = req.headers['x-forwarded-proto'] || 'http'
+    const serverUrl = `${proto}://${host}`
+    /** 提取鉴权 token（header 或 query）作为 apiKey */
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const apiKey = url.searchParams.get('key') || req.headers.authorization?.replace('Bearer ', '').trim() || ''
+    sendText(res, renderSkillPrompt(serverUrl, apiKey))
     return true
   }
 

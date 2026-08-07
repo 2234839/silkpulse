@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./skill-template": "./src/skill-template.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

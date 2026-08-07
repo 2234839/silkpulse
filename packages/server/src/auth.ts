@@ -305,8 +305,15 @@ export class ProjectStore {
 /** 从请求中提取 Bearer token */
 function extractBearerToken(req: IncomingMessage): string | undefined {
   const auth = req.headers.authorization
-  if (!auth || !auth.startsWith('Bearer ')) return undefined
-  return auth.slice(7).trim()
+  if (auth && auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim()
+  }
+  /** 回退：?key= query 参数（skill 文档拉取等场景，方便 agent 直接 curl） */
+  const url = req.url
+  if (url) {
+    return extractQueryParam(url, 'key')
+  }
+  return undefined
 }
 
 /** 从 URL query 中提取参数 */

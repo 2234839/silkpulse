@@ -38,6 +38,8 @@ export interface DomChangeData {
   timestamp: number
 }
 
+export { SKILL_PROMPT_TEMPLATE, SKILL_SYSTEM_PROMPT_TEMPLATE, renderSkillPrompt, renderSkillSystemPrompt } from './skill-template.js'
+
 /** server → 设备 的消息类型 */
 export type ServerToDeviceMessage =
   | { type: 'exec'; execId: string; code: string }

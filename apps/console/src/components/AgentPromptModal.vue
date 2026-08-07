@@ -2,16 +2,15 @@
 /**
  * AgentPromptModal —— 接入 AI Agent 弹窗
  *
- * 展示一段完整的 agent 提示词，包含 clarosight API 使用说明 + 当前服务地址 + API key。
- * 用户一键复制交给任意 AI agent（Cursor / Claude Code / ChatGPT 等），
- * agent 即可通过 HTTP API 查看在线设备、搜索日志、执行诊断代码。
+ * 提供两种接入方式：
+ * 1. 渐进式加载 —— 极短系统提示词（~50 token），agent 按需 curl 拉取完整文档
+ * 2. 完整提示词 —— 一键复制所有 API 文档，agent 直接全量加载
  *
- * 提示词模板从 agent-prompt.md 以 ?raw 导入，
- * 运行时替换 __SERVER_URL__ / __API_KEY__ 占位符为实际值。
+ * 提示词模板来自 @clarosight/shared（服务端 + 控制台共用同一份）。
  */
 import { computed, ref, watch } from 'vue'
 import { copyText } from '../utils/clipboard'
-import promptTemplate from '../assets/agent-prompt.md?raw'
+import { renderSkillPrompt, renderSkillSystemPrompt } from '@clarosight/shared'
 
 const props = defineProps<{
   modelValue: boolean
@@ -23,28 +22,46 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
+/** 当前选中的 tab */
+type Tab = 'full' | 'lazy'
+const activeTab = ref<Tab>('lazy')
+
 const copyState = ref<'idle' | 'copied' | 'error'>('idle')
 
-/** 替换模板占位符，生成最终提示词 */
-const promptText = computed(() => {
+/** 渲染完整提示词（替换占位符） */
+const fullPrompt = computed(() => {
   const key = props.apiKey || '<你的API密钥>'
   const origin = props.serverUrl || 'https://clarosight.heartstack.space'
-  return promptTemplate
-    .replaceAll('__SERVER_URL__', origin)
-    .replaceAll('__API_KEY__', key)
+  return renderSkillPrompt(origin, key)
 })
 
+/** 渲染渐进式加载系统提示词 */
+const lazyPrompt = computed(() => {
+  const key = props.apiKey || '<你的API密钥>'
+  const origin = props.serverUrl || 'https://clarosight.heartstack.space'
+  return renderSkillSystemPrompt(origin, key)
+})
+
+/** 当前 tab 对应的提示词 */
+const currentPrompt = computed(() => activeTab.value === 'full' ? fullPrompt.value : lazyPrompt.value)
+
 async function handleCopy() {
-  const ok = await copyText(promptText.value)
+  const ok = await copyText(currentPrompt.value)
   copyState.value = ok ? 'copied' : 'error'
   if (ok) {
     setTimeout(() => { copyState.value = 'idle' }, 2000)
   }
 }
 
+/** 切 tab 时重置复制状态 */
+watch(activeTab, () => { copyState.value = 'idle' })
+
 /** 弹窗关闭时重置状态 */
 watch(() => props.modelValue, (v) => {
-  if (!v) copyState.value = 'idle'
+  if (!v) {
+    copyState.value = 'idle'
+    activeTab.value = 'lazy'
+  }
 })
 </script>
 
@@ -59,7 +76,7 @@ watch(() => props.modelValue, (v) => {
       <div class="flex items-center justify-between px-5 py-3 border-b border-base">
         <div>
           <h3 class="text-sm font-semibold text-primary">🤖 接入 AI Agent</h3>
-          <p class="text-xs text-muted mt-0.5">复制以下提示词，粘贴给你的 AI agent 即可开始远程调试</p>
+          <p class="text-xs text-muted mt-0.5">选择接入方式，复制提示词粘贴给你的 AI agent</p>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -80,16 +97,52 @@ watch(() => props.modelValue, (v) => {
         </div>
       </div>
 
+      <!-- Tab 切换 -->
+      <div class="flex gap-1 px-5 pt-3 border-b border-base">
+        <button
+          @click="activeTab = 'lazy'"
+          class="px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px"
+          :class="activeTab === 'lazy'
+            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+            : 'border-transparent text-muted hover:text-secondary'"
+        >
+          ⚡ 渐进式加载 <span class="text-muted/60">~50 token</span>
+        </button>
+        <button
+          @click="activeTab = 'full'"
+          class="px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px"
+          :class="activeTab === 'full'
+            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+            : 'border-transparent text-muted hover:text-secondary'"
+        >
+          📄 完整提示词 <span class="text-muted/60">~600 token</span>
+        </button>
+      </div>
+
       <!-- 提示词内容 -->
       <div class="flex-1 overflow-y-auto p-5">
-        <pre class="text-xs font-mono text-primary whitespace-pre-wrap leading-relaxed">{{ promptText }}</pre>
+        <!-- 渐进式加载说明 -->
+        <div v-if="activeTab === 'lazy'" class="mb-3 p-3 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+          <p class="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+            💡 将这段极短提示词写入 agent 的<strong>系统提示词</strong>（system prompt）。
+            agent 会在需要远程调试时自动 curl 拉取完整文档，平时不占用 token。
+          </p>
+        </div>
+        <pre class="text-xs font-mono text-primary whitespace-pre-wrap leading-relaxed">{{ currentPrompt }}</pre>
       </div>
 
       <!-- 底部提示 -->
       <div class="px-5 py-2.5 border-t border-base bg-elevated/30">
         <p class="text-xs text-muted">
-          💡 提示词包含服务地址 <code class="text-blue-500">{{ serverUrl }}</code> 和 API Key，
-          agent 可直接通过 HTTP API 查看设备、搜索日志、执行代码。
+          <template v-if="activeTab === 'lazy'">
+            🚀 提示词中的 curl 地址指向
+            <code class="text-blue-500">{{ serverUrl }}/api/skill/clarosight</code>，
+            agent 按需拉取完整 API 文档。
+          </template>
+          <template v-else>
+            💡 提示词包含服务地址 <code class="text-blue-500">{{ serverUrl }}</code> 和 API Key，
+            agent 可直接通过 HTTP API 查看设备、搜索日志、执行代码。
+          </template>
         </p>
       </div>
     </div>
