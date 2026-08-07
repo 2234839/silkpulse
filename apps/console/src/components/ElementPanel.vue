@@ -28,11 +28,16 @@ const props = defineProps<{
 }>()
 
 /** 树节点（server 返回的元素信息 + 前端展开状态） */
+interface DomAttr {
+  name: string
+  value: string
+}
+
 interface ElementNode {
   idx: number
   tag: string
-  id?: string
-  classes?: string
+  /** 完整属性列表 */
+  attributes?: DomAttr[]
   childCount: number
   text?: string
   /** shadow host 标记：该元素有 shadowRoot，展开时需请求 shadow 子树 */

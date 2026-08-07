@@ -484,8 +484,9 @@ export async function execOnDevice(
  * parentIdx 为 null 时取 body 的直接子元素（首屏）。
  * shadow=true 时取 shadowRoot 的子元素（parentIdx 必须指向 shadow host）。
  *
- * 每个元素返回 {idx, tag, id, classes, childCount, text?, hasShadow?}：
+ * 每个元素返回 {idx, tag, attributes, childCount, text?, hasShadow?}：
  * - idx：__clarosight_ensureIdx 打稳定 idx，供后续 inspect/操作复用
+ * - attributes：完整属性列表 [{name, value}]（前端渲染所有属性）
  * - text：叶子元素（无子元素 + 无 shadow）的可见文本（完整返回，前端换行展示）
  * - childCount：子元素数（前端用来决定是否显示"展开"箭头）
  * - hasShadow：该元素是 shadow host（前端展开时需请求 shadow 子树）
@@ -502,8 +503,7 @@ for (const el of host.shadowRoot.children) {
   if (idx < 0) continue
   const item = {
     idx, tag,
-    id: el.id || undefined,
-    classes: el.className && typeof el.className === 'string' ? el.className.split(/\\s+/).filter(Boolean).slice(0, 3).join(' ') : undefined,
+    attributes: Array.from(el.attributes || []).map(a => ({ name: a.name, value: a.value })),
     childCount: el.children.length,
   }
   if (el.shadowRoot) {
@@ -529,8 +529,7 @@ for (const el of parent.children) {
   if (idx < 0) continue
   const item = {
     idx, tag,
-    id: el.id || undefined,
-    classes: el.className && typeof el.className === 'string' ? el.className.split(/\\s+/).filter(Boolean).slice(0, 3).join(' ') : undefined,
+    attributes: Array.from(el.attributes || []).map(a => ({ name: a.name, value: a.value })),
     childCount: el.children.length,
   }
   /** shadow host：标记 hasShadow + shadowChildCount，childCount 只统计普通子元素 */
@@ -566,14 +565,13 @@ const results = []
 const seen = new Set()
 const MAX = 50
 
-/** 收集元素信息（tag/id/classes/text/hasShadow） */
+/** 收集元素信息（tag/attributes/text/hasShadow） */
 function info(el) {
   const tag = el.tagName ? el.tagName.toLowerCase() : '#text'
   const item = {
     idx: __clarosight_ensureIdx(el),
     tag,
-    id: el.id || undefined,
-    classes: el.className && typeof el.className === 'string' ? el.className.split(/\\s+/).filter(Boolean).slice(0, 3).join(' ') : undefined,
+    attributes: el.attributes ? Array.from(el.attributes).map(a => ({ name: a.name, value: a.value })) : [],
     childCount: el.children ? el.children.length : 0,
   }
   if (el.shadowRoot) {

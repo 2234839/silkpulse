@@ -2,19 +2,29 @@
 /**
  * ElementTreeNode —— DOM 树的递归节点组件（Chrome DevTools Elements 风格）
  *
- * XML 标签风格：<tag id="..." class="...">text</tag>
- * - 叶子节点（有 text 无子元素）单行展示：<p>文本内容</p>
- * - 收起容器：<div class="demo">…3</div>
- * - 展开容器：开始标签 > 子节点缩进 > 闭合标签 </div>
+ * 纯数据驱动渲染：接收 DOM 结构信息（tagName、attributes、text），
+ * 用 Vue 的 v-for / {{ }} 渲染，不手动拼接 HTML 字符串。
+ *
+ * 展示规则：
+ * - 叶子节点（有 text 无子元素）：tag attr=val > text
+ * - 收起容器：tag attr=val > …N
+ * - 展开容器：开始标签 > 子节点（缩进）> 闭合标签
  * - shadow host 带 🕶️ 标记 + 紫色 shadow-root 区域
  */
+
+/** DOM 属性 */
+interface DomAttr {
+  name: string
+  value: string
+}
 
 interface ElementNode {
   idx: number
   tag: string
-  id?: string
-  classes?: string
+  /** 完整属性列表（server 从 el.attributes 收集） */
+  attributes?: DomAttr[]
   childCount: number
+  /** 叶子节点的文本内容 */
   text?: string
   hasShadow?: boolean
   shadowChildCount?: number
@@ -43,19 +53,6 @@ const emit = defineEmits<{
   select: [idx: number]
 }>()
 
-/** class 列表（拆分为数组） */
-function classList(n: ElementNode): string[] {
-  return n.classes ? n.classes.split(/\s+/).filter(Boolean) : []
-}
-
-/** HTML void 元素（自闭合，无结束标签） */
-const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
-
-/** 是否为 void 元素（如 <input>、<img>、<br>，不需要结束标签） */
-function isVoidTag(tag: string): boolean {
-  return VOID_TAGS.has(tag.toLowerCase())
-}
-
 /** 是否展开（普通 children 或 shadow） */
 function isExpanded(n: ElementNode): boolean {
   return (n.childCount > 0 && n.expanded) || (!!n.hasShadow && n.shadowExpanded)
@@ -64,6 +61,14 @@ function isExpanded(n: ElementNode): boolean {
 /** 是否有可展开内容 */
 function hasExpandable(n: ElementNode): boolean {
   return n.childCount > 0 || !!n.hasShadow
+}
+
+/** 长 style/data 属性值截断显示 */
+function shortValue(name: string, value: string): string {
+  if ((name === 'style' || name.startsWith('data-')) && value.length > 20) {
+    return value.slice(0, 20) + '…'
+  }
+  return value
 }
 </script>
 
@@ -86,39 +91,23 @@ function hasExpandable(n: ElementNode): boolean {
       <!-- shadow host 标记 -->
       <span v-if="node.hasShadow" class="etn-shadow-icon" title="Shadow Host">🕶️</span>
 
-      <!-- <tag -->
-      <span class="etn-bracket">&lt;</span>
-      <span class="etn-tag">{{ node.tag }}</span>
-      <span v-if="node.id" class="etn-attr"><span class="etn-attr-name"> id</span><span class="etn-attr-val">="{{ node.id }}"</span></span>
-      <span v-if="classList(node).length > 0" class="etn-attr"><span class="etn-attr-name"> class</span><span class="etn-attr-val">="{{ classList(node).join(' ') }}"</span></span>
+      <!-- 标签名 -->
+      <span class="etn-tag-name">{{ node.tag }}</span>
 
-      <!-- 收起状态：内联闭合 -->
+      <!-- 属性列表（v-for 遍历，Vue 自行渲染） -->
+      <span
+        v-for="attr in node.attributes"
+        :key="attr.name"
+        class="etn-attr"
+      >
+        <span class="etn-attr-name">{{ attr.name }}</span>=<span class="etn-attr-value">"{{ shortValue(attr.name, attr.value) }}"</span>
+      </span>
+
+      <!-- 收起状态：显示文本或子元素数量 -->
       <template v-if="!isExpanded(node)">
-        <!-- 叶子节点有文本：<tag>text</tag> 单行 -->
-        <template v-if="node.text">
-          <span class="etn-bracket">&gt;</span>
-          <span class="etn-text-inline">{{ node.text }}</span>
-          <span class="etn-bracket">&lt;/</span><span class="etn-tag">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
-        </template>
-        <!-- 有子元素但收起：<tag>…N</tag> -->
-        <template v-else>
-          <span v-if="node.childCount > 0" class="etn-child-hint"> …{{ node.childCount }} </span>
-          <span v-if="node.shadowChildCount" class="etn-shadow-hint"> 🕶️{{ node.shadowChildCount }} </span>
-          <span class="etn-bracket">&gt;</span>
-          <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-bracket">…&lt;/</span>
-          <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-tag">{{ node.tag }}</span>
-          <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-bracket">&gt;</span>
-          <!-- 无子元素：void 标签自闭合，其他标签空闭合 <script></script> -->
-          <span v-if="!(node.childCount > 0 || node.shadowChildCount) && isVoidTag(node.tag)" class="etn-bracket"> /&gt;</span>
-          <template v-if="!(node.childCount > 0 || node.shadowChildCount) && !isVoidTag(node.tag)">
-            <span class="etn-bracket">&lt;/</span><span class="etn-tag">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
-          </template>
-        </template>
-      </template>
-
-      <!-- 展开状态：只闭合开始标签 > -->
-      <template v-else>
-        <span class="etn-bracket">&gt;</span>
+        <span v-if="node.text" class="etn-text-inline"> {{ node.text }} </span>
+        <span v-else-if="node.childCount > 0" class="etn-child-hint">…{{ node.childCount }}</span>
+        <span v-if="node.shadowChildCount" class="etn-shadow-hint">🕶️{{ node.shadowChildCount }}</span>
       </template>
     </div>
 
@@ -161,7 +150,7 @@ function hasExpandable(n: ElementNode): boolean {
       @click="emit('select', node.idx)"
     >
       <span class="etn-arrow etn-arrow-hidden">▶</span>
-      <span class="etn-bracket">&lt;/</span><span class="etn-tag">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
+      <span class="etn-tag-name">/{{ node.tag }}</span>
     </div>
   </div>
 </template>
@@ -216,14 +205,14 @@ function hasExpandable(n: ElementNode): boolean {
   margin-right: 2px;
 }
 
-/** 尖括号 —— 灰色 */
-.etn-bracket {
-  color: #808080;
+/** 标签名 —— 蓝色 */
+.etn-tag-name {
+  color: #569cd6;
 }
 
-/** 标签名 —— 蓝色 */
-.etn-tag {
-  color: #569cd6;
+/** 属性 —— 整体浅色 */
+.etn-attr {
+  margin-left: 4px;
 }
 
 /** 属性名 —— 浅蓝 */
@@ -232,55 +221,45 @@ function hasExpandable(n: ElementNode): boolean {
 }
 
 /** 属性值 —— 橙色 */
-.etn-attr-val {
+.etn-attr-value {
   color: #ce9178;
-}
-
-/** 内联文本 —— 灰白，截断 */
-.etn-text-inline {
-  color: #ce9178;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
 }
 
 .etn-child-hint {
   color: #6a9955;
-  font-style: italic;
-  font-size: 11px;
+  margin-left: 4px;
 }
 
 .etn-shadow-hint {
-  color: #7c3aed;
+  color: #c586c0;
+  margin-left: 2px;
 }
 
-.etn-children {
-  border-left: 1px solid rgba(127, 127, 127, 0.15);
+/** 内联文本 —— 浅黄 */
+.etn-text-inline {
+  color: #dcdcaa;
+  margin-left: 4px;
 }
 
 .etn-shadow-root {
-  border-left: 2px dashed rgba(124, 58, 237, 0.3);
-  padding-left: 4px;
+  border-left: 2px dashed #7c3aed;
+  padding-left: 8px;
   margin-bottom: 2px;
 }
 
 .etn-shadow-label {
-  color: #7c3aed;
+  color: #c586c0;
   font-size: 10px;
-  padding: 1px 4px;
-  opacity: 0.7;
+  padding: 2px 0;
 }
 
-.etn-close {
-  opacity: 0.85;
+/** DOM 变化高亮闪烁 */
+@keyframes flash {
+  0% { background: rgba(255, 213, 79, 0.5); }
+  100% { background: transparent; }
 }
 
-/** DOM 变化高亮动画：黄色闪烁后渐隐 */
-@keyframes etn-flash {
-  0% { background-color: rgba(250, 204, 21, 0.6); }
-  100% { background-color: transparent; }
-}
 .etn-flash {
-  animation: etn-flash 1.5s ease-out;
+  animation: flash 1.5s ease-out;
 }
 </style>
