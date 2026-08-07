@@ -29,6 +29,9 @@ const newProjectDesc = ref('')
 /** 创建/轮换后一次性展示的密钥 */
 const createdApiKey = ref('')
 
+/** 错误提示（操作被拒绝时显示） */
+const errorMsg = ref('')
+
 /** 加载项目列表 */
 async function loadProjects() {
   try {
@@ -45,8 +48,9 @@ watch(() => props.modelValue, (v) => {
   if (v) {
     loadProjects()
   } else {
-    /** 关闭时清空一次性密钥展示 */
+    /** 关闭时清空一次性密钥和错误提示 */
     createdApiKey.value = ''
+    errorMsg.value = ''
   }
 })
 
@@ -71,33 +75,49 @@ async function createProject() {
 
 /** 轮换项目密钥 */
 async function rotateProjectKey(pid: string) {
+  errorMsg.value = ''
   try {
     const res = await apiFetch(`/api/projects/${pid}/rotate`, { method: 'POST' })
     if (res.ok) {
       const data = await res.json() as { apiKey: string }
       createdApiKey.value = data.apiKey
+    } else {
+      const data = await res.json().catch(() => null) as { error?: string } | null
+      errorMsg.value = data?.error || `操作失败 (${res.status})`
     }
   } catch { /* 忽略 */ }
 }
 
 /** 切换项目启用/禁用 */
 async function toggleProject(pid: string, enabled: boolean) {
+  errorMsg.value = ''
   try {
-    await apiFetch(`/api/projects/${pid}`, {
+    const res = await apiFetch(`/api/projects/${pid}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     })
-    await loadProjects()
+    if (res.ok) {
+      await loadProjects()
+    } else {
+      const data = await res.json().catch(() => null) as { error?: string } | null
+      errorMsg.value = data?.error || `操作失败 (${res.status})`
+    }
   } catch { /* 忽略 */ }
 }
 
 /** 删除项目 */
 async function deleteProject(pid: string, name: string) {
   if (!confirm(`确定删除项目「${name}」？关联设备的 projectId 将被清除。`)) return
+  errorMsg.value = ''
   try {
-    await apiFetch(`/api/projects/${pid}`, { method: 'DELETE' })
-    await loadProjects()
+    const res = await apiFetch(`/api/projects/${pid}`, { method: 'DELETE' })
+    if (res.ok) {
+      await loadProjects()
+    } else {
+      const data = await res.json().catch(() => null) as { error?: string } | null
+      errorMsg.value = data?.error || `操作失败 (${res.status})`
+    }
   } catch { /* 忽略 */ }
 }
 
@@ -127,6 +147,10 @@ defineExpose({ projects, loadProjects })
       </div>
 
       <div class="flex-1 overflow-y-auto p-5 space-y-4">
+        <!-- 错误提示 -->
+        <div v-if="errorMsg" class="p-3 rounded bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700">
+          <p class="text-xs text-red-700 dark:text-red-300 font-medium">⚠ {{ errorMsg }}</p>
+        </div>
         <!-- 创建项目 -->
         <div class="space-y-2 p-3 rounded border border-base bg-base/50">
           <h4 class="text-xs font-semibold text-secondary">创建新项目</h4>

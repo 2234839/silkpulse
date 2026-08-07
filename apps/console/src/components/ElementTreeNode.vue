@@ -65,7 +65,7 @@ function hasExpandable(n: ElementNode): boolean {
     <div
       class="etn-row"
       :class="{ 'etn-selected': selectedIdx === node.idx, 'etn-flash': node.flash }"
-      :style="{ paddingLeft: `${depth * 16}px` }"
+      :style="{ paddingLeft: `${depth * 20}px` }"
       @click="emit('select', node.idx)"
     >
       <!-- 展开/收起箭头 -->
@@ -117,7 +117,7 @@ function hasExpandable(n: ElementNode): boolean {
           v-for="child in node.children"
           :key="child.idx"
           :node="child"
-          :depth="0"
+          :depth="depth + 1"
           :selected-idx="selectedIdx"
           @toggle="emit('toggle', $event)"
           @select="emit('select', $event)"
@@ -127,13 +127,13 @@ function hasExpandable(n: ElementNode): boolean {
 
     <!-- shadow 子树（紫色虚线标识 shadow boundary） -->
     <template v-if="node.shadowExpanded && node.shadowChildren">
-      <div class="etn-shadow-root" :style="{ marginLeft: `${depth * 16 + 12}px` }">
+      <div class="etn-shadow-root" :style="{ marginLeft: `${depth * 20 + 12}px` }">
         <div class="etn-shadow-label">⚡ #shadow-root</div>
         <ElementTreeNode
           v-for="child in node.shadowChildren"
           :key="`s-${child.idx}`"
           :node="child"
-          :depth="0"
+          :depth="depth + 1"
           :selected-idx="selectedIdx"
           @toggle="emit('toggle', $event)"
           @select="emit('select', $event)"
@@ -145,7 +145,7 @@ function hasExpandable(n: ElementNode): boolean {
     <div
       v-if="isExpanded(node)"
       class="etn-row etn-close"
-      :style="{ paddingLeft: `${depth * 16}px` }"
+      :style="{ paddingLeft: `${depth * 20}px` }"
       @click="emit('select', node.idx)"
     >
       <span class="etn-arrow etn-arrow-hidden">▶</span>
