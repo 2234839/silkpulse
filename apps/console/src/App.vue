@@ -192,7 +192,6 @@ onMounted(async () => {
         :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
       >{{ theme === 'dark' ? '☀️' : '🌙' }}</button>
       <button
-        v-if="!isPlayground"
         @click="showInjectModal = true"
         class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
         title="查看三种方式把设备接入到本控制台"
@@ -282,8 +281,7 @@ onMounted(async () => {
         <div v-else class="flex-1 flex items-center justify-center text-faint overflow-y-auto">
           <div class="text-center max-w-lg w-full px-6 py-8">
             <p class="text-sm mb-6">从左侧选择一个设备查看详情</p>
-            <!-- 游客模式不显示接入代码（游客只读体验） -->
-            <div v-if="!isPlayground" class="bg-surface border border-base rounded-lg p-4 text-left">
+            <div class="bg-surface border border-base rounded-lg p-4 text-left">
               <h3 class="text-sm font-semibold text-primary mb-3">接入新设备</h3>
               <InjectPanel />
             </div>
