@@ -14,11 +14,14 @@ const apiKey = ref<string>('')
 const authStatus = ref<{
   authEnabled: boolean
   hasAdminKey: boolean
+  playgroundEnabled?: boolean
 } | null>(null)
 /** 当前用户角色信息（verify 后填充） */
 const userRole = ref<'admin' | 'project' | null>(null)
 const projectId = ref<string | undefined>(undefined)
 const projectName = ref<string | undefined>(undefined)
+/** 是否为 Playground 游客 */
+const isPlayground = ref<boolean>(false)
 
 /** 从 localStorage 恢复密钥 */
 function restoreKey(): void {
@@ -43,6 +46,7 @@ function clearKey(): void {
   userRole.value = null
   projectId.value = undefined
   projectName.value = undefined
+  isPlayground.value = false
   try { localStorage.removeItem(STORAGE_KEY) } catch { /** */ }
 }
 
@@ -70,17 +74,37 @@ async function verifyKey(): Promise<boolean> {
       userRole.value = null
       return false
     }
-    const data: { role: string; projectId?: string; projectName?: string } = await res.json()
+    const data: { role: string; projectId?: string; projectName?: string; isPlayground?: boolean } = await res.json()
     if (data.role === 'admin' || data.role === 'project') {
       userRole.value = data.role
       projectId.value = data.projectId
       projectName.value = data.projectName
+      isPlayground.value = !!data.isPlayground
       return true
     }
     userRole.value = null
     return false
   } catch {
     userRole.value = null
+    return false
+  }
+}
+
+/**
+ * 游客一键登录：调用 /api/auth/playground，
+ * 服务端返回 token（playgroundKey），保存后即可正常使用。
+ */
+async function guestLogin(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/playground', { method: 'POST' })
+    if (!res.ok) return false
+    const data: { role: string; token: string; isPlayground?: boolean } = await res.json()
+    if (data.role === 'admin' || data.role === 'project') {
+      saveKey(data.token)
+      return await verifyKey()
+    }
+    return false
+  } catch {
     return false
   }
 }
@@ -101,10 +125,12 @@ export function useAuth() {
     userRole: readonly(userRole),
     projectId: readonly(projectId),
     projectName: readonly(projectName),
+    isPlayground: readonly(isPlayground),
     saveKey,
     clearKey,
     checkAuthStatus,
     verifyKey,
+    guestLogin,
     isAuthenticated,
   }
 }

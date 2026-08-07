@@ -343,10 +343,12 @@ export function setupWebSocket(
       /** 控制台连上后立即推送当前设备列表（按项目过滤） */
       const consoleAuthCtx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
       const consoleProjectId = consoleAuthCtx?.role === 'project' ? consoleAuthCtx.projectId : undefined
+      /** Playground 游客可以看公共设备（无项目归属的设备） */
+      const includeUnassigned = consoleAuthCtx?.projectId === '__playground__'
       ws.send(
         JSON.stringify({
           type: 'device-list',
-          devices: registry.listByProject(consoleProjectId),
+          devices: registry.listByProject(consoleProjectId, includeUnassigned),
         } satisfies ServerToConsoleMessage)
       )
 
@@ -402,7 +404,9 @@ export function setupWebSocket(
       /** 每个控制台只收到它有权访问的设备列表 */
       const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
       const pid = ctx?.role === 'project' ? ctx.projectId : undefined
-      const msg: ServerToConsoleMessage = { type: 'device-list', devices: registry.listByProject(pid) }
+      /** Playground 游客可以看公共设备 */
+      const inclUnassigned = ctx?.projectId === '__playground__'
+      const msg: ServerToConsoleMessage = { type: 'device-list', devices: registry.listByProject(pid, inclUnassigned) }
       ws.send(JSON.stringify(msg))
     }
   }

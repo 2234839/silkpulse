@@ -120,9 +120,11 @@ export async function handleApiRoute(
       return true
     }
     const projectId = authCtx.role === 'project' ? authCtx.projectId : undefined
+    /** Playground 游客可以看公共设备（无项目归属的设备） */
+    const includeUnassigned = authCtx.projectId === '__playground__'
     sendJson(res, {
-      devices: registry.listByProject(projectId),
-      recentlyOffline: registry.listOfflineByProject(projectId),
+      devices: registry.listByProject(projectId, includeUnassigned),
+      recentlyOffline: registry.listOfflineByProject(projectId, includeUnassigned),
     })
     return true
   }
@@ -145,7 +147,7 @@ export async function handleApiRoute(
     sendJson(res, { error: '未授权' }, 401)
     return true
   }
-  if (authCtx.role === 'project' && device.info.projectId !== authCtx.projectId) {
+  if (!_auth?.canAccessDevice(authCtx, device.info.projectId)) {
     sendJson(res, { error: '无权访问此设备' }, 403)
     return true
   }

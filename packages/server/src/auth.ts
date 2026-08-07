@@ -339,6 +339,27 @@ export class AuthManager {
     return !!this.adminKey
   }
 
+  /** Playground 密钥（环境变量 CLAROSIGHT_PLAYGROUND_KEY 配置） */
+  get playgroundKey(): string | undefined {
+    return process.env.CLAROSIGHT_PLAYGROUND_KEY
+  }
+
+  /** 是否启用了 Playground（游客访问）模式 */
+  isPlaygroundEnabled(): boolean {
+    return !!this.playgroundKey
+  }
+
+  /**
+   * 获取 Playground 虚拟项目 ID
+   *
+   * Playground 模式下不需要创建真实项目，使用固定的虚拟 ID '__playground__'。
+   * 游客以 project 角色访问，看到的是所有没有 projectId 归属的公共设备。
+   */
+  getPlaygroundProjectId(): string | undefined {
+    if (!this.playgroundKey) return undefined
+    return '__playground__'
+  }
+
   /**
    * 验证 HTTP 请求的鉴权
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
@@ -358,9 +379,29 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
+    return this.authorizeWithToken(token)
+  }
+
+  /**
+   * 直接用 token 鉴权（不走限流，因为 playground 登录场景已经过了限流验证）。
+   * 供 playground 登录等"服务端自己发起的"鉴权场景使用。
+   */
+  authorizeHttpRequestWithToken(token: string): AuthContext {
+    if (!this.isAuthEnabled()) return { role: 'admin' }
+    return this.authorizeWithToken(token)
+  }
+
+  /** token → AuthContext 的核心鉴权逻辑 */
+  private authorizeWithToken(token: string): AuthContext {
     // 尝试超管密钥
     if (this.adminKey && safeEqual(token, this.adminKey)) {
       return { role: 'admin' }
+    }
+
+    // 尝试 Playground 密钥（游客模式）
+    if (this.playgroundKey && safeEqual(token, this.playgroundKey)) {
+      const pid = this.getPlaygroundProjectId()
+      if (pid) return { role: 'project', projectId: pid }
     }
 
     // 尝试项目密钥
@@ -390,6 +431,11 @@ export class AuthManager {
       // 超管密钥
       if (this.adminKey && safeEqual(token, this.adminKey)) {
         return { role: 'admin' }
+      }
+      // Playground 密钥（游客模式）
+      if (this.playgroundKey && safeEqual(token, this.playgroundKey)) {
+        const pgPid = this.getPlaygroundProjectId()
+        if (pgPid) return { role: 'project', projectId: pgPid }
       }
       // 项目密钥
       const pid = this.projects.verifyKey(token)
@@ -429,11 +475,17 @@ export class AuthManager {
   /**
    * 检查鉴权上下文是否有权限访问指定设备
    * @param ctx 鉴权上下文
-   * @param deviceProjectId 设备所属项目 ID（undefined 表示旧设备无项目归属）
+   * @param deviceProjectId 设备所属项目 ID（undefined 表示公共设备，无项目归属）
+   *
+   * Playground 游客（projectId='__playground__'）可以访问公共设备（无 projectId）。
    */
   canAccessDevice(ctx: AuthContext, deviceProjectId?: string): boolean {
     if (ctx.role === 'admin') return true
-    if (ctx.role === 'project') return ctx.projectId === deviceProjectId
+    if (ctx.role === 'project') {
+      /** Playground 游客可以访问公共设备 */
+      if (ctx.projectId === '__playground__') return !deviceProjectId
+      return ctx.projectId === deviceProjectId
+    }
     return false
   }
 
@@ -494,6 +546,7 @@ export function handleProjectApiRoute(
     jsonResponse(res, 200, {
       authEnabled: auth.isAuthEnabled(),
       hasAdminKey: auth.hasAdminKey(),
+      playgroundEnabled: auth.isPlaygroundEnabled(),
     })
     return true
   }
@@ -507,14 +560,49 @@ export function handleProjectApiRoute(
     }
     /** 项目密钥：附带项目名称供前端展示 */
     let projectName: string | undefined
+    let isPlayground = false
     if (ctx.role === 'project' && ctx.projectId) {
-      const proj = auth.projects.get(ctx.projectId)
-      projectName = proj?.name
+      /** Playground 游客 */
+      if (ctx.projectId === '__playground__') {
+        isPlayground = true
+        projectName = 'Playground'
+      } else {
+        const proj = auth.projects.get(ctx.projectId)
+        projectName = proj?.name
+      }
     }
     jsonResponse(res, 200, {
       role: ctx.role,
       projectId: ctx.projectId,
       projectName,
+      isPlayground,
+    })
+    return true
+  }
+
+  /**
+   * 游客一键登录：服务端内部用 playgroundKey 授权，
+   * 返回 playgroundKey 作为 token（前端保存后用作后续请求的 Authorization）。
+   * 原始 key 不暴露在 URL 或前端代码中——前端只需 POST 一次即可。
+   */
+  if (url === '/api/auth/playground' && method === 'POST') {
+    if (!auth.isPlaygroundEnabled()) {
+      jsonResponse(res, 403, { error: 'Playground 未开启' })
+      return true
+    }
+    const key = auth.playgroundKey!
+    const ctx = auth.authorizeHttpRequestWithToken(key)
+    if (ctx.role === 'anonymous') {
+      jsonResponse(res, 500, { error: 'Playground 配置异常' })
+      return true
+    }
+    jsonResponse(res, 200, {
+      role: ctx.role,
+      projectId: ctx.projectId,
+      projectName: 'Playground',
+      isPlayground: true,
+      /** 前端保存此 key 作为后续请求的 token */
+      token: key,
     })
     return true
   }

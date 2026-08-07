@@ -22,6 +22,10 @@ const authLoading = ref(false)
 const props = defineProps<{
   /** 父级提供的验证函数，返回 true=成功 */
   onVerify: (key: string) => Promise<boolean>
+  /** 父级提供的游客登录函数 */
+  onGuestLogin?: () => Promise<boolean>
+  /** 是否开启了 Playground 游客模式 */
+  playgroundEnabled?: boolean
 }>()
 
 async function submitAuth() {
@@ -35,6 +39,24 @@ async function submitAuth() {
       return
     }
     authKeyInput.value = ''
+    emit('success')
+  } catch {
+    authError.value = '网络错误，请检查服务器连接'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function handleGuestLogin() {
+  if (!props.onGuestLogin) return
+  authLoading.value = true
+  authError.value = ''
+  try {
+    const ok = await props.onGuestLogin()
+    if (!ok) {
+      authError.value = '游客模式暂不可用，请稍后重试'
+      return
+    }
     emit('success')
   } catch {
     authError.value = '网络错误，请检查服务器连接'
@@ -67,12 +89,36 @@ async function submitAuth() {
           class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white rounded-lg font-medium text-sm transition"
         >{{ authLoading ? '验证中...' : '登录' }}</button>
         <p v-if="authError" class="text-red-400 text-sm text-center">{{ authError }}</p>
+
+        <!-- 游客访问按钮 -->
+        <div v-if="playgroundEnabled" class="pt-2">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="flex-1 h-px bg-gray-700"></div>
+            <span class="text-xs text-gray-500">或</span>
+            <div class="flex-1 h-px bg-gray-700"></div>
+          </div>
+          <button
+            @click="handleGuestLogin"
+            :disabled="authLoading"
+            class="w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition flex items-center justify-center gap-2"
+          >
+            <span>🎮</span>
+            <span>游客访问</span>
+          </button>
+        </div>
       </div>
       <p class="text-xs text-gray-500 text-center leading-relaxed">
         超管密钥可查看所有项目和设备<br/>
         项目密钥只能查看对应项目的设备<br/>
         <span class="text-gray-600">密钥安全存储在浏览器本地</span>
       </p>
+      <!-- 游客模式提示 -->
+      <div v-if="playgroundEnabled" class="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
+        <p class="text-xs text-yellow-400/80 text-center leading-relaxed">
+          🎮 游客模式仅可查看公开设备，数据在公网共享<br/>
+          <span class="text-yellow-600">建议私有化部署以保护隐私</span>
+        </p>
+      </div>
     </div>
   </div>
 </template>

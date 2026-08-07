@@ -53,10 +53,12 @@ const {
   apiKey,
   authStatus,
   userRole,
+  isPlayground,
   saveKey,
   clearKey,
   checkAuthStatus,
   verifyKey,
+  guestLogin,
   isAuthenticated,
 } = useAuth()
 
@@ -124,6 +126,14 @@ async function verifyAuthKey(key: string): Promise<boolean> {
   return true
 }
 
+/** 游客一键登录 */
+async function handleGuestLogin(): Promise<boolean> {
+  const ok = await guestLogin()
+  if (!ok) return false
+  connect()
+  return true
+}
+
 /** 退出登录 */
 function logout() {
   clearKey()
@@ -147,7 +157,12 @@ onMounted(async () => {
 
 <template>
   <!-- 鉴权页面 -->
-  <AuthPage v-if="needAuth" :on-verify="verifyAuthKey" />
+  <AuthPage
+    v-if="needAuth"
+    :on-verify="verifyAuthKey"
+    :on-guest-login="handleGuestLogin"
+    :playground-enabled="authStatus?.playgroundEnabled"
+  />
 
   <!-- 主界面 -->
   <div v-else class="h-screen flex flex-col">
@@ -155,6 +170,12 @@ onMounted(async () => {
     <header class="bg-gray-900 text-white px-6 py-3 flex items-center gap-4">
       <h1 class="text-lg font-semibold">clarosight</h1>
       <span class="text-xs text-gray-400">远程设备调试控制台</span>
+      <!-- 游客模式标识 -->
+      <span
+        v-if="isPlayground"
+        class="px-2 py-0.5 text-xs rounded-full bg-yellow-900/40 text-yellow-400 border border-yellow-700/40"
+        title="游客模式 · 数据在公网共享，建议私有化部署"
+      >🎮 游客模式 · 建议私有化部署</span>
       <span
         class="ml-auto flex items-center gap-2 text-xs"
         :class="connected ? 'text-green-400' : 'text-red-400'"
