@@ -11,6 +11,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import ElementTreeNode from './ElementTreeNode.vue'
 import { apiFetch } from '../utils/api'
 import { useSnapshot } from '../composables/useSnapshot'
+import { useResizable } from '../composables/useResizable'
 import {
   useLayoutPreview,
   isContainer,
@@ -66,6 +67,15 @@ interface ElementNode {
 /** ─── 布局预览 ─── */
 /** 左侧面板视图：tree = DOM 树，preview = 布局框图 */
 const leftView = ref<'tree' | 'preview'>('tree')
+/** 布局预览模式下诊断面板是否悬浮显示（关闭后不挡预览） */
+const floatDiagnosticVisible = ref(true)
+/** DOM 树模式下的左侧分栏宽度可拖拽 */
+const { width: treePanelWidth, onDragStart: onTreePanelResize } = useResizable({
+  initial: 360,
+  min: 200,
+  max: 600,
+  direction: 'right',
+})
 /** 布局预览的 sentinel（ResizeObserver 测量宽度用） */
 const sentinelRef = ref<HTMLElement | null>(null)
 /** 快照数据（含 rect 位置信息） */
@@ -466,12 +476,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex-1 flex overflow-hidden bg-base">
-    <!-- 左：DOM 树 / 布局预览 -->
-    <div class="w-2/5 min-w-[180px] md:min-w-[240px] border-r border-base flex flex-col overflow-hidden">
-      <!-- 视图切换 + 刷新 -->
-      <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2">
-        <div class="flex rounded border border-base overflow-hidden flex-shrink-0">
+  <div class="flex-1 flex flex-col overflow-hidden bg-base relative">
+    <!-- 顶部工具栏：视图切换 + 刷新 -->
+    <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2 flex-shrink-0">
+      <div class="flex rounded border border-base overflow-hidden flex-shrink-0">
           <button
             @click="leftView = 'tree'"
             class="px-2 py-0.5 text-xs font-medium transition-colors"
@@ -482,17 +490,24 @@ onMounted(() => {
             class="px-2 py-0.5 text-xs font-medium transition-colors"
             :class="leftView === 'preview' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
           >布局预览</button>
-        </div>
-        <button
-          v-if="leftView === 'tree'"
-          @click="loadElementTree"
-          :disabled="elementTreeLoading"
-          class="text-xs text-faint hover:text-primary disabled:opacity-50"
-        >{{ elementTreeLoading ? '加载中...' : '刷新' }}</button>
-        <span v-else-if="snapshotData" class="text-xs text-faint whitespace-nowrap">{{ rectElements.length }} 元素 · {{ snapshotData.viewportWidth }}×{{ snapshotData.viewportHeight }}</span>
       </div>
-      <!-- DOM 树视图 -->
+      <button
+        v-if="leftView === 'tree'"
+        @click="loadElementTree"
+        :disabled="elementTreeLoading"
+        class="text-xs text-faint hover:text-primary disabled:opacity-50"
+      >{{ elementTreeLoading ? '加载中...' : '刷新' }}</button>
+      <span v-else-if="snapshotData" class="text-xs text-faint whitespace-nowrap">{{ rectElements.length }} 元素 · {{ snapshotData.viewportWidth }}×{{ snapshotData.viewportHeight }}</span>
+    </div>
+
+    <!-- ═══ 主体区域 ═══ -->
+    <div class="flex-1 flex overflow-hidden relative">
+      <!-- ═══ DOM 树模式：左右分栏（可拖拽） ═══ -->
       <template v-if="leftView === 'tree'">
+        <!-- 左：DOM 树 -->
+        <div class="border-r border-base flex flex-col overflow-hidden flex-shrink-0" :style="{ width: treePanelWidth + 'px' }">
+      <!-- DOM 树视图 -->
+      <!-- tree 模式：左侧只放 filter + tree -->
         <!-- filter 搜索框 -->
         <div class="px-3 py-2 border-b border-base bg-surface">
           <input
@@ -541,62 +556,32 @@ onMounted(() => {
             </template>
           </template>
         </div>
-      </template>
-
-      <!-- 布局预览视图 -->
-      <template v-else>
-        <!-- sentinel：放在滚动容器外，滚动条增减不影响测量 -->
-        <div ref="sentinelRef" class="w-full h-0 overflow-hidden flex-shrink-0"></div>
-        <div class="flex-1 overflow-auto">
-          <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">加载快照...</div>
-          <div v-else-if="!snapshotData" class="text-faint text-center py-8 text-xs">快照不可用</div>
-          <template v-else>
-            <div
-              class="relative mx-auto bg-white dark:bg-gray-900 border border-base"
-              :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
-            >
-              <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
-              <div
-                v-for="el in rectElements"
-                :key="el.idx"
-                @click="selectElement(el.idx)"
-                class="absolute overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
-                :class="[
-                  /** 有真实样式的元素不需要 Tailwind 色块类，只加基础轮廓 */
-                  el.style ? '' : elementColor(el),
-                  /** 无 style 的容器用虚线框 */
-                  !el.style && isContainer(el) ? 'border-dashed bg-transparent' : '',
-                  /** 选中的元素用橙色高亮边框 + 提升层级 */
-                  selectedElementIdx === el.idx ? 'ring-2 ring-orange-500 !z-20' : '',
-                ]"
-                :style="elementStyle(el)"
-                :title="`${el.tag} #${el.idx}${el.text ? ' | ' + el.text : ''}${el.value ? ' | val=' + el.value : ''}${el.disabled ? ' | disabled' : ''}${el.focused ? ' | focused' : ''}`"
-              >
-                <span
-                  v-if="canShowLabel(el)"
-                  class="text-[9px] font-mono leading-tight truncate pointer-events-none"
-                  :class="el.style ? '' : elementColor(el)"
-                >{{ elementLabel(el) }}</span>
-                <span
-                  v-if="el.focused"
-                  class="absolute -top-px -right-px w-1.5 h-1.5 rounded-full bg-orange-500"
-                ></span>
-              </div>
-            </div>
-            <!-- 图例 -->
-            <div class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted">
-              <span class="text-faint italic">点击元素 → 查看诊断 · 真实样式高保真渲染</span>
-            </div>
-          </template>
-        </div>
-      </template>
-    </div>
-
-    <!-- 右：诊断卡 -->
-    <div class="flex-1 overflow-y-auto p-4">
+      </div>
+      <!-- 拖拽手柄（tree 模式） -->
+      <div
+        class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
+        @mousedown="onTreePanelResize"
+      ></div>
+      <!-- 右：诊断面板 -->
+      <!-- tree 模式 → flex-1 常驻；preview 模式 → absolute 悬浮卡片（可关闭/恢复） -->
+      <div
+        v-show="leftView === 'tree' || floatDiagnosticVisible"
+        :class="leftView === 'tree'
+          ? 'flex-1 overflow-y-auto p-4 min-w-0'
+          : 'absolute top-2 right-2 bottom-2 w-[340px] max-w-[60%] bg-surface/95 backdrop-blur border border-base rounded-lg shadow-2xl overflow-y-auto p-3 z-30'"
+      >
       <div v-if="elementInspectLoading" class="text-faint text-center py-8 text-sm">诊断中...</div>
-      <div v-else-if="!elementInspect" class="text-faint text-center py-8 text-sm">点击左侧元素查看诊断</div>
+      <div v-else-if="!elementInspect" class="text-faint text-center py-8 text-sm">点击元素查看诊断</div>
       <template v-else>
+        <!-- 悬浮模式下的关闭按钮 + 标题栏 -->
+        <div v-if="leftView === 'preview'" class="flex items-center justify-between mb-3 pb-2 border-b border-base">
+          <span class="text-xs font-semibold text-secondary">元素诊断</span>
+          <button
+            @click="floatDiagnosticVisible = false"
+            class="text-faint hover:text-primary text-xs px-1"
+            title="关闭诊断面板"
+          >✕</button>
+        </div>
         <!-- 元素标题 -->
         <div class="mb-4">
           <div class="text-sm font-semibold text-primary font-mono">
@@ -733,6 +718,57 @@ onMounted(() => {
           </div>
         </div>
       </template>
+    </div>
+    </template>
+    <!-- ═══ 布局预览模式：画布占满全宽 ═══ -->
+    <template v-if="leftView === 'preview'">
+      <div class="flex-1 flex flex-col overflow-hidden" ref="sentinelRef">
+        <div class="flex-1 overflow-auto">
+          <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">加载快照...</div>
+          <div v-else-if="!snapshotData" class="text-faint text-center py-8 text-xs">快照不可用</div>
+          <template v-else>
+            <div
+              class="relative mx-auto bg-white dark:bg-gray-900 border border-base"
+              :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
+            >
+              <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
+              <div
+                v-for="el in rectElements"
+                :key="el.idx"
+                @click="selectElement(el.idx); floatDiagnosticVisible = true"
+                class="absolute overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
+                :class="[
+                  el.style ? '' : elementColor(el),
+                  !el.style && isContainer(el) ? 'border-dashed bg-transparent' : '',
+                  selectedElementIdx === el.idx ? 'ring-2 ring-orange-500 !z-20' : '',
+                ]"
+                :style="elementStyle(el)"
+                :title="`${el.tag} #${el.idx}${el.text ? ' | ' + el.text : ''}${el.value ? ' | val=' + el.value : ''}${el.disabled ? ' | disabled' : ''}${el.focused ? ' | focused' : ''}`"
+              >
+                <span
+                  v-if="canShowLabel(el)"
+                  class="text-[9px] font-mono leading-tight truncate pointer-events-none"
+                  :class="el.style ? '' : elementColor(el)"
+                >{{ elementLabel(el) }}</span>
+                <span
+                  v-if="el.focused"
+                  class="absolute -top-px -right-px w-1.5 h-1.5 rounded-full bg-orange-500"
+                ></span>
+              </div>
+            </div>
+            <div class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted">
+              <span class="text-faint italic">点击元素 → 查看诊断 · 真实样式高保真渲染</span>
+            </div>
+          </template>
+        </div>
+        <!-- 悬浮诊断面板关闭后，提供一个重新打开的按钮 -->
+        <button
+          v-if="!floatDiagnosticVisible && elementInspect"
+          @click="floatDiagnosticVisible = true"
+          class="absolute bottom-3 right-3 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg shadow-lg hover:bg-blue-700 z-30"
+        >📋 显示诊断</button>
+      </div>
+    </template>
     </div>
   </div>
 </template>

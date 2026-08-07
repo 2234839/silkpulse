@@ -29,8 +29,17 @@ import NetworkPanel from './components/NetworkPanel.vue'
 import ExecPanel from './components/ExecPanel.vue'
 import ElementPanel from './components/ElementPanel.vue'
 import StoragePanel from './components/StoragePanel.vue'
+import { useResizable } from './composables/useResizable'
 
 const { theme, toggleTheme } = useTheme()
+
+/** 设备列表宽度可拖拽 */
+const { width: sidebarWidth, onDragStart: onSidebarResize } = useResizable({
+  initial: 288,
+  min: 200,
+  max: 500,
+  direction: 'right',
+})
 
 const {
   devices,
@@ -293,6 +302,7 @@ onMounted(async () => {
       <div
         class="flex-shrink-0 md:flex static md:relative z-40 h-full"
         :class="sidebarOpen ? 'flex' : 'hidden md:flex'"
+        :style="{ width: sidebarOpen ? undefined : sidebarWidth + 'px' }"
       >
         <DeviceList
           :devices="devices"
@@ -303,6 +313,11 @@ onMounted(async () => {
           @select="selectDevice"
         />
       </div>
+      <!-- 拖拽手柄：桌面端显示 -->
+      <div
+        class="hidden md:flex w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
+        @mousedown="onSidebarResize"
+      />
 
       <main class="flex-1 flex flex-col overflow-hidden">
         <template v-if="selectedDeviceId">
