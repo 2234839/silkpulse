@@ -242,16 +242,10 @@ export class DeviceRegistry {
    * 按项目过滤的在线设备信息（鉴权模式下，控制台只能看自己项目的设备）
    *
    * @param projectId 项目 ID（undefined=超管，看全部）
-   * @param includeUnassigned 是否包含无项目归属的设备（Playground 游客用）
    */
-  listByProject(projectId?: string, includeUnassigned = false): DeviceInfo[] {
+  listByProject(projectId?: string): DeviceInfo[] {
     return Array.from(this.devices.values())
-      .filter((d) => {
-        if (projectId === undefined) return true
-        if (d.info.projectId === projectId) return true
-        /** Playground 游客可以看公共设备 */
-        return includeUnassigned && d.info.projectId === undefined
-      })
+      .filter((d) => projectId === undefined || d.info.projectId === projectId)
       .map((d) => d.info)
   }
 
@@ -259,14 +253,9 @@ export class DeviceRegistry {
    * 按项目过滤的最近下线设备摘要
    *
    * @param projectId 项目 ID（undefined=超管，看全部）
-   * @param includeUnassigned 是否包含无项目归属的设备（Playground 游客用）
    */
-  listOfflineByProject(projectId?: string, includeUnassigned = false): OfflineDeviceSummary[] {
-    return this.offlineHistory.filter((o) => {
-      if (projectId === undefined) return true
-      if (o.projectId === projectId) return true
-      return includeUnassigned && o.projectId === undefined
-    })
+  listOfflineByProject(projectId?: string): OfflineDeviceSummary[] {
+    return this.offlineHistory.filter((o) => projectId === undefined || o.projectId === projectId)
   }
 
   /** 最近下线设备摘要（用于 AI 判断"接入过但掉了"） */

@@ -217,6 +217,30 @@ export class ProjectStore {
     return rest
   }
 
+  /** 获取项目原始数据（含密钥哈希，仅供内部使用） */
+  getRaw(projectId: string): Project | undefined {
+    return this.projects.get(projectId)
+  }
+
+  /** 直接写入项目原始数据（供 Playground 项目初始化使用） */
+  setRaw(projectId: string, project: Project): void {
+    this.projects.set(projectId, project)
+    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId)
+    this.save()
+  }
+
+  /** 更新项目密钥哈希（供 Playground key 变更时同步） */
+  updateRaw(projectId: string, patch: { apiKeyHash: string; apiKeySalt: string }): void {
+    const p = this.projects.get(projectId)
+    if (!p) return
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
+    p.apiKeyHash = patch.apiKeyHash
+    p.apiKeySalt = patch.apiKeySalt
+    p.updatedAt = new Date().toISOString()
+    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId)
+    this.save()
+  }
+
   /** 删除项目 */
   delete(projectId: string): boolean {
     const p = this.projects.get(projectId)
@@ -263,7 +287,6 @@ export class ProjectStore {
    * @returns 项目 ID（验证成功）或 undefined（失败）
    */
   verifyKey(plainKey: string): string | undefined {
-    if (!plainKey.startsWith('cs_live_')) return undefined
     // 遍历所有项目尝试验证（因为密钥是哈希的，不能直接反查）
     // 对于少量项目（通常 <100）性能可接受
     for (const [id, p] of this.projects) {
@@ -324,6 +347,9 @@ export class AuthManager {
     this.adminKey = process.env.CLAROSIGHT_ADMIN_KEY
     this.projects = projectStore
 
+    /** Playground 游客模式：初始化时创建/确保存在一个真实的公开项目 */
+    this.ensurePlaygroundProject()
+
     // 每 5 分钟清理过期限流条目
     this.cleanupTimer = setInterval(() => this.rateLimiter.cleanup(), 5 * 60_000)
     this.cleanupTimer.unref?.()
@@ -349,15 +375,42 @@ export class AuthManager {
     return !!this.playgroundKey
   }
 
+  /** Playground 项目的固定 ID（真实项目，不是虚拟 ID） */
+  static readonly PLAYGROUND_PROJECT_ID = 'cs_playground'
+
+  /** Playground 项目名称 */
+  static readonly PLAYGROUND_PROJECT_NAME = 'Playground'
+
   /**
-   * 获取 Playground 虚拟项目 ID
-   *
-   * Playground 模式下不需要创建真实项目，使用固定的虚拟 ID '__playground__'。
-   * 游客以 project 角色访问，看到的是所有没有 projectId 归属的公共设备。
+   * 确保 Playground 项目存在：如果配置了 CLAROSIGHT_PLAYGROUND_KEY，
+   * 就创建一个真实的公开项目（固定 ID + 固定名称），
+   * apiKeyHash = hash(playgroundKey)。
+   * 这样游客的权限隔离、设备归属、接入代码全部复用现有项目逻辑，零特殊处理。
    */
-  getPlaygroundProjectId(): string | undefined {
-    if (!this.playgroundKey) return undefined
-    return '__playground__'
+  private ensurePlaygroundProject(): void {
+    const key = this.playgroundKey
+    if (!key) return
+    const pid = AuthManager.PLAYGROUND_PROJECT_ID
+    /** 已存在则检查 key 是否需要更新（用户可能改了环境变量） */
+    const existing = this.projects.getRaw(pid)
+    const { hash, salt } = hashApiKey(key)
+    if (existing) {
+      /** key 没变就跳过 */
+      if (verifyApiKey(key, existing.apiKeyHash, existing.apiKeySalt)) return
+      this.projects.updateRaw(pid, { apiKeyHash: hash, apiKeySalt: salt })
+      return
+    }
+    const now = new Date().toISOString()
+    this.projects.setRaw(pid, {
+      id: pid,
+      name: AuthManager.PLAYGROUND_PROJECT_NAME,
+      description: '游客公开体验项目（环境变量自动创建）',
+      apiKeyHash: hash,
+      apiKeySalt: salt,
+      createdAt: now,
+      updatedAt: now,
+      enabled: true,
+    })
   }
 
   /**
@@ -379,32 +432,12 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    return this.authorizeWithToken(token)
-  }
-
-  /**
-   * 直接用 token 鉴权（不走限流，因为 playground 登录场景已经过了限流验证）。
-   * 供 playground 登录等"服务端自己发起的"鉴权场景使用。
-   */
-  authorizeHttpRequestWithToken(token: string): AuthContext {
-    if (!this.isAuthEnabled()) return { role: 'admin' }
-    return this.authorizeWithToken(token)
-  }
-
-  /** token → AuthContext 的核心鉴权逻辑 */
-  private authorizeWithToken(token: string): AuthContext {
     // 尝试超管密钥
     if (this.adminKey && safeEqual(token, this.adminKey)) {
       return { role: 'admin' }
     }
 
-    // 尝试 Playground 密钥（游客模式）
-    if (this.playgroundKey && safeEqual(token, this.playgroundKey)) {
-      const pid = this.getPlaygroundProjectId()
-      if (pid) return { role: 'project', projectId: pid }
-    }
-
-    // 尝试项目密钥
+    // 尝试项目密钥（包括 Playground 项目）
     const projectId = this.projects.verifyKey(token)
     if (projectId) {
       return { role: 'project', projectId }
@@ -432,12 +465,7 @@ export class AuthManager {
       if (this.adminKey && safeEqual(token, this.adminKey)) {
         return { role: 'admin' }
       }
-      // Playground 密钥（游客模式）
-      if (this.playgroundKey && safeEqual(token, this.playgroundKey)) {
-        const pgPid = this.getPlaygroundProjectId()
-        if (pgPid) return { role: 'project', projectId: pgPid }
-      }
-      // 项目密钥
+      // 项目密钥（包括 Playground 项目）
       const pid = this.projects.verifyKey(token)
       if (pid) return { role: 'project', projectId: pid }
       return { role: 'anonymous' }
@@ -474,18 +502,14 @@ export class AuthManager {
 
   /**
    * 检查鉴权上下文是否有权限访问指定设备
+  /**
+   * 检查鉴权上下文是否有权限访问指定设备
    * @param ctx 鉴权上下文
    * @param deviceProjectId 设备所属项目 ID（undefined 表示公共设备，无项目归属）
-   *
-   * Playground 游客（projectId='__playground__'）可以访问公共设备（无 projectId）。
    */
   canAccessDevice(ctx: AuthContext, deviceProjectId?: string): boolean {
     if (ctx.role === 'admin') return true
-    if (ctx.role === 'project') {
-      /** Playground 游客可以访问公共设备 */
-      if (ctx.projectId === '__playground__') return !deviceProjectId
-      return ctx.projectId === deviceProjectId
-    }
+    if (ctx.role === 'project') return ctx.projectId === deviceProjectId
     return false
   }
 
@@ -562,14 +586,9 @@ export function handleProjectApiRoute(
     let projectName: string | undefined
     let isPlayground = false
     if (ctx.role === 'project' && ctx.projectId) {
-      /** Playground 游客 */
-      if (ctx.projectId === '__playground__') {
-        isPlayground = true
-        projectName = 'Playground'
-      } else {
-        const proj = auth.projects.get(ctx.projectId)
-        projectName = proj?.name
-      }
+      const proj = auth.projects.get(ctx.projectId)
+      projectName = proj?.name
+      isPlayground = ctx.projectId === AuthManager.PLAYGROUND_PROJECT_ID
     }
     jsonResponse(res, 200, {
       role: ctx.role,
@@ -581,9 +600,8 @@ export function handleProjectApiRoute(
   }
 
   /**
-   * 游客一键登录：服务端内部用 playgroundKey 授权，
-   * 返回 playgroundKey 作为 token（前端保存后用作后续请求的 Authorization）。
-   * 原始 key 不暴露在 URL 或前端代码中——前端只需 POST 一次即可。
+   * 游客一键登录：返回 playground key 作为 token，
+   * 前端保存后用作后续请求的 Authorization。
    */
   if (url === '/api/auth/playground' && method === 'POST') {
     if (!auth.isPlaygroundEnabled()) {
@@ -591,15 +609,11 @@ export function handleProjectApiRoute(
       return true
     }
     const key = auth.playgroundKey!
-    const ctx = auth.authorizeHttpRequestWithToken(key)
-    if (ctx.role === 'anonymous') {
-      jsonResponse(res, 500, { error: 'Playground 配置异常' })
-      return true
-    }
+    const pid = AuthManager.PLAYGROUND_PROJECT_ID
     jsonResponse(res, 200, {
-      role: ctx.role,
-      projectId: ctx.projectId,
-      projectName: 'Playground',
+      role: 'project',
+      projectId: pid,
+      projectName: AuthManager.PLAYGROUND_PROJECT_NAME,
       isPlayground: true,
       /** 前端保存此 key 作为后续请求的 token */
       token: key,
