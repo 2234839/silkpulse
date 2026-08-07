@@ -252,8 +252,27 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     res.end('Not found')
   })
 
-  /** 挂载 WebSocket 服务（noServer 模式，手动处理 upgrade 以区分 device/console） */
-  const wss = new WebSocketServer({ noServer: true })
+  /**
+   * 挂载 WebSocket 服务（noServer 模式，手动处理 upgrade 以区分 device/console）
+   *
+   * perMessageDeflate：启用 WebSocket 原生 permessage-deflate 扩展。
+   * 浏览器（SDK 端）和 `ws` 库都原生支持，握手时自动协商，
+   * 应用层完全透明——所有 JSON 消息在传输层自动压缩/解压。
+   *
+   * 阈值策略：
+   * - threshold 256B：小于此长度的消息不压缩（压缩头开销 > 收益）
+   * - memLevel / level：默认压缩参数，平衡速度和压缩率
+   * - serverMaxWindowBits / clientMaxWindowBits：滑动窗口位数，默认值已够
+   * - zlibDeflateReset 间隔：定期复用 deflate 上下文避免内存泄漏
+   *
+   * 对 DOM 快照、日志批量上报等大 JSON 压缩率通常 70-90%。
+   */
+  const wss = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: {
+      threshold: 256,
+    },
+  })
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const pathname = url.pathname
