@@ -19,6 +19,7 @@ export type DeviceMessage =
   | { type: 'sse-event'; seq: number; event: SseEvent }
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
+  | { type: 'screen-frame'; frame: ScreenFrame }
   | { type: 'exec-result'; execId: string; result: ExecResult }
   | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; changes: DomChangeData }
@@ -45,6 +46,10 @@ export type ServerToDeviceMessage =
   | { type: 'exec'; execId: string; code: string }
   /** 按需启停采集器：控制台打开对应面板时启用，关闭时停止，减少不必要的数据传输 */
   | { type: 'set-watchers'; watchers: WatcherType[] }
+  /** 请求设备开始屏幕共享（用户侧弹出授权弹窗） */
+  | { type: 'start-screen-share' }
+  /** 请求设备停止屏幕共享 */
+  | { type: 'stop-screen-share' }
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
@@ -58,6 +63,7 @@ export type ServerToConsoleMessage =
   | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
   | { type: 'sse-event'; deviceId: string; seq: number; event: SseEvent }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
+  | { type: 'screen-frame'; deviceId: string; frame: ScreenFrame }
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
   /** server → 控制台的心跳响应 */
@@ -69,6 +75,10 @@ export type ConsoleMessage =
   | { type: 'unsubscribe'; deviceId: string }
   /** 控制台通知 server 当前启用的 watcher（按需采集，减少不必要的数据传输） */
   | { type: 'set-watchers'; deviceId: string; watchers: WatcherType[] }
+  /** 控制台请求设备开始屏幕共享 */
+  | { type: 'start-screen-share'; deviceId: string }
+  /** 控制台请求设备停止屏幕共享 */
+  | { type: 'stop-screen-share'; deviceId: string }
   /** 控制台 → server 的应用层心跳（检测半开连接） */
   | { type: 'ping' }
 
@@ -350,6 +360,36 @@ export interface ExecResult {
 }
 
 /** 页面快照数据（compact 格式的结构化形态，移植 pilot snapshot） */
+/**
+ * 屏幕共享帧（增量图传协议）
+ *
+ * 首帧 keyframe=true：完整 JPEG dataURL
+ * 后续帧 keyframe=false：只包含变化区域的 JPEG 补丁，贴到上一帧上合成
+ * 无变化的帧不发送（SDK 端跳过）
+ */
+export interface ScreenFrame {
+  /** 是否为关键帧（完整画面） */
+  keyframe: boolean
+  /** JPEG dataURL（关键帧=完整画面，增量帧=变化区域裁剪图） */
+  dataUrl: string
+  /** 帧序号（从 0 递增，控制台检测丢帧用） */
+  seq: number
+  /** 画面宽度 px（帧的原始尺寸，不含缩放） */
+  width: number
+  /** 画面高度 px */
+  height: number
+  /** 增量帧：变化区域在画面中的 x 偏移（关键帧时为 0） */
+  dx: number
+  /** 增量帧：变化区域在画面中的 y 偏移（关键帧时为 0） */
+  dy: number
+  /** 增量帧：变化区域宽度（关键帧时等于 width） */
+  dw: number
+  /** 增量帧：变化区域高度（关键帧时等于 height） */
+  dh: number
+  /** 采集时间戳（ms） */
+  timestamp: number
+}
+
 export interface SnapshotData {
   /** ISO 时间戳 */
   t: string

@@ -18,6 +18,7 @@ import { pushRecentError } from './snapshot.js'
 import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
 import { installStorageWatcher, setStorageWatcherActive } from './storage-watcher.js'
 import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './dom-watcher.js'
+import { startScreenShare, stopScreenShare } from './screen-capture.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
 const DEVICE_ID_KEY = '__clarosight_device_id__'
@@ -201,6 +202,13 @@ export function init(options: InitOptions): void {
       const watchers = msg.watchers
       setStorageWatcherActive(watchers.includes('storage'))
       setDomWatcherActive(watchers.includes('dom'))
+    } else if (msg.type === 'start-screen-share') {
+      /** 控制台请求屏幕共享 → 弹出浏览器授权弹窗 → 用户同意后开始增量推帧 */
+      startScreenShare(
+        (frame) => send({ type: 'screen-frame', frame }),
+      )
+    } else if (msg.type === 'stop-screen-share') {
+      stopScreenShare()
     }
   })
 

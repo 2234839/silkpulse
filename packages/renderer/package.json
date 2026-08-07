@@ -1,0 +1,20 @@
+{
+  "name": "@clarosight/renderer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "dependencies": {
+    "@clarosight/shared": "workspace:*"
+  }
+}

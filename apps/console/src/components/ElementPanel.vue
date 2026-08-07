@@ -7,7 +7,7 @@
  *
  * 复用 server 的 /element/tree（懒加载子元素）和 /element/inspect（诊断单元素）。
  */
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import ElementTreeNode from './ElementTreeNode.vue'
 import { apiFetch } from '../utils/api'
 import { useSnapshot } from '../composables/useSnapshot'
@@ -18,6 +18,8 @@ import {
   elementColor,
   elementLabel,
 } from '../composables/useLayoutPreview'
+import { FrameCompositor } from '@clarosight/renderer'
+import type { ConsoleMessage } from '@clarosight/shared'
 
 /** DOM 变化数据（从 useConsoleSocket 传入） */
 interface DomChangeData {
@@ -33,6 +35,10 @@ const props = defineProps<{
   domChangeVersion?: number
   /** 最近一次 DOM 变化的详细数据 */
   domChangeData?: DomChangeData | null
+  /** 最新的屏幕共享帧（来自 console socket） */
+  screenFrame?: import('@clarosight/shared').ScreenFrame | null
+  /** 发送控制台消息到 server */
+  sendConsoleMessage?: (msg: ConsoleMessage) => void
 }>()
 
 /** 树节点（server 返回的元素信息 + 前端展开状态） */
@@ -65,8 +71,8 @@ interface ElementNode {
 }
 
 /** ─── 布局预览 ─── */
-/** 左侧面板视图：tree = DOM 树，preview = 布局框图 */
-const leftView = ref<'tree' | 'preview'>('tree')
+/** 左侧面板视图：tree = DOM 树，preview = 布局框图，screen = 屏幕共享 */
+const leftView = ref<'tree' | 'preview' | 'screen'>('tree')
 /** 布局预览模式下诊断面板是否悬浮显示（关闭后不挡预览） */
 const floatDiagnosticVisible = ref(true)
 /** DOM 树模式下的左侧分栏宽度可拖拽 */
@@ -88,6 +94,44 @@ const {
   elementStyle,
   canShowLabel,
 } = useLayoutPreview(snapshotData, sentinelRef)
+
+/** ─── 屏幕共享 ─── */
+/** 帧合成器实例 */
+let compositor: FrameCompositor | null = null
+/** 共享 canvas ref */
+const screenCanvasRef = ref<HTMLCanvasElement | null>(null)
+/** 屏幕共享状态 */
+const screenShareStatus = ref<'idle' | 'sharing' | 'denied' | 'error'>('idle')
+
+/** 启动屏幕共享 */
+function startScreenShare() {
+  screenShareStatus.value = 'sharing'
+  props.sendConsoleMessage?.({ type: 'start-screen-share', deviceId: props.deviceId })
+}
+
+/** 停止屏幕共享 */
+function stopScreenShare() {
+  props.sendConsoleMessage?.({ type: 'stop-screen-share', deviceId: props.deviceId })
+  screenShareStatus.value = 'idle'
+  compositor?.clear()
+}
+
+/** watch 屏幕帧 → 合成到 canvas */
+watch(
+  () => props.screenFrame,
+  (frame) => {
+    if (!frame || !screenCanvasRef.value) return
+    if (!compositor) {
+      compositor = new FrameCompositor(screenCanvasRef.value)
+    }
+    compositor.drawFrame(frame)
+  },
+)
+
+onUnmounted(() => {
+  compositor?.clear()
+  compositor = null
+})
 
 /** 元素诊断信息（server /element/inspect 返回） */
 interface ElementInspect {
@@ -490,6 +534,11 @@ onMounted(() => {
             class="px-2 py-0.5 text-xs font-medium transition-colors"
             :class="leftView === 'preview' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
           >布局预览</button>
+          <button
+            @click="leftView = 'screen'"
+            class="px-2 py-0.5 text-xs font-medium transition-colors"
+            :class="leftView === 'screen' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
+          >屏幕共享</button>
       </div>
       <button
         v-if="leftView === 'tree'"
@@ -768,6 +817,46 @@ onMounted(() => {
           @click="floatDiagnosticVisible = true"
           class="absolute bottom-3 right-3 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg shadow-lg hover:bg-blue-700 z-30"
         >📋 显示诊断</button>
+      </div>
+    </template>
+
+    <!-- ═══ 屏幕共享模式：实时远程画面 ═══ -->
+    <template v-if="leftView === 'screen'">
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <!-- 控制栏 -->
+        <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <button
+              v-if="screenShareStatus !== 'sharing'"
+              @click="startScreenShare"
+              class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
+            >请求用户共享屏幕</button>
+            <button
+              v-else
+              @click="stopScreenShare"
+              class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
+            >停止共享</button>
+            <span v-if="screenShareStatus === 'sharing'" class="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+              等待用户授权...
+            </span>
+          </div>
+        </div>
+
+        <!-- 画面显示区 -->
+        <div class="flex-1 overflow-auto flex items-center justify-center bg-gray-900/5 dark:bg-black/20">
+          <div v-if="screenShareStatus === 'idle'" class="text-center py-12 px-4">
+            <div class="text-4xl mb-3 opacity-30">🖥️</div>
+            <p class="text-sm text-muted mb-1">屏幕共享未启动</p>
+            <p class="text-xs text-faint">点击「请求用户共享屏幕」后，用户浏览器会弹出授权弹窗</p>
+          </div>
+          <canvas
+            v-else
+            ref="screenCanvasRef"
+            class="max-w-full max-h-full shadow-lg rounded"
+            :style="{ objectFit: 'contain' }"
+          ></canvas>
+        </div>
       </div>
     </template>
     </div>

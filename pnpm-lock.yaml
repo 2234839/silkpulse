@@ -255,6 +255,9 @@ importers:
 
   apps/console:
     dependencies:
+      '@clarosight/renderer':
+        specifier: workspace:*
+        version: link:../../packages/renderer
       '@clarosight/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -279,6 +282,19 @@ importers:
         version: 3.5.40(typescript@7.0.2)
 
   packages/feature-detect:
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.6(@types/node@26.1.2)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@26.1.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.0))(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.0)
+
+  packages/renderer:
+    dependencies:
+      '@clarosight/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       typescript:
         specifier: 'catalog:'

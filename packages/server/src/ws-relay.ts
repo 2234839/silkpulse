@@ -288,6 +288,12 @@ export function setupWebSocket(
             /** 快照请求通常是 exec 触发的，由 exec-bridge 处理，这里仅转发 */
             break
           }
+          case 'screen-frame': {
+            /** 屏幕共享帧：直接转发给订阅了该设备的控制台（不存缓冲，体积大时效性强） */
+            if (!device) return
+            broadcast(deviceId, { type: 'screen-frame', deviceId, frame: msg.frame })
+            break
+          }
           case 'exec-result': {
             if (!device) return
             const entry = device.pendingExecs.get(msg.execId)
@@ -392,6 +398,22 @@ export function setupWebSocket(
             /** 应用层心跳响应（浏览器 WebSocket 无法发 ping 帧） */
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({ type: 'pong' } satisfies ServerToConsoleMessage))
+            }
+            break
+          }
+          case 'start-screen-share': {
+            /** 控制台请求设备开始屏幕共享（用户侧弹出授权弹窗） */
+            const device = registry.get(msg.deviceId)
+            if (device && device.ws.readyState === device.ws.OPEN) {
+              device.ws.send(JSON.stringify({ type: 'start-screen-share' }))
+            }
+            break
+          }
+          case 'stop-screen-share': {
+            /** 控制台请求设备停止屏幕共享 */
+            const device = registry.get(msg.deviceId)
+            if (device && device.ws.readyState === device.ws.OPEN) {
+              device.ws.send(JSON.stringify({ type: 'stop-screen-share' }))
             }
             break
           }

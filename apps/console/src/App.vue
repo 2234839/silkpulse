@@ -51,6 +51,8 @@ const {
   storageKeyTimes,
   domChangeVersion,
   domChangeData,
+  screenFrame,
+  sendConsoleMessage,
   selectedDeviceId,
   connected,
   connect,
@@ -358,6 +360,8 @@ onMounted(async () => {
             :device-id="selectedDeviceId"
             :dom-change-version="domChangeVersion"
             :dom-change-data="domChangeData"
+            :screen-frame="screenFrame"
+            :send-console-message="sendConsoleMessage"
           />
           <StoragePanel
             v-else-if="activeTab === 'storage'"

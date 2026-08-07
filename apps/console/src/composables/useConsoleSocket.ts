@@ -11,6 +11,7 @@ import type {
   LogEntry,
   NetworkEntry,
   ErrorEntry,
+  ScreenFrame,
   ServerToConsoleMessage,
 } from '@clarosight/shared'
 import { useAuth } from './useAuth'
@@ -49,6 +50,9 @@ export function useConsoleSocket() {
     kinds: Array<'added' | 'removed' | 'attributes' | 'text'>
     timestamp: number
   } | null>(null)
+
+  /** 最新的屏幕共享帧（ElementPanel watch 后用 FrameCompositor 合成到 canvas） */
+  const screenFrame = shallowRef<ScreenFrame | null>(null)
   /**
    * 每个 storage key 的最后修改时间戳（运行期间 SDK 捕获）
    *
@@ -337,6 +341,19 @@ export function useConsoleSocket() {
           domChangeData.value = msg.changes
         }
         break
+      case 'screen-frame':
+        /** 设备屏幕共享帧 → 更新 screenFrame（ElementPanel watch 合成） */
+        if (msg.deviceId === selectedDeviceId.value) {
+          screenFrame.value = msg.frame
+        }
+        break
+    }
+  }
+
+  /** 发送控制台消息到 server（start/stop screen-share 等） */
+  function sendConsoleMessage(msg: import('@clarosight/shared').ConsoleMessage): void {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg))
     }
   }
 
@@ -362,10 +379,12 @@ export function useConsoleSocket() {
     storageKeyTimes,
     domChangeVersion,
     domChangeData,
+    screenFrame,
     selectedDeviceId,
     connected,
     connect,
     selectDevice,
     setWatchers,
+    sendConsoleMessage,
   }
 }

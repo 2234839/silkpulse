@@ -18,6 +18,7 @@
     "vue": "catalog:"
   },
   "dependencies": {
-    "@clarosight/shared": "workspace:*"
+    "@clarosight/shared": "workspace:*",
+    "@clarosight/renderer": "workspace:*"
   }
 }
