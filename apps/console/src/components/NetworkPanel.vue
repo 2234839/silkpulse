@@ -175,7 +175,7 @@ watch(() => props.network, () => {
 <template>
   <div class="flex-1 flex overflow-hidden bg-base">
     <!-- 请求列表 -->
-    <div class="w-2/5 flex flex-col border-r border-base">
+    <div class="w-2/5 min-w-[180px] md:min-w-[240px] flex flex-col border-r border-base">
       <!-- 搜索 + 状态筛选栏 -->
       <div class="p-2 border-b border-light bg-surface space-y-2">
         <input

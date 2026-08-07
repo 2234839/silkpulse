@@ -49,7 +49,7 @@ watch(() => props.modelValue, async (v) => {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="emit('update:modelValue', false)"
   >
-    <div class="bg-surface rounded-lg shadow-xl w-[720px] max-h-[80vh] flex flex-col">
+    <div class="bg-surface rounded-lg shadow-xl w-full max-w-[720px] mx-4 max-h-[80vh] flex flex-col">
       <div class="flex items-center justify-between px-5 py-3 border-b border-base">
         <h3 class="text-sm font-semibold text-primary">AI 诊断上下文</h3>
         <div class="flex items-center gap-2">

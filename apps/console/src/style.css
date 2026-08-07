@@ -76,3 +76,24 @@
 
   .focus-border-blue:focus { border-color: #3b82f6; }
 }
+
+/* ─── 响应式适配 ─── */
+
+/** 防止窄屏横向溢出 */
+html, body, #app {
+  overflow-x: hidden;
+}
+
+/** 窄屏下 tab 导航按钮不收缩 */
+nav button {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/** 移动端 header 菜单外部点击关闭（通过透明覆盖层捕获事件） */
+@media (max-width: 767px) {
+  /** 确保 drawer 层级正确 */
+  .fixed.inset-0.bg-black\/50 {
+    touch-action: manipulation;
+  }
+}

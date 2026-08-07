@@ -205,7 +205,7 @@ function handleMultilineIndent(
       </div>
     </div>
     <!-- 历史侧栏 -->
-    <div class="w-56 border-l border-base bg-surface flex flex-col overflow-hidden">
+    <div class="w-48 md:w-56 border-l border-base bg-surface flex flex-col overflow-hidden">
       <div class="flex items-center justify-between px-3 py-2 border-b border-light">
         <span class="text-xs font-medium text-secondary">执行历史</span>
         <button

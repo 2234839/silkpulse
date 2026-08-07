@@ -97,6 +97,17 @@ const showProjectModal = ref(false)
 const showAiModal = ref(false)
 const showAgentModal = ref(false)
 
+/** 移动端 sidebar drawer 开关（窄屏下设备列表以抽屉式展开） */
+const sidebarOpen = ref(false)
+
+/** 移动端 header 更多菜单开关 */
+const headerMenuOpen = ref(false)
+
+/** 选中设备时自动关闭 sidebar drawer（移动端） */
+watch(selectedDeviceId, () => {
+  sidebarOpen.value = false
+})
+
 /** 当前激活的面板 */
 const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'feature' | 'snapshot' | 'exec'>('console')
 
@@ -177,75 +188,125 @@ onMounted(async () => {
   <!-- 主界面 -->
   <div v-else class="h-screen flex flex-col">
     <!-- 顶部栏 -->
-    <header class="bg-gray-900 text-white px-6 py-3 flex items-center gap-4">
-      <h1 class="text-lg font-semibold">clarosight</h1>
-      <span class="text-xs text-gray-400">远程设备调试控制台</span>
+    <header class="bg-gray-900 text-white px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap">
+      <!-- 移动端：汉堡菜单按钮（打开设备列表 drawer） -->
+      <button
+        class="md:hidden p-1.5 rounded text-gray-300 hover:text-white hover:bg-white/10 flex-shrink-0"
+        @click="sidebarOpen = true"
+        title="打开设备列表"
+      >☰</button>
+      <h1 class="text-base sm:text-lg font-semibold flex-shrink-0">clarosight</h1>
+      <!-- 副标题：窄屏隐藏 -->
+      <span class="hidden lg:inline text-xs text-gray-400">远程设备调试控制台</span>
       <!-- 游客模式标识 -->
       <span
         v-if="isPlayground"
         class="px-2 py-0.5 text-xs rounded-full bg-yellow-900/40 text-yellow-400 border border-yellow-700/40"
         title="游客模式 · 数据在公网共享，建议私有化部署"
-      >🎮 游客模式 · 建议私有化部署</span>
+      >🎮 游客</span>
       <span
-        class="ml-auto flex items-center gap-2 text-xs"
+        class="ml-auto flex items-center gap-1.5 text-xs flex-shrink-0"
         :class="connected ? 'text-green-400' : 'text-red-400'"
       >
         <span
-          class="w-2 h-2 rounded-full"
+          class="w-2 h-2 rounded-full flex-shrink-0"
           :class="connected ? 'bg-green-400' : 'bg-red-400'"
         />
-        {{ connected ? '已连接' : '断开中' }}
+        <span class="hidden sm:inline">{{ connected ? '已连接' : '断开中' }}</span>
       </span>
-      <button
-        @click="toggleTheme"
-        class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
-        :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
-      >{{ theme === 'dark' ? '☀️' : '🌙' }}</button>
-      <button
-        @click="showInjectModal = true"
-        class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
-        title="查看三种方式把设备接入到本控制台"
-      >➕ 接入新设备</button>
-      <button
-        v-if="isAdmin"
-        @click="showProjectModal = true"
-        class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-1"
-        title="管理项目和密钥"
-      >📁 项目管理</button>
-      <button
-        v-if="authStatus?.authEnabled && apiKey"
-        @click="logout"
-        class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
-        title="退出登录"
-      >🚪 退出</button>
-      <button
-        v-if="selectedDevice"
-        @click="openAiContext"
-        :disabled="showAiModal"
-        class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
-      >
-        <span v-if="showAiModal">生成中...</span>
-        <span v-else>📋 复制诊断上下文</span>
-      </button>
-      <button
-        @click="openAgent"
-        class="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
-        title="复制提示词，交给 AI agent 远程调试"
-      >🤖 接入 Agent</button>
+
+      <!-- 桌面端：所有按钮平铺 -->
+      <div class="hidden md:flex items-center gap-2">
+        <button
+          @click="toggleTheme"
+          class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
+          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+        >{{ theme === 'dark' ? '☀️' : '🌙' }}</button>
+        <button
+          @click="showInjectModal = true"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
+          title="查看三种方式把设备接入到本控制台"
+        >➕ 接入新设备</button>
+        <button
+          v-if="isAdmin"
+          @click="showProjectModal = true"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-1"
+          title="管理项目和密钥"
+        >📁 项目管理</button>
+        <button
+          v-if="selectedDevice"
+          @click="openAiContext"
+          :disabled="showAiModal"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+        >
+          <span v-if="showAiModal">生成中...</span>
+          <span v-else>📋 诊断上下文</span>
+        </button>
+        <button
+          @click="openAgent"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
+          title="复制提示词，交给 AI agent 远程调试"
+        >🤖 Agent</button>
+        <button
+          v-if="authStatus?.authEnabled && apiKey"
+          @click="logout"
+          class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
+          title="退出登录"
+        >🚪</button>
+      </div>
+
+      <!-- 移动端：折叠菜单 -->
+      <div class="md:hidden relative flex-shrink-0">
+        <button
+          @click="headerMenuOpen = !headerMenuOpen"
+          class="p-1.5 rounded text-gray-300 hover:text-white hover:bg-white/10"
+        >⚙️</button>
+        <!-- 外部点击关闭遮罩 -->
+        <div
+          v-if="headerMenuOpen"
+          class="fixed inset-0 z-40"
+          @click="headerMenuOpen = false"
+        />
+        <div
+          v-if="headerMenuOpen"
+          class="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px] z-50"
+          @click="headerMenuOpen = false"
+        >
+          <button @click="toggleTheme" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">{{ theme === 'dark' ? '☀️ 亮色' : '🌙 暗色' }}</button>
+          <button @click="showInjectModal = true" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">➕ 接入新设备</button>
+          <button v-if="isAdmin" @click="showProjectModal = true" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">📁 项目管理</button>
+          <button v-if="selectedDevice" @click="openAiContext" :disabled="showAiModal" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 disabled:opacity-50">📋 诊断上下文</button>
+          <button @click="openAgent" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">🤖 接入 Agent</button>
+          <button v-if="authStatus?.authEnabled && apiKey" @click="logout" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">🚪 退出</button>
+        </div>
+      </div>
     </header>
 
-    <div class="flex-1 flex overflow-hidden">
-      <DeviceList
-        :devices="devices"
-        :selected-device-id="selectedDeviceId"
-        :is-admin="isAdmin"
-        :project-name-map="projectNameMap"
-        @select="selectDevice"
+    <div class="flex-1 flex overflow-hidden relative">
+      <!-- 移动端 sidebar 遮罩（不覆盖 header） -->
+      <div
+        v-if="sidebarOpen"
+        class="md:hidden absolute inset-0 bg-black/50 z-30"
+        @click="sidebarOpen = false"
       />
+      <!-- DeviceList：桌面端固定显示，移动端 drawer -->
+      <div
+        class="flex-shrink-0 md:flex static md:relative z-40 h-full"
+        :class="sidebarOpen ? 'flex' : 'hidden md:flex'"
+      >
+        <DeviceList
+          :devices="devices"
+          :selected-device-id="selectedDeviceId"
+          :is-admin="isAdmin"
+          :project-name-map="projectNameMap"
+          :class="sidebarOpen ? 'fixed md:static inset-y-0 left-0 shadow-2xl' : ''"
+          @select="selectDevice"
+        />
+      </div>
 
       <main class="flex-1 flex flex-col overflow-hidden">
         <template v-if="selectedDeviceId">
-          <nav class="flex border-b border-base bg-surface">
+          <nav class="flex border-b border-base bg-surface overflow-x-auto">
             <button
               v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec'] as const)"
               :key="tab"
@@ -310,7 +371,7 @@ onMounted(async () => {
       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
       @click.self="showInjectModal = false"
     >
-      <div class="bg-surface rounded-lg shadow-xl w-[560px] max-h-[80vh] flex flex-col">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-[560px] mx-4 max-h-[80vh] flex flex-col">
         <InjectPanel closable @close="showInjectModal = false" />
       </div>
     </div>

@@ -148,7 +148,7 @@ function relativeTime(ts: number): string {
 </script>
 
 <template>
-  <aside class="w-72 border-r border-base bg-surface overflow-y-auto flex flex-col">
+  <aside class="w-64 md:w-72 border-r border-base bg-surface overflow-y-auto flex flex-col h-full">
     <div class="px-4 py-3 border-b border-base">
       <h2 class="text-sm font-semibold text-secondary">
         在线设备

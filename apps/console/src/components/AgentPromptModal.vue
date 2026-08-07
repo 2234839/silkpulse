@@ -71,7 +71,7 @@ watch(() => props.modelValue, (v) => {
     class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
     @click.self="emit('update:modelValue', false)"
   >
-    <div class="bg-surface rounded-lg shadow-xl w-[760px] max-h-[85vh] flex flex-col">
+    <div class="bg-surface rounded-lg shadow-xl w-full max-w-[760px] mx-4 max-h-[85vh] flex flex-col">
       <!-- 标题栏 -->
       <div class="flex items-center justify-between px-5 py-3 border-b border-base">
         <div>

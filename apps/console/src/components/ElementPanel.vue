@@ -443,7 +443,7 @@ onMounted(() => {
 <template>
   <div class="flex-1 flex overflow-hidden bg-base">
     <!-- 左：DOM 树 -->
-    <div class="w-2/5 border-r border-base flex flex-col overflow-hidden">
+    <div class="w-2/5 min-w-[180px] md:min-w-[240px] border-r border-base flex flex-col overflow-hidden">
       <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between">
         <span class="text-xs font-medium text-secondary">DOM 树</span>
         <button
