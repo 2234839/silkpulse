@@ -225,9 +225,9 @@ onUnmounted(() => {
     </div>
 
     <!-- 快照内容 -->
+    <!-- sentinel：放在滚动容器外，滚动条增减不影响测量 -->
+    <div ref="sentinelRef" class="w-full h-0 overflow-hidden flex-shrink-0"></div>
     <div ref="containerRef" class="flex-1 overflow-auto">
-      <!-- 宽度测量 sentinel：不随画布大小变化，避免 ResizeObserver 循环 -->
-      <div ref="sentinelRef" class="w-full h-0 overflow-hidden"></div>
       <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
 
       <!-- 预览模式：布局框图 -->
