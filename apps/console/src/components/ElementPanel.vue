@@ -19,7 +19,7 @@ import {
   elementLabel,
 } from '../composables/useLayoutPreview'
 import { FrameCompositor } from '@clarosight/renderer'
-import type { ConsoleMessage } from '@clarosight/shared'
+import type { ConsoleMessage, SnapshotElement } from '@clarosight/shared'
 
 /** DOM 变化数据（从 useConsoleSocket 传入） */
 interface DomChangeData {
@@ -370,6 +370,11 @@ async function selectElement(idx: number) {
   elementStylesLoading.value = true
   elementStyles.value = null
   expandedRules.value = new Set([0])
+  /** 清空旧截图 */
+  if (elementScreenshotUrl.value) {
+    URL.revokeObjectURL(elementScreenshotUrl.value)
+    elementScreenshotUrl.value = null
+  }
   /** 并行拉取 inspect 和 styles */
   const inspectPromise = apiFetch(`/api/devices/${props.deviceId}/element/inspect?idx=${idx}`)
     .then((res) => res.ok ? res.json() : null)
@@ -380,6 +385,118 @@ async function selectElement(idx: number) {
   const [inspectData, stylesData] = await Promise.all([inspectPromise, stylesPromise])
   elementInspect.value = inspectData
   elementStyles.value = stylesData
+}
+
+/**
+ * 布局预览点击处理：穿透选中点击位置下最内层的元素
+ *
+ * 策略：
+ * - 用 elementsFromPoint 找到点击位置下所有渲染的元素 div
+ * - 普通点击：选面积最小的（最内层/最具体的元素）
+ * - Alt+点击：选当前选中元素的祖先（向外层方向跳）
+ * - 如果已选中元素被再次点击，自动向父级方向走一步
+ */
+function handlePreviewClick(el: SnapshotElement, event: MouseEvent) {
+  /** Alt+点击：向外层方向选父元素 */
+  if (event.altKey && elementInspect.value?.ancestors?.length) {
+    const parent = elementInspect.value.ancestors[0]
+    if (parent) {
+      selectElement(parent.idx)
+      floatDiagnosticVisible.value = true
+      return
+    }
+  }
+
+  /**
+   * 用 elementsFromPoint 找到点击位置下所有渲染的元素 div
+   *
+   * 每个 div 有 data-idx 属性对应 snapshot 元素的 idx。
+   * elementsFromPoint 按 z-index/DOM 顺序返回（最顶层在前）。
+   */
+  const stack = document.elementsFromPoint(event.clientX, event.clientY)
+  const canvas = stack.find((s) => s.classList?.contains('relative') && s.classList?.contains('mx-auto'))
+  if (!canvas) {
+    selectElement(el.idx)
+    floatDiagnosticVisible.value = true
+    return
+  }
+
+  /** 从 stack 中提取所有带 data-idx 的元素 div（画布的直接子元素） */
+  const idxSet = new Set<number>()
+  for (const s of stack) {
+    const idx = (s as HTMLElement).dataset?.idx
+    if (idx != null) {
+      idxSet.add(Number(idx))
+    }
+  }
+
+  /** 将 idx 映射回 snapshot 元素 */
+  const candidates = rectElements.value.filter((e) => idxSet.has(e.idx))
+  if (candidates.length === 0) {
+    selectElement(el.idx)
+    floatDiagnosticVisible.value = true
+    return
+  }
+
+  /**
+   * 按面积排序（小→大），面积最小的是最内层元素。
+   * 如果当前已选中面积最小的，且有多个候选，选第二个（向外层走一步）。
+   */
+  candidates.sort((a, b) => {
+    const areaA = a.rect!.w * a.rect!.h
+    const areaB = b.rect!.w * b.rect!.h
+    return areaA - areaB
+  })
+
+  const currentIdx = selectedElementIdx.value
+  const currentPos = candidates.findIndex((c) => c.idx === currentIdx)
+  if (currentPos >= 0 && currentPos < candidates.length - 1) {
+    /** 已选中内层，向父级走 */
+    selectElement(candidates[currentPos + 1].idx)
+  } else {
+    /** 选最内层 */
+    selectElement(candidates[0].idx)
+  }
+  floatDiagnosticVisible.value = true
+}
+
+/** ─── 元素截图 ─── */
+/** 元素截图 loading 状态 */
+const elementScreenshotLoading = ref(false)
+/** 元素截图 dataURL（在诊断面板内嵌展示） */
+const elementScreenshotUrl = ref<string | null>(null)
+/** 截图放大 dialog 是否显示 */
+const screenshotDialogVisible = ref(false)
+
+/**
+ * 截取当前选中元素：调用远端 SDK 的 __clarosight_screenshot(idx)
+ *
+ * 通过 /api/devices/:id/screenshot?idx=xxx 接口获取二进制图片，
+ * 存为 objectURL 在诊断面板内嵌展示，点击可放大查看。
+ */
+async function screenshotElement() {
+  if (!props.deviceId || selectedElementIdx.value == null) return
+  /** 清空旧截图 */
+  if (elementScreenshotUrl.value) {
+    URL.revokeObjectURL(elementScreenshotUrl.value)
+    elementScreenshotUrl.value = null
+  }
+  elementScreenshotLoading.value = true
+  try {
+    const url = `/api/devices/${props.deviceId}/screenshot?idx=${selectedElementIdx.value}&format=png&scale=2`
+    const res = await apiFetch(url)
+    if (!res.ok) {
+      const text = await res.text().catch(() => '未知错误')
+      console.error('[元素截图失败]', text)
+      return
+    }
+    const blob = await res.blob()
+    elementScreenshotUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    console.error('[元素截图异常]', err)
+  } finally {
+    elementScreenshotLoading.value = false
+  }
 }
 
 /** 切换规则展开/收起 */
@@ -637,7 +754,15 @@ onMounted(() => {
       <template v-else>
         <!-- 悬浮模式下的关闭按钮 + 标题栏 -->
         <div v-if="leftView === 'preview'" class="flex items-center justify-between mb-3 pb-2 border-b border-base">
-          <span class="text-xs font-semibold text-secondary">元素诊断</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-secondary">元素诊断</span>
+            <button
+              @click="screenshotElement"
+              :disabled="elementScreenshotLoading"
+              class="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              title="截取此元素"
+            >📷 {{ elementScreenshotLoading ? '截图中...' : '截图' }}</button>
+          </div>
           <button
             @click="floatDiagnosticVisible = false"
             class="text-faint hover:text-primary text-xs px-1"
@@ -646,10 +771,30 @@ onMounted(() => {
         </div>
         <!-- 元素标题 -->
         <div class="mb-4">
-          <div class="text-sm font-semibold text-primary font-mono">
-            {{ elementInspect.tag }}<span v-if="elementInspect.id" class="text-blue-600">#{{ elementInspect.id }}</span>
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-sm font-semibold text-primary font-mono">
+              {{ elementInspect.tag }}<span v-if="elementInspect.id" class="text-blue-600">#{{ elementInspect.id }}</span>
+            </div>
+            <!-- 截图按钮（tree 模式下显示在标题旁） -->
+            <button
+              v-if="leftView === 'tree'"
+              @click="screenshotElement"
+              :disabled="elementScreenshotLoading"
+              class="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
+              title="截取此元素"
+            >📷 {{ elementScreenshotLoading ? '...' : '截图' }}</button>
           </div>
           <div v-if="elementInspect.classes" class="text-xs text-muted font-mono mt-1">{{ elementInspect.classes }}</div>
+          <!-- 元素截图预览（在诊断面板内嵌展示） -->
+          <div v-if="elementScreenshotUrl" class="mt-2">
+            <img
+              :src="elementScreenshotUrl"
+              @click="screenshotDialogVisible = true"
+              class="w-full rounded border border-base cursor-zoom-in hover:opacity-80 transition-opacity"
+              alt="元素截图"
+            />
+            <div class="text-[10px] text-faint mt-0.5 text-center">点击图片放大查看</div>
+          </div>
         </div>
 
         <!-- 可见性诊断 -->
@@ -793,10 +938,12 @@ onMounted(() => {
               :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
             >
               <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
+              <!-- 点击穿透：画布统一处理 click，通过 elementsFromPoint 找最内层元素 -->
               <div
                 v-for="el in rectElements"
                 :key="el.idx"
-                @click="selectElement(el.idx); floatDiagnosticVisible = true"
+                :data-idx="el.idx"
+                @click.stop="handlePreviewClick(el, $event)"
                 class="absolute overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
                 :class="[
                   el.style ? '' : elementColor(el),
@@ -818,7 +965,7 @@ onMounted(() => {
               </div>
             </div>
             <div class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted">
-              <span class="text-faint italic">点击元素 → 查看诊断 · 真实样式高保真渲染</span>
+              <span class="text-faint italic">点击元素 → 选中（再次点击 → 选父元素）· Alt+点击 → 直接选父元素 · 📷 截图选中元素</span>
             </div>
           </template>
         </div>
@@ -870,5 +1017,26 @@ onMounted(() => {
       </div>
     </template>
     </div>
+
+    <!-- ═══ 截图放大 Dialog ═══ -->
+    <Teleport to="body">
+      <div
+        v-if="screenshotDialogVisible"
+        class="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]"
+        @click="screenshotDialogVisible = false"
+      >
+        <button
+          @click="screenshotDialogVisible = false"
+          class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl px-3"
+          title="关闭"
+        >✕</button>
+        <img
+          :src="elementScreenshotUrl ?? ''"
+          class="max-w-[90vw] max-h-[90vh] object-contain rounded shadow-2xl"
+          @click.stop
+          alt="元素截图（放大）"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
