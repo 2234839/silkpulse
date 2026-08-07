@@ -107,25 +107,70 @@ function elementStyle(el: SnapshotElement): Record<string, string> {
   }
 }
 
-/** 根据 tag 类型返回颜色类 */
-const TAG_COLORS: Record<string, string> = {
-  button: 'bg-blue-500/20 border-blue-500/50 text-blue-700 dark:text-blue-300',
-  a: 'bg-green-500/15 border-green-500/40 text-green-700 dark:text-green-300',
-  input: 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300',
-  textarea: 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300',
-  select: 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300',
-  h1: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
-  h2: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
-  h3: 'bg-purple-500/10 border-purple-500/30 text-purple-700 dark:text-purple-300',
-  img: 'bg-pink-500/10 border-pink-500/30 text-pink-700 dark:text-pink-300',
+/**
+ * 容器标签 —— 只画虚线边框，不填充背景色
+ * 这类元素在布局中是“框”，不是“内容”，低视觉权重避免遮挡子元素
+ */
+const CONTAINER_TAGS = new Set([
+  'div', 'section', 'header', 'footer', 'nav', 'main', 'aside',
+  'article', 'ul', 'ol', 'li', 'form', 'fieldset', 'figure',
+  'table', 'thead', 'tbody', 'tr', 'td', 'th',
+])
+
+/** 判断是否为容器元素（框）而非叶子元素（内容） */
+function isContainer(el: SnapshotElement): boolean {
+  return CONTAINER_TAGS.has(el.tag)
 }
 
-/** 默认色块样式 */
-const DEFAULT_COLOR = 'bg-gray-500/10 border-gray-400/30 text-gray-600 dark:text-gray-400'
+/**
+ * 叶子/交互元素的颜色 —— 实心半透明色块
+ * 高视觉权重，突出页面上实际可见的内容
+ */
+const LEAF_COLORS: Record<string, string> = {
+  button: 'bg-blue-500/25 border-blue-500/60 text-blue-700 dark:text-blue-300',
+  a: 'bg-green-500/20 border-green-500/50 text-green-700 dark:text-green-300',
+  input: 'bg-amber-500/20 border-amber-500/50 text-amber-700 dark:text-amber-300',
+  textarea: 'bg-amber-500/20 border-amber-500/50 text-amber-700 dark:text-amber-300',
+  select: 'bg-amber-500/20 border-amber-500/50 text-amber-700 dark:text-amber-300',
+  h1: 'bg-purple-500/20 border-purple-500/50 text-purple-700 dark:text-purple-300',
+  h2: 'bg-purple-500/20 border-purple-500/50 text-purple-700 dark:text-purple-300',
+  h3: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
+  h4: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
+  h5: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
+  h6: 'bg-purple-500/15 border-purple-500/40 text-purple-700 dark:text-purple-300',
+  img: 'bg-pink-500/15 border-pink-500/40 text-pink-700 dark:text-pink-300',
+  span: 'bg-teal-500/15 border-teal-500/35 text-teal-700 dark:text-teal-300',
+  p: 'bg-teal-500/15 border-teal-500/35 text-teal-700 dark:text-teal-300',
+  label: 'bg-teal-500/15 border-teal-500/35 text-teal-700 dark:text-teal-300',
+}
 
-/** 获取元素的颜色类 */
+/** 默认叶子色块样式 */
+const DEFAULT_LEAF = 'bg-gray-500/15 border-gray-400/40 text-gray-600 dark:text-gray-400'
+
+/**
+ * 容器框样式 —— 虚线边框 + 无背景色 + 淡色标签
+ * 根据容器类型着色边框（header=蓝虚线、nav=绿虚线、main=紫虚线等）
+ */
+const CONTAINER_BORDER: Record<string, string> = {
+  header: 'border-blue-400/40 text-blue-500/60 dark:text-blue-400/50',
+  nav: 'border-green-400/40 text-green-500/60 dark:text-green-400/50',
+  main: 'border-purple-400/40 text-purple-500/60 dark:text-purple-400/50',
+  aside: 'border-cyan-400/40 text-cyan-500/60 dark:text-cyan-400/50',
+  footer: 'border-gray-400/40 text-gray-500/60 dark:text-gray-400/50',
+  form: 'border-amber-400/40 text-amber-500/60 dark:text-amber-400/50',
+  ul: 'border-orange-400/30 text-orange-500/50 dark:text-orange-400/40',
+  ol: 'border-orange-400/30 text-orange-500/50 dark:text-orange-400/40',
+  li: 'border-orange-400/30 text-orange-500/50 dark:text-orange-400/40',
+}
+
+const DEFAULT_CONTAINER = 'border-gray-300/30 text-gray-400/50 dark:text-gray-500/40'
+
+/** 获取元素的样式类（区分容器框和叶子色块） */
 function elementColor(el: SnapshotElement): string {
-  return TAG_COLORS[el.tag] ?? DEFAULT_COLOR
+  if (isContainer(el)) {
+    return CONTAINER_BORDER[el.tag] ?? DEFAULT_CONTAINER
+  }
+  return LEAF_COLORS[el.tag] ?? DEFAULT_LEAF
 }
 
 /** 获取色块内显示的标签文字 */
@@ -240,8 +285,13 @@ onUnmounted(() => {
           <div
             v-for="el in rectElements"
             :key="el.idx"
-            class="absolute border rounded-sm overflow-hidden flex items-center justify-center px-0.5 cursor-default transition-opacity hover:opacity-100 hover:z-10 hover:shadow-lg"
-            :class="[elementColor(el), canShowLabel(el) ? 'opacity-90' : 'opacity-60']"
+            class="absolute border overflow-hidden flex items-center justify-center px-0.5 cursor-default transition-all hover:z-20 hover:shadow-lg"
+            :class="[
+              elementColor(el),
+              /** 容器：虚线框无背景；叶子：实心半透明色块 */
+              isContainer(el) ? 'border-dashed bg-transparent' : 'rounded-sm',
+              canShowLabel(el) ? '' : 'opacity-70',
+            ]"
             :style="elementStyle(el)"
             :title="`${el.tag} #${el.idx}${el.text ? ' | ' + el.text : ''}${el.value ? ' | val=' + el.value : ''}${el.disabled ? ' | disabled' : ''}${el.focused ? ' | focused' : ''}`"
           >
@@ -256,12 +306,16 @@ onUnmounted(() => {
           </div>
         </div>
         <!-- 图例 -->
-        <div class="px-4 py-2 border-t border-base bg-surface flex flex-wrap gap-3 text-[10px] text-muted sticky bottom-0">
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-blue-500/30 border border-blue-500/50"></span>button</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-green-500/25 border border-green-500/40"></span>link</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-amber-500/25 border border-amber-500/40"></span>input</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-purple-500/25 border border-purple-500/40"></span>heading</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-gray-500/20 border border-gray-400/30"></span>other</span>
+        <div class="px-4 py-2 border-t border-base bg-surface flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted sticky bottom-0">
+          <span class="font-medium text-faint mr-1">内容</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-blue-500/25 border border-blue-500/60"></span>button</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-green-500/20 border border-green-500/50"></span>link</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-amber-500/20 border border-amber-500/50"></span>input</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-purple-500/20 border border-purple-500/50"></span>heading</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-teal-500/15 border border-teal-500/35"></span>text</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm bg-pink-500/15 border border-pink-500/40"></span>img</span>
+          <span class="ml-2 font-medium text-faint mr-1">容器</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 border border-dashed border-gray-400/50"></span>container</span>
           <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>focused</span>
         </div>
       </template>
