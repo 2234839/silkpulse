@@ -846,6 +846,19 @@ const rect = el.getBoundingClientRect()
     cur = cur.parentElement
   }
 
+  /** 表单元素的当前值/状态 */
+  const isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
+  const inputValue = isInput ? (() => {
+    const input = el
+    if (input.tagName === 'INPUT' && (input.type === 'checkbox' || input.type === 'radio')) {
+      return { checked: input.checked, type: input.type }
+    }
+    if (input.tagName === 'SELECT') {
+      return { value: input.value, options: Array.from(input.options).map(o => o.value) }
+    }
+    return { value: input.value ?? '', placeholder: input.placeholder || '' }
+  })() : undefined
+
   return {
     idx: ${idx},
     tag: el.tagName.toLowerCase(),
@@ -855,6 +868,7 @@ const rect = el.getBoundingClientRect()
     computedStyle,
     box,
     ancestors,
+    inputValue,
   }
 `
 }

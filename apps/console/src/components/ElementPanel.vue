@@ -167,6 +167,11 @@ interface ElementInspect {
     margin: { top: number; right: number; bottom: number; left: number }
   }
   ancestors: Array<{ idx: number; tag: string; id?: string; classes?: string }>
+  /** 表单元素的当前值/状态（仅 input/textarea/select） */
+  inputValue?:
+    | { value: string; placeholder?: string }
+    | { checked: boolean; type: string }
+    | { value: string; options: string[] }
   error?: string
 }
 
@@ -385,6 +390,78 @@ async function selectElement(idx: number) {
   const [inspectData, stylesData] = await Promise.all([inspectPromise, stylesPromise])
   elementInspect.value = inspectData
   elementStyles.value = stylesData
+  /** 初始化表单编辑值 */
+  initEditingValue()
+}
+
+/** ─── 表单值双向同步 ─── */
+/** 本地编辑中的值（v-model 绑定） */
+const editingValue = ref('')
+const editingChecked = ref(false)
+/** 同步中状态 */
+const syncingValue = ref(false)
+/** 同步防抖 timer */
+let syncTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 初始化编辑控件值（在 inspect 数据加载后调用）
+ *
+ * 从 elementInspect.inputValue 填充 editingValue / editingChecked。
+ */
+function initEditingValue() {
+  const iv = elementInspect.value?.inputValue
+  if (!iv) return
+  if ('checked' in iv) {
+    editingChecked.value = iv.checked
+  } else if ('value' in iv) {
+    editingValue.value = iv.value
+  }
+}
+
+/**
+ * 将编辑后的值同步到远端设备
+ *
+ * 通过 exec 接口调用 __clarosight_setValue(idx, val)，
+ * SDK 端用原生 setter 绕过框架，触发 input/change 事件。
+ */
+async function syncValueToRemote(val: string) {
+  if (!props.deviceId || selectedElementIdx.value == null) return
+  syncingValue.value = true
+  try {
+    const code = `return __clarosight_setValue(${selectedElementIdx.value}, ${JSON.stringify(val)})`
+    await apiFetch(`/api/devices/${props.deviceId}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+  } catch (err) {
+    console.error('[值同步失败]', err)
+  } finally {
+    syncingValue.value = false
+  }
+}
+
+/**
+ * input/textarea 值变化时防抖同步到远端
+ */
+function onValueInput() {
+  if (syncTimer) clearTimeout(syncTimer)
+  const val = editingValue.value
+  syncTimer = setTimeout(() => syncValueToRemote(val), 500)
+}
+
+/**
+ * checkbox/radio 切换时立即同步
+ */
+function onCheckedChange() {
+  syncValueToRemote(String(editingChecked.value))
+}
+
+/**
+ * select 变化时立即同步
+ */
+function onSelectChange() {
+  syncValueToRemote(editingValue.value)
 }
 
 /**
@@ -813,6 +890,43 @@ onMounted(() => {
               </span>
             </div>
           </div>
+        </div>
+
+        <!-- 表单值双向同步（仅 input/textarea/select 元素） -->
+        <div v-if="elementInspect.inputValue" class="bg-surface border border-base rounded p-3 mb-3">
+          <h4 class="text-xs font-semibold text-secondary mb-2 flex items-center gap-2">
+            值同步
+            <span v-if="syncingValue" class="text-blue-500 font-normal animate-pulse">同步中...</span>
+            <span v-else class="text-faint font-normal">↔ 双向绑定</span>
+          </h4>
+          <!-- checkbox / radio -->
+          <label v-if="'checked' in elementInspect.inputValue" class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              v-model="editingChecked"
+              @change="onCheckedChange"
+              class="w-4 h-4 accent-blue-600"
+            />
+            <span class="text-primary">{{ elementInspect.inputValue.type }} ({{ editingChecked ? '已选中' : '未选中' }})</span>
+          </label>
+          <!-- select 下拉框 -->
+          <select
+            v-else-if="'options' in elementInspect.inputValue"
+            v-model="editingValue"
+            @change="onSelectChange"
+            class="w-full text-xs px-2 py-1.5 bg-base border border-base rounded text-primary focus:outline-none focus:border-blue-500"
+          >
+            <option v-for="opt in elementInspect.inputValue.options" :key="opt" :value="opt">{{ opt }}</option>
+          </select>
+          <!-- text / textarea -->
+          <textarea
+            v-else
+            v-model="editingValue"
+            @input="onValueInput"
+            :placeholder="('placeholder' in elementInspect.inputValue ? elementInspect.inputValue.placeholder : '') || '输入值...'"
+            rows="2"
+            class="w-full text-xs px-2 py-1.5 bg-base border border-base rounded text-primary font-mono focus:outline-none focus:border-blue-500 resize-y"
+          ></textarea>
         </div>
 
         <!-- 样式规则（DevTools Styles 面板风格） -->
