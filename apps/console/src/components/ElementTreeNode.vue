@@ -91,8 +91,8 @@ function shortValue(name: string, value: string): string {
       <!-- shadow host 标记 -->
       <span v-if="node.hasShadow" class="etn-shadow-icon" title="Shadow Host">🕶️</span>
 
-      <!-- 标签名 -->
-      <span class="etn-tag-name">{{ node.tag }}</span>
+      <!-- 开始标签：<tag attr="val"> -->
+      <span class="etn-bracket">&lt;</span><span class="etn-tag-name">{{ node.tag }}</span>
 
       <!-- 属性列表（v-for 遍历，Vue 自行渲染） -->
       <span
@@ -102,6 +102,7 @@ function shortValue(name: string, value: string): string {
       >
         <span class="etn-attr-name">{{ attr.name }}</span>=<span class="etn-attr-value">"{{ shortValue(attr.name, attr.value) }}"</span>
       </span>
+      <span class="etn-bracket">&gt;</span>
 
       <!-- 收起状态：显示文本或子元素数量 -->
       <template v-if="!isExpanded(node)">
@@ -150,7 +151,7 @@ function shortValue(name: string, value: string): string {
       @click="emit('select', node.idx)"
     >
       <span class="etn-arrow etn-arrow-hidden">▶</span>
-      <span class="etn-tag-name">/{{ node.tag }}</span>
+      <span class="etn-bracket">&lt;/</span><span class="etn-tag-name">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
     </div>
   </div>
 </template>
@@ -203,6 +204,11 @@ function shortValue(name: string, value: string): string {
 .etn-shadow-icon {
   font-size: 10px;
   margin-right: 2px;
+}
+
+/** 尖括号 —— 灰色（DevTools 风格） */
+.etn-bracket {
+  color: #808080;
 }
 
 /** 标签名 —— 蓝色 */
