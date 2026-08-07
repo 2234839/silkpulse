@@ -486,7 +486,7 @@ export async function execOnDevice(
  *
  * 每个元素返回 {idx, tag, id, classes, childCount, text?, hasShadow?}：
  * - idx：__clarosight_ensureIdx 打稳定 idx，供后续 inspect/操作复用
- * - text：叶子元素（无子元素 + 无 shadow）的可见文本，截断到 30 字符
+ * - text：叶子元素（无子元素 + 无 shadow）的可见文本（完整返回，前端换行展示）
  * - childCount：子元素数（前端用来决定是否显示"展开"箭头）
  * - hasShadow：该元素是 shadow host（前端展开时需请求 shadow 子树）
  */
@@ -512,7 +512,7 @@ for (const el of host.shadowRoot.children) {
   }
   if (el.children.length === 0 && !el.shadowRoot) {
     const text = (el.textContent || '').trim()
-    if (text) item.text = text.length > 30 ? text.slice(0, 30) + '…' : text
+    if (text) item.text = text
   }
   result.push(item)
 }
@@ -538,10 +538,10 @@ for (const el of parent.children) {
     item.hasShadow = true
     item.shadowChildCount = el.shadowRoot.children.length
   }
-  /** 叶子元素（无普通子元素 + 无 shadow）给可见文本预览（前端自行截断） */
+  /** 叶子元素（无普通子元素 + 无 shadow）返回完整文本，前端换行展示 */
   if (el.children.length === 0 && !el.shadowRoot) {
     const text = (el.textContent || '').trim()
-    if (text) item.text = text.slice(0, 80)
+    if (text) item.text = text
   }
   result.push(item)
 }
@@ -582,7 +582,7 @@ function info(el) {
   }
   if (el.children && el.children.length === 0 && !el.shadowRoot) {
     const text = (el.textContent || '').trim()
-    if (text) item.text = text.length > 30 ? text.slice(0, 30) + '…' : text
+    if (text) item.text = text
   }
   return item
 }

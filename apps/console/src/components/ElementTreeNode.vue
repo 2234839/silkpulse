@@ -48,6 +48,14 @@ function classList(n: ElementNode): string[] {
   return n.classes ? n.classes.split(/\s+/).filter(Boolean) : []
 }
 
+/** HTML void 元素（自闭合，无结束标签） */
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
+
+/** 是否为 void 元素（如 <input>、<img>、<br>，不需要结束标签） */
+function isVoidTag(tag: string): boolean {
+  return VOID_TAGS.has(tag.toLowerCase())
+}
+
 /** 是否展开（普通 children 或 shadow） */
 function isExpanded(n: ElementNode): boolean {
   return (n.childCount > 0 && n.expanded) || (!!n.hasShadow && n.shadowExpanded)
@@ -100,7 +108,11 @@ function hasExpandable(n: ElementNode): boolean {
           <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-bracket">…&lt;/</span>
           <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-tag">{{ node.tag }}</span>
           <span v-if="node.childCount > 0 || node.shadowChildCount" class="etn-bracket">&gt;</span>
-          <span v-if="!(node.childCount > 0 || node.shadowChildCount)" class="etn-bracket"> /&gt;</span>
+          <!-- 无子元素：void 标签自闭合，其他标签空闭合 <script></script> -->
+          <span v-if="!(node.childCount > 0 || node.shadowChildCount) && isVoidTag(node.tag)" class="etn-bracket"> /&gt;</span>
+          <template v-if="!(node.childCount > 0 || node.shadowChildCount) && !isVoidTag(node.tag)">
+            <span class="etn-bracket">&lt;/</span><span class="etn-tag">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
+          </template>
         </template>
       </template>
 
