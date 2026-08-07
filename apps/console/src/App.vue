@@ -20,6 +20,7 @@ import DeviceList from './components/DeviceList.vue'
 import InjectPanel from './components/InjectPanel.vue'
 import ProjectModal from './components/ProjectModal.vue'
 import AiContextModal from './components/AiContextModal.vue'
+import AgentPromptModal from './components/AgentPromptModal.vue'
 import SnapshotPanel from './components/SnapshotPanel.vue'
 import FeaturePanel from './components/FeaturePanel.vue'
 import ErrorsPanel from './components/ErrorsPanel.vue'
@@ -65,6 +66,9 @@ const {
 /** 是否超管 */
 const isAdmin = computed(() => userRole.value === 'admin')
 
+/** 当前页面 origin（供 AgentPromptModal 使用，避免模板里直接访问 location） */
+const serverOrigin = typeof location !== 'undefined' ? location.origin : ''
+
 /** 是否需要显示鉴权页面 */
 const needAuth = computed(() => {
   if (!authStatus.value) return false
@@ -91,6 +95,7 @@ const selectedDevice = computed(() =>
 const showInjectModal = ref(false)
 const showProjectModal = ref(false)
 const showAiModal = ref(false)
+const showAgentModal = ref(false)
 
 /** 当前激活的面板 */
 const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'feature' | 'snapshot' | 'exec'>('console')
@@ -108,6 +113,11 @@ watch([activeTab, selectedDeviceId], () => {
 /** 打开 AI 诊断上下文弹窗 */
 function openAiContext() {
   showAiModal.value = true
+}
+
+/** 打开接入 Agent 弹窗 */
+function openAgent() {
+  showAgentModal.value = true
 }
 
 /** AuthPage 的验证回调：保存密钥 -> verify -> 返回结果 */
@@ -215,8 +225,13 @@ onMounted(async () => {
         class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
       >
         <span v-if="showAiModal">生成中...</span>
-        <span v-else>✨ 复制 AI 诊断上下文</span>
+        <span v-else>📋 复制诊断上下文</span>
       </button>
+      <button
+        @click="openAgent"
+        class="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
+        title="复制提示词，交给 AI agent 远程调试"
+      >🤖 接入 Agent</button>
     </header>
 
     <div class="flex-1 flex overflow-hidden">
@@ -311,6 +326,12 @@ onMounted(async () => {
       :errors="errors"
       :network="network"
       :logs="logs"
+    />
+
+    <AgentPromptModal
+      v-model="showAgentModal"
+      :server-url="serverOrigin"
+      :api-key="apiKey || ''"
     />
   </div>
 </template>
