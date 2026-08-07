@@ -144,11 +144,29 @@ export function useLayoutPreview(
       }
       if (vs.radius) styles.borderRadius = `${Math.max(1, Math.round(vs.radius * s))}px`
       if (vs.align) styles.textAlign = vs.align
-      /** 字号缩放，但不小于 8px（太小看不见） */
-      if (vs.fs) styles.fontSize = `${Math.max(8, Math.round(vs.fs * s))}px`
-      if (vs.fw) styles.fontWeight = vs.fw
-
-      /** 图片缩略图：作为背景图填满 */
+      /** 阴影：按缩放比例近似（shadow 值含 px，缩放后视觉差异不大，直接用原值） */
+      if (vs.shadow) styles.boxShadow = vs.shadow
+      /** 透明度 */
+      if (vs.opacity !== undefined) styles.opacity = String(vs.opacity)
+      /** 内边距（按缩放比例） */
+      if (vs.pad) styles.padding = `${Math.round(vs.pad * s)}px`
+      /** 行高（无单位倍数直接用，px 值按缩放） */
+      if (vs.lh) {
+        styles.lineHeight = vs.lh < 5 ? String(vs.lh) : `${Math.round(vs.lh * s)}px`
+      }
+      /** 字间距（按缩放比例） */
+      if (vs.lsp) styles.letterSpacing = `${Math.round(vs.lsp * s * 10) / 10}px`
+      /** 文字修饰 */
+      if (vs.tdecor) styles.textDecoration = vs.tdecor
+      /** 文字转换 */
+      if (vs.ttrans) styles.textTransform = vs.ttrans
+      /** 不换行 + 省略 */
+      if (vs.noWrap) {
+        styles.whiteSpace = 'nowrap'
+        styles.textOverflow = 'ellipsis'
+        styles.overflow = 'hidden'
+      }
+      /** 图片缩略图优先（img 元素 > CSS background-image > 渐变） */
       if (vs.img) {
         styles.backgroundImage = `url(${vs.img})`
         styles.backgroundSize = 'cover'
@@ -158,14 +176,22 @@ export function useLayoutPreview(
         styles.backgroundImage = `url(${vs.bgImg})`
         styles.backgroundSize = 'cover'
         styles.backgroundPosition = 'center'
+      } else if (vs.gradient) {
+        /** 背景渐变（原样传递 CSS 值） */
+        styles.backgroundImage = vs.gradient
       }
+
+      /** 字号缩放，但不小于 8px（太小看不见） */
+      if (vs.fs) styles.fontSize = `${Math.max(8, Math.round(vs.fs * s))}px`
+      if (vs.fw) styles.fontWeight = vs.fw
 
       /** 可滚动容器：还原 overflow 行为（滚动位置由 ElementPanel 的 onUpdated 设置） */
       if (vs.overflow) {
         const [ovx, ovy] = vs.overflow.split(' ')
         styles.overflowX = ovx === 'visible' ? 'hidden' : ovx
         styles.overflowY = ovy === 'visible' ? 'hidden' : ovy
-      } else {
+      } else if (!vs.noWrap) {
+        /** 普通元素隐藏溢出（noWrap 的 overflow 已在上面设为 hidden） */
         styles.overflow = 'hidden'
       }
     }

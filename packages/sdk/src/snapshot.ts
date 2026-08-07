@@ -177,6 +177,64 @@ function captureVisualStyle(el: HTMLElement): SnapshotElement['style'] | null {
     s.align = align
   }
 
+  /** 阴影：非 none 才采集（卡片/弹窗的关键视觉特征） */
+  const shadow = cs.boxShadow
+  if (shadow && shadow !== 'none') {
+    s.shadow = shadow
+  }
+
+  /** 透明度：< 1 才采集 */
+  const opacity = parseFloat(cs.opacity)
+  if (opacity < 1) {
+    s.opacity = opacity
+  }
+
+  /** 内边距：非 0 才采集（影响文字在框内的位置） */
+  const padTop = parseFloat(cs.paddingTop)
+  const padLeft = parseFloat(cs.paddingLeft)
+  if (padTop > 0 || padLeft > 0) {
+    /** 取四边最大值（简化），按缩放渲染时再调整 */
+    s.pad = Math.round(Math.max(padTop, padLeft, parseFloat(cs.paddingBottom), parseFloat(cs.paddingRight)))
+  }
+
+  /** 行高：非 normal 且非 ~1.2（浏览器默认）才采集 */
+  const lh = cs.lineHeight
+  if (lh && lh !== 'normal') {
+    const lhNum = parseFloat(lh)
+    if (lhNum && Math.abs(lhNum - 1.2) > 0.1) {
+      s.lh = lhNum
+    }
+  }
+
+  /** 字间距：非 normal 才采集 */
+  const lsp = cs.letterSpacing
+  if (lsp && lsp !== 'normal' && parseFloat(lsp) !== 0) {
+    s.lsp = Math.round(parseFloat(lsp) * 100) / 100
+  }
+
+  /** 文字修饰：有下划线/删除线才采集 */
+  const tdecor = cs.textDecorationLine
+  if (tdecor && tdecor !== 'none') {
+    s.tdecor = tdecor
+  }
+
+  /** 文字转换：uppercase/lowercase/capitalize */
+  const ttrans = cs.textTransform
+  if (ttrans && ttrans !== 'none') {
+    s.ttrans = ttrans
+  }
+
+  /** 文字不换行 + 省略号 */
+  if (cs.whiteSpace === 'nowrap') {
+    s.noWrap = true
+  }
+
+  /** 背景渐变：linear-gradient / radial-gradient（非图片类背景） */
+  const bgImgVal = cs.backgroundImage
+  if (bgImgVal && bgImgVal !== 'none' && bgImgVal.includes('gradient')) {
+    s.gradient = bgImgVal
+  }
+
   /** 溢出 + 滚动：可滚动容器采集 overflow 和 scroll 位置 */
   const ovx = cs.overflowX
   const ovy = cs.overflowY
@@ -193,10 +251,10 @@ function captureVisualStyle(el: HTMLElement): SnapshotElement['style'] | null {
     if (thumb) s.img = thumb
   }
 
-  /** CSS background-image：如果是已加载的图片 URL，采集缩略图 */
-  const bgImg = cs.backgroundImage
-  if (bgImg && bgImg !== 'none') {
-    const urlMatch = bgImg.match(/url\(["']?([^"')]+)["']?\)/)
+  /** CSS background-image（非渐变）：如果是已加载的图片 URL，采集缩略图 */
+  const bgImgRaw = cs.backgroundImage
+  if (bgImgRaw && bgImgRaw !== 'none' && !bgImgRaw.includes('gradient')) {
+    const urlMatch = bgImgRaw.match(/url\(["']?([^"')]+)["']?\)/)
     if (urlMatch) {
       const thumb = urlToThumb(urlMatch[1])
       if (thumb) s.bgImg = thumb

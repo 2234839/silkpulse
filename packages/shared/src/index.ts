@@ -427,6 +427,24 @@ export interface SnapshotElement {
     border?: string
     /** 文字对齐 */
     align?: string
+    /** 阴影（box-shadow 简写） */
+    shadow?: string
+    /** 透明度（< 1 才采集） */
+    opacity?: number
+    /** 内边距 px（上下左右一致时单个值） */
+    pad?: number
+    /** 行高（非 normal 时采集） */
+    lh?: number
+    /** 字间距 px（非 normal 才采集） */
+    lsp?: number
+    /** 文字修饰（underline/line-through 等） */
+    tdecor?: string
+    /** 文字转换（uppercase/lowercase/capitalize） */
+    ttrans?: string
+    /** 文字溢出省略（ellipsis 时为 true） */
+    noWrap?: boolean
+    /** 背景渐变（linear-gradient 等 CSS 值，原样传递） */
+    gradient?: string
     /** 缩略图 dataURL（img 元素或 CSS background-image，压缩后 ~1-2KB） */
     img?: string
     /** 背景图 dataURL（CSS background-image 采集，压缩后 ~1-2KB） */
