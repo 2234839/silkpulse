@@ -146,23 +146,32 @@ function canShowLabel(el: SnapshotElement): boolean {
   return el.rect.w * s > 40 && el.rect.h * s > 16
 }
 
-/** ResizeObserver 更新容器宽度 */
-function onContainerResize(entry: ResizeObserverEntry[]) {
-  for (const e of entry) {
-    containerWidth.value = e.contentRect.width
-  }
-}
-
-/** 容器 DOM ref（ResizeObserver 监听目标） */
+/** 容器 DOM ref（滚动区域） */
 const containerRef = ref<HTMLElement | null>(null)
+
+/**
+ * 宽度测量 sentinel —— 一个不随画布大小变化的稳定元素
+ *
+ * 不能监听 containerRef 本身：画布在 containerRef 内，画布尺寸变化会引起
+ * 滚动条出现/消失 → containerRef contentRect 变化 → 触发 ResizeObserver
+ * → 重算 scale → 画布尺寸又变 → 无限循环闪烁。
+ * sentinel 是一个 width:100%、height:0 的 div，只反映容器实际可用宽度。
+ */
+const sentinelRef = ref<HTMLElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
   await nextTick()
-  if (containerRef.value) {
-    containerWidth.value = containerRef.value.clientWidth
-    resizeObserver = new ResizeObserver(onContainerResize)
-    resizeObserver.observe(containerRef.value)
+  if (sentinelRef.value) {
+    containerWidth.value = sentinelRef.value.clientWidth
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        /** 用 borderBoxSize[0] 更稳定，不受 padding 变化影响 */
+        const w = e.borderBoxSize?.[0]?.inlineSize ?? e.contentRect.width
+        if (w > 0) containerWidth.value = w
+      }
+    })
+    resizeObserver.observe(sentinelRef.value)
   }
 })
 
@@ -217,6 +226,8 @@ onUnmounted(() => {
 
     <!-- 快照内容 -->
     <div ref="containerRef" class="flex-1 overflow-auto">
+      <!-- 宽度测量 sentinel：不随画布大小变化，避免 ResizeObserver 循环 -->
+      <div ref="sentinelRef" class="w-full h-0 overflow-hidden"></div>
       <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
 
       <!-- 预览模式：布局框图 -->
