@@ -10,6 +10,13 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import ElementTreeNode from './ElementTreeNode.vue'
 import { apiFetch } from '../utils/api'
+import { useSnapshot } from '../composables/useSnapshot'
+import {
+  useLayoutPreview,
+  isContainer,
+  elementColor,
+  elementLabel,
+} from '../composables/useLayoutPreview'
 
 /** DOM 变化数据（从 useConsoleSocket 传入） */
 interface DomChangeData {
@@ -55,6 +62,22 @@ interface ElementNode {
   /** DOM 变化高亮标记（收到 dom-change 后短暂高亮） */
   flash?: boolean
 }
+
+/** ─── 布局预览 ─── */
+/** 左侧面板视图：tree = DOM 树，preview = 布局框图 */
+const leftView = ref<'tree' | 'preview'>('tree')
+/** 布局预览的 sentinel（ResizeObserver 测量宽度用） */
+const sentinelRef = ref<HTMLElement | null>(null)
+/** 快照数据（含 rect 位置信息） */
+const { snapshotData, loading: snapLoading, fetchSnapshot: fetchSnap } = useSnapshot()
+/** 布局预览计算 */
+const {
+  rectElements,
+  canvasWidth,
+  canvasHeight,
+  elementStyle,
+  canShowLabel,
+} = useLayoutPreview(snapshotData, sentinelRef)
 
 /** 元素诊断信息（server /element/inspect 返回） */
 interface ElementInspect {
@@ -418,7 +441,7 @@ watch(
   }
 )
 
-/** 设备切换时清空树 + 重新加载 */
+/** 设备切换时清空树 + 重新加载 + 拉取快照 */
 watch(
   () => props.deviceId,
   () => {
@@ -428,6 +451,7 @@ watch(
     elementInspect.value = null
     if (props.deviceId) {
       loadElementTree()
+      fetchSnap(props.deviceId)
     }
   }
 )
@@ -442,64 +466,131 @@ onMounted(() => {
 
 <template>
   <div class="flex-1 flex overflow-hidden bg-base">
-    <!-- 左：DOM 树 -->
+    <!-- 左：DOM 树 / 布局预览 -->
     <div class="w-2/5 min-w-[180px] md:min-w-[240px] border-r border-base flex flex-col overflow-hidden">
-      <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between">
-        <span class="text-xs font-medium text-secondary">DOM 树</span>
+      <!-- 视图切换 + 刷新 -->
+      <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2">
+        <div class="flex rounded border border-base overflow-hidden flex-shrink-0">
+          <button
+            @click="leftView = 'tree'"
+            class="px-2 py-0.5 text-xs font-medium transition-colors"
+            :class="leftView === 'tree' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
+          >DOM 树</button>
+          <button
+            @click="leftView = 'preview'"
+            class="px-2 py-0.5 text-xs font-medium transition-colors"
+            :class="leftView === 'preview' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
+          >布局预览</button>
+        </div>
         <button
+          v-if="leftView === 'tree'"
           @click="loadElementTree"
           :disabled="elementTreeLoading"
           class="text-xs text-faint hover:text-primary disabled:opacity-50"
         >{{ elementTreeLoading ? '加载中...' : '刷新' }}</button>
+        <span v-else-if="snapshotData" class="text-xs text-faint whitespace-nowrap">{{ rectElements.length }} 元素 · {{ snapshotData.viewportWidth }}×{{ snapshotData.viewportHeight }}</span>
       </div>
-      <!-- filter 搜索框 -->
-      <div class="px-3 py-2 border-b border-base bg-surface">
-        <input
-          v-model="filterQuery"
-          @input="onFilterInput"
-          type="text"
-          placeholder="搜索元素 (tag/id/class/text)..."
-          spellcheck="false"
-          autocomplete="off"
-          class="w-full text-xs px-2 py-1 bg-base border border-base rounded text-primary placeholder:text-faint focus:outline-none focus:border-primary"
-        />
-      </div>
-      <!-- 树 / 搜索结果 -->
-      <div class="flex-1 overflow-y-auto p-2 font-mono text-xs">
-        <!-- filter 搜索模式 -->
-        <template v-if="isFiltering">
-          <div v-if="filterLoading" class="text-faint text-center py-4">搜索中...</div>
-          <div v-else-if="filterResults.length === 0" class="text-faint text-center py-4">无匹配元素</div>
-          <template v-else>
-            <div class="text-faint text-[10px] mb-2">{{ filterResults.length }} 个匹配</div>
-            <ElementTreeNode
-              v-for="item in filterResults"
-              :key="item.idx"
-              :node="item"
-              :depth="0"
-              :selected-idx="selectedElementIdx"
-              @toggle="handleToggle"
-              @select="selectElement"
-            />
+      <!-- DOM 树视图 -->
+      <template v-if="leftView === 'tree'">
+        <!-- filter 搜索框 -->
+        <div class="px-3 py-2 border-b border-base bg-surface">
+          <input
+            v-model="filterQuery"
+            @input="onFilterInput"
+            type="text"
+            placeholder="搜索元素 (tag/id/class/text)..."
+            spellcheck="false"
+            autocomplete="off"
+            class="w-full text-xs px-2 py-1 bg-base border border-base rounded text-primary placeholder:text-faint focus:outline-none focus:border-primary"
+          />
+        </div>
+        <!-- 树 / 搜索结果 -->
+        <div class="flex-1 overflow-y-auto p-2 font-mono text-xs">
+          <!-- filter 搜索模式 -->
+          <template v-if="isFiltering">
+            <div v-if="filterLoading" class="text-faint text-center py-4">搜索中...</div>
+            <div v-else-if="filterResults.length === 0" class="text-faint text-center py-4">无匹配元素</div>
+            <template v-else>
+              <div class="text-faint text-[10px] mb-2">{{ filterResults.length }} 个匹配</div>
+              <ElementTreeNode
+                v-for="item in filterResults"
+                :key="item.idx"
+                :node="item"
+                :depth="0"
+                :selected-idx="selectedElementIdx"
+                @toggle="handleToggle"
+                @select="selectElement"
+              />
+            </template>
           </template>
-        </template>
-        <!-- 正常树模式 -->
-        <template v-else>
-          <div v-if="elementTreeLoading && elementTreeRoot.length === 0" class="text-faint text-center py-8">加载中...</div>
-          <div v-else-if="elementTreeRoot.length === 0" class="text-faint text-center py-8">暂无元素</div>
+          <!-- 正常树模式 -->
           <template v-else>
-            <ElementTreeNode
-              v-for="node in elementTreeRoot"
-              :key="node.idx"
-              :node="node"
-              :depth="0"
-              :selected-idx="selectedElementIdx"
-              @toggle="handleToggle"
-              @select="selectElement"
-            />
+            <div v-if="elementTreeLoading && elementTreeRoot.length === 0" class="text-faint text-center py-8">加载中...</div>
+            <div v-else-if="elementTreeRoot.length === 0" class="text-faint text-center py-8">暂无元素</div>
+            <template v-else>
+              <ElementTreeNode
+                v-for="node in elementTreeRoot"
+                :key="node.idx"
+                :node="node"
+                :depth="0"
+                :selected-idx="selectedElementIdx"
+                @toggle="handleToggle"
+                @select="selectElement"
+              />
+            </template>
           </template>
-        </template>
-      </div>
+        </div>
+      </template>
+
+      <!-- 布局预览视图 -->
+      <template v-else>
+        <!-- sentinel：放在滚动容器外，滚动条增减不影响测量 -->
+        <div ref="sentinelRef" class="w-full h-0 overflow-hidden flex-shrink-0"></div>
+        <div class="flex-1 overflow-auto">
+          <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">加载快照...</div>
+          <div v-else-if="!snapshotData" class="text-faint text-center py-8 text-xs">快照不可用</div>
+          <template v-else>
+            <div
+              class="relative mx-auto bg-white dark:bg-gray-900 border border-base"
+              :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
+            >
+              <!-- 元素色块：点击选中 → 右侧诊断卡联动 -->
+              <div
+                v-for="el in rectElements"
+                :key="el.idx"
+                @click="selectElement(el.idx)"
+                class="absolute border overflow-hidden flex items-center justify-center px-0.5 cursor-pointer transition-all hover:z-20 hover:shadow-lg"
+                :class="[
+                  elementColor(el),
+                  isContainer(el) ? 'border-dashed bg-transparent' : 'rounded-sm',
+                  /** 选中的元素用橙色高亮边框 + 提升层级 */
+                  selectedElementIdx === el.idx ? 'ring-2 ring-orange-500 z-20' : '',
+                  canShowLabel(el) ? '' : 'opacity-70',
+                ]"
+                :style="elementStyle(el)"
+                :title="`${el.tag} #${el.idx}${el.text ? ' | ' + el.text : ''}${el.value ? ' | val=' + el.value : ''}${el.disabled ? ' | disabled' : ''}${el.focused ? ' | focused' : ''}`"
+              >
+                <span v-if="canShowLabel(el)" class="text-[9px] font-mono leading-tight truncate pointer-events-none">
+                  {{ elementLabel(el) }}
+                </span>
+                <span
+                  v-if="el.focused"
+                  class="absolute -top-px -right-px w-1.5 h-1.5 rounded-full bg-orange-500"
+                ></span>
+              </div>
+            </div>
+            <!-- 图例 -->
+            <div class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted">
+              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-blue-500/25 border border-blue-500/60"></span>btn</span>
+              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/50"></span>link</span>
+              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-500/20 border border-purple-500/50"></span>h</span>
+              <span class="flex items-center gap-0.5"><span class="w-2.5 h-2.5 border border-dashed border-gray-400/50"></span>容器</span>
+              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>focused</span>
+              <span class="text-faint italic">点击色块 → 查看诊断</span>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- 右：诊断卡 -->
