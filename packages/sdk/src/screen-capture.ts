@@ -21,8 +21,8 @@ import type { ScreenFrame } from '@clarosight/shared'
 /** 抓帧间隔 ms（3fps，平衡流畅度和带宽） */
 const FRAME_INTERVAL = 333
 
-/** 关键帧间隔（每 15 帧 ≈ 5 秒强制全量刷新一次） */
-const KEYFRAME_INTERVAL = 15
+/** 关键帧间隔（每 90 帧 ≈ 30 秒强制全量刷新一次，防累积误差） */
+const KEYFRAME_INTERVAL = 90
 
 /** 像素变化判定阈值（RGB 差值之和 > 此值认为该像素变了） */
 const PIXEL_DIFF_THRESHOLD = 30
