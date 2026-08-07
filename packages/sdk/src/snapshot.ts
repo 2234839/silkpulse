@@ -179,6 +179,13 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
   if (el.id) entry.id = el.id
   if (txt) entry.text = txt
   if (frame) entry.frame = frame
+  /** 布局位置（相对视口），控制台侧据此渲染布局框图预览 */
+  entry.rect = {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    w: Math.round(rect.width),
+    h: Math.round(rect.height),
+  }
 
   /** 交互元素的状态标记 */
   if (isInteractive) {

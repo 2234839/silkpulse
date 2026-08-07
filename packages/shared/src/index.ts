@@ -409,5 +409,7 @@ export interface SnapshotElement {
   href?: string
   /** 元素所在的 iframe 标识（src 或 name，主文档元素无此字段） */
   frame?: string
+  /** 元素相对视口的位置和尺寸（用于控制台侧渲染布局框图预览） */
+  rect?: { x: number; y: number; w: number; h: number }
   [k: string]: unknown
 }

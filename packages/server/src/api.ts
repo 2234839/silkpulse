@@ -201,14 +201,19 @@ export async function handleApiRoute(
       return true
     }
 
-    /** /api/devices/:id/snapshot —— 页面快照（text/plain，AI 直接读） */
+    /** /api/devices/:id/snapshot —— 页面快照（默认 text/plain，?format=json 返回原始 JSON） */
     case 'snapshot': {
       const result = await execOnDevice(registry, deviceId, 'return __clarosight_snapshot()')
       if (!result.success) {
         sendText(res, `[快照失败] ${result.error}`, 500)
         return true
       }
-      /** 快照结果序列化为 compact 文本 */
+      /** ?format=json 返回原始 JSON（控制台预览模式用，含 rect 布局信息） */
+      if (url.searchParams.get('format') === 'json') {
+        sendJson(res, result.result ? JSON.parse(result.result) : {})
+        return true
+      }
+      /** 默认：序列化为 compact 文本（AI 直接读） */
       const text = sendSnapshot(result.result)
       sendText(res, text)
       return true
