@@ -254,6 +254,7 @@ async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
     fast: true,
     burst: true,
     clip: 'viewport',
+    reconcile: true,
   })
 
   return canvas

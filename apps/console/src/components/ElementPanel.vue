@@ -625,9 +625,9 @@ onMounted(() => {
         @mousedown="onTreePanelResize"
       ></div>
       <!-- 右：诊断面板（tree / preview 模式共用，定位不同；screen 模式隐藏） -->
-      <!-- tree 模式 → flex-1 常驻；preview 模式 → absolute 悬浮卡片（可关闭/恢复） -->
+      <!-- tree 模式 → flex-1 常驻；preview 模式 → absolute 悬浮卡片（有选中元素才显示） -->
       <div
-        v-show="leftView !== 'screen' && (leftView === 'tree' || floatDiagnosticVisible)"
+        v-show="leftView !== 'screen' && (leftView === 'tree' || (floatDiagnosticVisible && elementInspect))"
         :class="leftView === 'tree'
           ? 'flex-1 overflow-y-auto p-4 min-w-0'
           : 'absolute top-2 right-2 bottom-2 w-[340px] max-w-[60%] bg-surface/95 backdrop-blur border border-base rounded-lg shadow-2xl overflow-y-auto p-3 z-30'"
