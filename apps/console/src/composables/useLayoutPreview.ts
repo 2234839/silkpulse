@@ -109,9 +109,17 @@ export function useLayoutPreview(
     const vw = snapshotData.value?.viewportWidth ?? 375
     return Math.round(vw * scale.value)
   })
+  /**
+   * 画布高度：取所有元素的最大底部（y + h）和 viewportHeight 的较大值。
+   * 不能只用 viewportHeight，因为页面有滚动内容时元素 rect.y 会远超视口高度。
+   */
   const canvasHeight = computed(() => {
     const vh = snapshotData.value?.viewportHeight ?? 800
-    return Math.round(vh * scale.value)
+    const maxBottom = rectElements.value.reduce((max, el) => {
+      const b = (el.rect!.y + el.rect!.h) * scale.value
+      return b > max ? b : max
+    }, vh * scale.value)
+    return Math.round(maxBottom)
   })
 
   /**
