@@ -164,9 +164,8 @@ function hasExpandable(n: ElementNode): boolean {
 
 .etn-row {
   display: block;
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-all;
   padding: 1px 4px;
   border-radius: 2px;
   cursor: pointer;
