@@ -18,6 +18,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
 
 // ─── 类型定义 ─────────────────────────────────────────────
 
@@ -528,11 +529,15 @@ function setSecurityHeaders(res: ServerResponse): void {
   res.setHeader('Referrer-Policy', 'no-referrer')
 }
 
-/** JSON 响应 */
+/** JSON 响应（自动 gzip 压缩） */
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
   setSecurityHeaders(res)
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(body))
+  const json = JSON.stringify(body)
+  const { body: respBody, headers } = maybeGzipResponse(res.req!, json, {
+    'Content-Type': 'application/json; charset=utf-8',
+  })
+  res.writeHead(status, headers)
+  res.end(respBody)
 }
 
 /**
@@ -758,7 +763,10 @@ export async function readAndCacheBody(req: IncomingMessage): Promise<void> {
       chunks.push(chunk)
     })
     req.on('end', () => {
-      ;(req as unknown as { __bodyBuf?: Buffer }).__bodyBuf = Buffer.concat(chunks)
+      const buf = Buffer.concat(chunks)
+      /** 支持 gzip 请求体（Content-Encoding: gzip） */
+      const decompressed = maybeGunzipRequest(req, buf)
+      ;(req as unknown as { __bodyBuf?: Buffer }).__bodyBuf = decompressed
       resolve()
     })
     req.on('error', () => resolve())

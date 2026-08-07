@@ -17,6 +17,7 @@ import { DeviceRegistry } from './device-registry.js'
 import { setupWebSocket } from './ws-relay.js'
 import { handleApiRoute } from './api.js'
 import { AuthManager, ProjectStore, handleProjectApiRoute, readAndCacheBody, type AuthContext } from './auth.js'
+import { maybeGzipResponse } from './gzip.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -355,9 +356,15 @@ function serveFile(
       res.end()
       return
     }
-    const stream = fs.createReadStream(filePath)
-    res.writeHead(200, headers)
-    stream.pipe(res)
+    /**
+     * 读取文件到 Buffer，支持 gzip 压缩。
+     * Vite 构建产物通常 <1MB，一次性读入无内存压力；
+     * 超过 GZIP_THRESHOLD 且客户端支持 gzip 时压缩传输。
+     */
+    const fileBuf = fs.readFileSync(filePath)
+    const { body, headers: gzipHeaders } = maybeGzipResponse(res.req!, fileBuf, headers)
+    res.writeHead(200, gzipHeaders)
+    res.end(body)
   } catch {
     res.writeHead(500)
     res.end('Internal error')

@@ -10,6 +10,7 @@ import type { DeviceRegistry } from './device-registry.js'
 import type { AuthManager, AuthContext } from './auth.js'
 import { sendSnapshot } from './snapshot-text.js'
 import { generateFeatureDetectScript } from '@clarosight/feature-detect'
+import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
 
 /**
  * POST body 最大字节数
@@ -28,42 +29,54 @@ const MAX_BODY = 2 * 1024 * 1024
  */
 function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boolean }> {
   return new Promise((resolve) => {
-    let body = ''
+    /** Buffer 收集（兼容 gzip 二进制），超限保护基于累计字节数 */
+    const chunks: Buffer[] = []
+    let totalSize = 0
     let oversized = false
-    req.on('data', (chunk) => {
+    req.on('data', (chunk: Buffer) => {
       if (oversized) return
-      body += chunk
-      if (body.length > MAX_BODY) {
+      totalSize += chunk.length
+      if (totalSize > MAX_BODY) {
         /** 超限：停止累加，resolve oversize 让调用方回 413。
          * 不用 req.destroy()——它会 RST 连接导致客户端 fetch 报 ECONNRESET，
          * 而是停止读取，让调用方正常 sendJson(413) 结束响应。 */
         oversized = true
         resolve({ body: '', oversize: true })
+        return
       }
+      chunks.push(chunk)
     })
-    req.on('end', () => resolve({ body, oversize: false }))
+    req.on('end', () => {
+      const buf = Buffer.concat(chunks)
+      /** 支持 gzip 请求体（Content-Encoding: gzip） */
+      const decompressed = maybeGunzipRequest(req, buf)
+      resolve({ body: decompressed.toString('utf-8'), oversize: false })
+    })
     /** 客户端中断或连接错误：resolve 空串，避免 promise 永久挂起泄漏 */
     req.on('aborted', () => resolve({ body: '', oversize: false }))
     req.on('error', () => resolve({ body: '', oversize: false }))
   })
 }
 
-/** 发送 JSON 响应 */
+/** 发送 JSON 响应（自动 gzip 压缩） */
 function sendJson(res: ServerResponse, data: unknown, status = 200) {
-  res.writeHead(status, {
+  const json = JSON.stringify(data)
+  const { body, headers } = maybeGzipResponse(res.req!, json, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
   })
-  res.end(JSON.stringify(data))
+  res.writeHead(status, headers)
+  res.end(body)
 }
 
-/** 发送纯文本响应 */
+/** 发送纯文本响应（自动 gzip 压缩） */
 function sendText(res: ServerResponse, text: string, status = 200) {
-  res.writeHead(status, {
+  const { body, headers } = maybeGzipResponse(res.req!, text, {
     'Content-Type': 'text/plain; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
   })
-  res.end(text)
+  res.writeHead(status, headers)
+  res.end(body)
 }
 
 /** exec 超时（ms） */
@@ -212,9 +225,13 @@ export async function handleApiRoute(
         sendJson(res, { error: result.error }, 500)
         return true
       }
-      /** exec 的 result 是序列化后的 JSON 字符串，直接透传 */
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-      res.end(result.result ?? '[]')
+      /** exec 的 result 是序列化后的 JSON 字符串，直接透传（gzip 压缩） */
+      const { body, headers } = maybeGzipResponse(req, result.result ?? '[]', {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      })
+      res.writeHead(200, headers)
+      res.end(body)
       return true
     }
 
@@ -236,8 +253,12 @@ export async function handleApiRoute(
         sendJson(res, { error: result.error }, 500)
         return true
       }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-      res.end(result.result ?? '{}')
+      const { body, headers } = maybeGzipResponse(req, result.result ?? '{}', {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      })
+      res.writeHead(200, headers)
+      res.end(body)
       return true
     }
 
@@ -260,8 +281,12 @@ export async function handleApiRoute(
         sendJson(res, { error: result.error }, 500)
         return true
       }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-      res.end(result.result ?? '{}')
+      const { body, headers } = maybeGzipResponse(req, result.result ?? '{}', {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      })
+      res.writeHead(200, headers)
+      res.end(body)
       return true
     }
 
@@ -307,8 +332,12 @@ export async function handleApiRoute(
           sendJson(res, { error: 'Storage 数据过大，exec 结果被截断为不合法 JSON' }, 500)
           return true
         }
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-        res.end(raw)
+        const { body, headers } = maybeGzipResponse(req, raw, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+        })
+        res.writeHead(200, headers)
+        res.end(body)
         return true
       }
 
