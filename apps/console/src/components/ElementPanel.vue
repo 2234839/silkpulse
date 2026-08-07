@@ -460,6 +460,7 @@ watch(
 onMounted(() => {
   if (props.deviceId) {
     loadElementTree()
+    fetchSnap(props.deviceId)
   }
 })
 </script>
