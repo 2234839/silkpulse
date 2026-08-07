@@ -48,6 +48,76 @@ const STATE_RE = /(active|selected|current|checked|open|expanded)/i
 const elementsRegistry = new Map<number, Element>()
 
 /**
+ * 缩略图最大边长 px（压缩到很小，预览只需模糊轮廓）
+ */
+const THUMB_SIZE = 48
+
+/**
+ * 缩略图缓存：同一 URL 只采集一次（同一页面多次出现的图标/图片）
+ */
+const thumbCache = new Map<string, string | null>()
+
+/**
+ * 把已加载的 HTMLImageElement 压缩成低质量 dataURL
+ *
+ * 不触发新网络请求——只使用浏览器已缓存的图片数据。
+ * 输出约 0.5-2KB 的 JPEG dataURL，足够预览渲染用。
+ */
+function imgToThumb(img: HTMLImageElement): string | null {
+  /** naturalWidth=0 说明图片未加载或加载失败 */
+  const nw = img.naturalWidth
+  const nh = img.naturalHeight
+  if (!nw || !nh) return null
+
+  try {
+    const canvas = document.createElement('canvas')
+    /** 缩略图尺寸：按比例缩放到 THUMB_SIZE */
+    const ratio = Math.min(THUMB_SIZE / nw, THUMB_SIZE / nh, 1)
+    canvas.width = Math.max(1, Math.round(nw * ratio))
+    canvas.height = Math.max(1, Math.round(nh * ratio))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.3)
+  } catch {
+    /** 跨域图片 drawImage 会抛 SecurityError，静默跳过 */
+    return null
+  }
+}
+
+/**
+ * 把已加载的 URL（背景图等）压缩成 dataURL
+ *
+ * 复用同一 img 元素避免重复加载，带缓存防止重复采集。
+ * 不触发新网络请求——浏览器已缓存的图片直接可用。
+ */
+function urlToThumb(url: string): string | null {
+  /** data: URL 直接缓存（可能本身就很短） */
+  if (url.startsWith('data:')) {
+    return url.length < 500 ? url : null
+  }
+
+  /** 命中缓存 */
+  if (thumbCache.has(url)) return thumbCache.get(url)!
+
+  /** 用一个临时 img 加载（浏览器缓存命中不会发网络请求） */
+  const tmp = new Image()
+  tmp.crossOrigin = 'anonymous'
+  tmp.src = url
+
+  /** 同步检查：如果浏览器已缓存且立即可用 */
+  if (tmp.complete && tmp.naturalWidth > 0) {
+    const result = imgToThumb(tmp)
+    thumbCache.set(url, result)
+    return result
+  }
+
+  /** 未缓存（需要网络）——标记为 null 不采集（不阻塞快照） */
+  thumbCache.set(url, null)
+  return null
+}
+
+/**
  * 采集元素的关键视觉样式（控制台侧高保真预览用）
  *
  * 只提取对视觉还原影响最大的属性，跳过 transparent/默认值以节省体积。
@@ -105,6 +175,32 @@ function captureVisualStyle(el: HTMLElement): SnapshotElement['style'] | null {
   const align = cs.textAlign
   if (align && align !== 'left' && align !== 'start') {
     s.align = align
+  }
+
+  /** 溢出 + 滚动：可滚动容器采集 overflow 和 scroll 位置 */
+  const ovx = cs.overflowX
+  const ovy = cs.overflowY
+  const scrollableX = (ovx === 'auto' || ovx === 'scroll') && el.scrollWidth > el.clientWidth + 1
+  const scrollableY = (ovy === 'auto' || ovy === 'scroll') && el.scrollHeight > el.clientHeight + 1
+  if (scrollableX || scrollableY) {
+    s.overflow = `${scrollableX ? ovx : 'visible'} ${scrollableY ? ovy : 'visible'}`
+    s.scroll = [el.scrollLeft, el.scrollTop]
+  }
+
+  /** img 元素的缩略图：用 Canvas 把已加载图片压缩成 dataURL */
+  if (el.tagName === 'IMG' && (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0) {
+    const thumb = imgToThumb(el as HTMLImageElement)
+    if (thumb) s.img = thumb
+  }
+
+  /** CSS background-image：如果是已加载的图片 URL，采集缩略图 */
+  const bgImg = cs.backgroundImage
+  if (bgImg && bgImg !== 'none') {
+    const urlMatch = bgImg.match(/url\(["']?([^"')]+)["']?\)/)
+    if (urlMatch) {
+      const thumb = urlToThumb(urlMatch[1])
+      if (thumb) s.bgImg = thumb
+    }
   }
 
   return Object.keys(s).length > 0 ? s : null

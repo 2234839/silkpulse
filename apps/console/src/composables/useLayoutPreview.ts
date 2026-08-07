@@ -147,7 +147,27 @@ export function useLayoutPreview(
       /** 字号缩放，但不小于 8px（太小看不见） */
       if (vs.fs) styles.fontSize = `${Math.max(8, Math.round(vs.fs * s))}px`
       if (vs.fw) styles.fontWeight = vs.fw
-      styles.overflow = 'hidden'
+
+      /** 图片缩略图：作为背景图填满 */
+      if (vs.img) {
+        styles.backgroundImage = `url(${vs.img})`
+        styles.backgroundSize = 'cover'
+        styles.backgroundPosition = 'center'
+      } else if (vs.bgImg) {
+        /** CSS background-image 缩略图 */
+        styles.backgroundImage = `url(${vs.bgImg})`
+        styles.backgroundSize = 'cover'
+        styles.backgroundPosition = 'center'
+      }
+
+      /** 可滚动容器：还原 overflow 行为（滚动位置由 ElementPanel 的 onUpdated 设置） */
+      if (vs.overflow) {
+        const [ovx, ovy] = vs.overflow.split(' ')
+        styles.overflowX = ovx === 'visible' ? 'hidden' : ovx
+        styles.overflowY = ovy === 'visible' ? 'hidden' : ovy
+      } else {
+        styles.overflow = 'hidden'
+      }
     }
 
     return styles

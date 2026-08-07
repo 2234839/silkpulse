@@ -557,12 +557,14 @@ onMounted(() => {
           </template>
         </div>
       </div>
-      <!-- 拖拽手柄（tree 模式） -->
+      </template>
+      <!-- 拖拽手柄（仅 tree 模式） -->
       <div
+        v-if="leftView === 'tree'"
         class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
         @mousedown="onTreePanelResize"
       ></div>
-      <!-- 右：诊断面板 -->
+      <!-- 右：诊断面板（两种模式共用，定位不同） -->
       <!-- tree 模式 → flex-1 常驻；preview 模式 → absolute 悬浮卡片（可关闭/恢复） -->
       <div
         v-show="leftView === 'tree' || floatDiagnosticVisible"
@@ -719,7 +721,6 @@ onMounted(() => {
         </div>
       </template>
     </div>
-    </template>
     <!-- ═══ 布局预览模式：画布占满全宽 ═══ -->
     <template v-if="leftView === 'preview'">
       <div class="flex-1 flex flex-col overflow-hidden" ref="sentinelRef">

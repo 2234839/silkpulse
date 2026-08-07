@@ -427,6 +427,14 @@ export interface SnapshotElement {
     border?: string
     /** 文字对齐 */
     align?: string
+    /** 缩略图 dataURL（img 元素或 CSS background-image，压缩后 ~1-2KB） */
+    img?: string
+    /** 背景图 dataURL（CSS background-image 采集，压缩后 ~1-2KB） */
+    bgImg?: string
+    /** 溢出模式（overflow-x/overflow-y 的简写，如 'auto auto'） */
+    overflow?: string
+    /** 滚动位置 [scrollLeft, scrollTop]（可滚动容器才采集） */
+    scroll?: [number, number]
   }
   [k: string]: unknown
 }
