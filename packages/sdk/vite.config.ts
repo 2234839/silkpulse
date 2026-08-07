@@ -6,6 +6,10 @@ export default defineConfig({
     dts: false,
     /** 注入脚本不生成 exports 映射，产物是单文件 IIFE */
     exports: false,
+    /** SnapDOM 默认被当外部依赖，IIFE 模式下必须 inline */
+    deps: {
+      alwaysBundle: ["@zumer/snapdom"],
+    },
   },
   lint: {
     options: {

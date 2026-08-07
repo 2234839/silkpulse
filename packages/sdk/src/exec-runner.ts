@@ -15,6 +15,7 @@
  * - __clarosight_hover(idx)
  * - __clarosight_wait(ms) / __clarosight_snapshot()
  * - __clarosight_sourcemap(...) / __clarosight_sourcemapStack(...)
+ * - __clarosight_screenshot(idx?, opts?) — 截取页面或指定元素，返回 dataURL
  */
 
 import type { ServerToDeviceMessage, ExecResult } from '@clarosight/shared'
@@ -36,11 +37,10 @@ export function setResultSender(sender: (execId: string, result: ExecResult) => 
 /**
  * 序列化 exec 返回值（限深限长，移植 pilot serializeResult）
  *
- * 截断阈值 20000：足以容纳完整页面快照（__clarosight_snapshot() 的结构化 JSON，
- * 典型 2-8KB，大页面可达 15KB+），同时仍能挡住 `return document` 之类的失误
- * （整个 DOM 序列化远超 20K）。WS 单帧 20K 文本在背压保护下安全。
+ * 截断阈值 500000：截图 dataURL（JPEG base64）可达 50-300KB，
+ * 需完整传输才能正确解码。快照 JSON 典型 2-8KB，大页面可达 15KB+。
  */
-const MAX_RESULT_LEN = 20000
+const MAX_RESULT_LEN = 500000
 function serializeResult(val: unknown): string {
   try {
     return JSON.stringify(val, (_, v) => {
@@ -375,6 +375,55 @@ export function installHelpers(): void {
    * 所以不能用 querySelector 反查，必须走 elementsRegistry。
    */
   w.__clarosight_getElement = (idx: number): Element | undefined => getElement(idx)
+
+  /**
+   * 截取页面或指定元素的截图（返回 dataURL）
+   *
+   * 用 SnapDOM 的 toCanvas 将 DOM 渲染为 canvas，再编码为 JPEG/PNG dataURL。
+   * Agent 通过 exec 调用此函数获取页面可视化快照。
+   *
+   * @param idx  元素 idx（来自 snapshot/element-tree），不传则截取整个 body（viewport）
+   * @param opts 截图选项
+   * @returns dataURL 字符串（可直接用于 <img> 或下载）
+   *
+   * 用法：
+   * - 全页截图：return await __clarosight_screenshot()
+   * - 指定元素：return await __clarosight_screenshot(42)
+   * - 高质量 PNG：return await __clarosight_screenshot(42, { format:'png', scale:2 })
+   */
+  w.__clarosight_screenshot = async (
+    idx?: number,
+    opts?: { format?: 'jpg' | 'png' | 'webp'; quality?: number; scale?: number; backgroundColor?: string },
+  ): Promise<string> => {
+    /** dynamic import snapdom（避免 exec-runner 同步加载依赖） */
+    const { snapdom } = await import('@zumer/snapdom')
+
+    /** 确定截图目标：指定 idx 的元素，或 document.body */
+    const target = idx != null ? getElement(idx) : document.body
+    if (!target) {
+      throw new Error(`__clarosight_screenshot: idx=${idx} 对应的元素不存在`)
+    }
+
+    /** 合并默认选项 */
+    const format = opts?.format ?? 'jpg'
+    const quality = opts?.quality ?? 0.8
+    const scale = opts?.scale ?? 1
+    const backgroundColor = opts?.backgroundColor ?? '#ffffff'
+
+    /** 根据格式选择 SnapDOM 导出方法 */
+    if (format === 'png') {
+      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: true })
+      /** SnapDOM 返回 HTMLImageElement，从 src 取 dataURL */
+      return img.src
+    }
+    if (format === 'webp') {
+      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: true })
+      return img.src
+    }
+    /** 默认 jpg */
+    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: true })
+    return img.src
+  }
 }
 
 /**

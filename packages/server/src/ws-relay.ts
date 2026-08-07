@@ -294,6 +294,12 @@ export function setupWebSocket(
             broadcast(deviceId, { type: 'screen-frame', deviceId, frame: msg.frame })
             break
           }
+          case 'screen-share-status': {
+            /** 屏幕共享状态变化（等待授权/共享中/被拒绝等）：转发给控制台 */
+            if (!device) return
+            broadcast(deviceId, { type: 'screen-share-status', deviceId, status: msg.status })
+            break
+          }
           case 'exec-result': {
             if (!device) return
             const entry = device.pendingExecs.get(msg.execId)

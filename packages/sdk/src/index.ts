@@ -203,9 +203,14 @@ export function init(options: InitOptions): void {
       setStorageWatcherActive(watchers.includes('storage'))
       setDomWatcherActive(watchers.includes('dom'))
     } else if (msg.type === 'start-screen-share') {
-      /** 控制台请求屏幕共享 → 弹出浏览器授权弹窗 → 用户同意后开始增量推帧 */
+      /**
+       * 控制台请求屏幕共享
+       * SDK 用 SnapDOM 直接截取页面视口，无需用户授权/手势，
+       * 收到指令后立即开始增量推帧。
+       */
       startScreenShare(
         (frame) => send({ type: 'screen-frame', frame }),
+        (status) => send({ type: 'screen-share-status', status }),
       )
     } else if (msg.type === 'stop-screen-share') {
       stopScreenShare()

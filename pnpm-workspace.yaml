@@ -17,6 +17,9 @@ catalog:
   "@tailwindcss/vite": ^4.0.0
   "@vitejs/plugin-vue": ^6.0.8
   puppeteer-core: ^25.5.0
+  modern-screenshot: ^4.7.0
+  snapdom: ^0.1.2
+  '@zumer/snapdom': ^2.23.2
 overrides:
   vite: "catalog:"
 peerDependencyRules:

@@ -131,6 +131,51 @@ export async function handleAgentApiRoute(
     }
 
     /**
+     * GET /api/agent/devices/:id/screenshot —— 截图（返回二进制图片）
+     *
+     * 参数：
+     * - idx:    元素 idx（不传则截整个 viewport）
+     * - format: jpg（默认）| png | webp
+     * - quality: JPEG/WebP 质量 0-1（默认 0.8）
+     * - scale:  放大倍数（默认 1）
+     *
+     * 返回 Content-Type: image/* 的二进制图片，Agent 可直接保存/查看。
+     */
+    case 'screenshot': {
+      const idx = url.searchParams.get('idx')
+      const format = url.searchParams.get('format') ?? 'jpg'
+      const quality = url.searchParams.get('quality') ?? '0.8'
+      const scale = url.searchParams.get('scale') ?? '1'
+      const idxArg = idx ? Number(idx) : 'undefined'
+      const code = `return await __clarosight_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
+      const result = await execOnDevice(registry, deviceId, code)
+      if (!result.success) {
+        sendText(res, `[截图失败] ${result.error}`, 500)
+        return true
+      }
+      /** result.result 是 JSON.stringify 后的 dataURL（如 "data:image/jpeg;base64,..."） */
+      const dataUrl = result.result ? JSON.parse(result.result) : ''
+      if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+        sendText(res, `[截图失败] 返回数据格式异常`, 500)
+        return true
+      }
+      const meta = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+      if (!meta) {
+        sendText(res, `[截图失败] dataURL 解析失败`, 500)
+        return true
+      }
+      const mimeType = meta[1] === 'jpg' ? 'jpeg' : meta[1]
+      const binary = Buffer.from(meta[2], 'base64')
+      res.writeHead(200, {
+        'Content-Type': `image/${mimeType}`,
+        'Content-Length': binary.length,
+        'Cache-Control': 'no-cache',
+      })
+      res.end(binary)
+      return true
+    }
+
+    /**
      * GET /api/agent/devices/:id/logs?limit=20 —— console 日志（text/plain）
      *
      * 返回精简文本格式，agent 不需要解析 JSON。

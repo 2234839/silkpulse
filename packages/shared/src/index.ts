@@ -20,6 +20,7 @@ export type DeviceMessage =
   | { type: 'error'; error: ErrorEntry }
   | { type: 'snapshot'; snapshot: SnapshotData }
   | { type: 'screen-frame'; frame: ScreenFrame }
+  | { type: 'screen-share-status'; status: ScreenShareStatus }
   | { type: 'exec-result'; execId: string; result: ExecResult }
   | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; changes: DomChangeData }
@@ -64,6 +65,7 @@ export type ServerToConsoleMessage =
   | { type: 'sse-event'; deviceId: string; seq: number; event: SseEvent }
   | { type: 'error'; deviceId: string; error: ErrorEntry }
   | { type: 'screen-frame'; deviceId: string; frame: ScreenFrame }
+  | { type: 'screen-share-status'; deviceId: string; status: ScreenShareStatus }
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
   /** server → 控制台的心跳响应 */
@@ -367,6 +369,19 @@ export interface ExecResult {
  * 后续帧 keyframe=false：只包含变化区域的 JPEG 补丁，贴到上一帧上合成
  * 无变化的帧不发送（SDK 端跳过）
  */
+/** 屏幕共享状态（设备 SDK → 控制台） */
+export type ScreenShareStatus =
+  /** 控制台请求共享，设备端等待用户点击授权按钮 */
+  | 'awaiting-user-action'
+  /** 用户已授权，正在推流 */
+  | 'sharing'
+  /** 用户拒绝授权 */
+  | 'denied'
+  /** 共享已停止 */
+  | 'stopped'
+  /** 发生错误 */
+  | 'error'
+
 export interface ScreenFrame {
   /** 是否为关键帧（完整画面） */
   keyframe: boolean

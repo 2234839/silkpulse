@@ -52,6 +52,7 @@ const {
   domChangeVersion,
   domChangeData,
   screenFrame,
+  screenShareStatus,
   sendConsoleMessage,
   selectedDeviceId,
   connected,
@@ -361,6 +362,7 @@ onMounted(async () => {
             :dom-change-version="domChangeVersion"
             :dom-change-data="domChangeData"
             :screen-frame="screenFrame"
+            :screen-share-status="screenShareStatus"
             :send-console-message="sendConsoleMessage"
           />
           <StoragePanel

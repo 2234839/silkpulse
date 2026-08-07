@@ -12,7 +12,8 @@
     "check": "vp check"
   },
   "dependencies": {
-    "@clarosight/shared": "workspace:*"
+    "@clarosight/shared": "workspace:*",
+    "@zumer/snapdom": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

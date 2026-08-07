@@ -12,6 +12,7 @@ import type {
   NetworkEntry,
   ErrorEntry,
   ScreenFrame,
+  ScreenShareStatus,
   ServerToConsoleMessage,
 } from '@clarosight/shared'
 import { useAuth } from './useAuth'
@@ -53,6 +54,8 @@ export function useConsoleSocket() {
 
   /** 最新的屏幕共享帧（ElementPanel watch 后用 FrameCompositor 合成到 canvas） */
   const screenFrame = shallowRef<ScreenFrame | null>(null)
+  /** 远端设备屏幕共享状态 */
+  const screenShareStatus = shallowRef<ScreenShareStatus | null>(null)
   /**
    * 每个 storage key 的最后修改时间戳（运行期间 SDK 捕获）
    *
@@ -102,6 +105,7 @@ export function useConsoleSocket() {
     logs.value = []
     network.value = []
     errors.value = []
+    screenShareStatus.value = null
     storageKeyTimes.value = {}
     /** 先取消订阅旧设备，避免带宽浪费（server 会保留旧订阅） */
     if (ws && ws.readyState === WebSocket.OPEN && lastSubscribedDeviceId && lastSubscribedDeviceId !== id) {
@@ -246,6 +250,7 @@ export function useConsoleSocket() {
           logs.value = []
           network.value = []
           errors.value = []
+          screenShareStatus.value = null
         }
         break
       case 'log':
@@ -347,6 +352,12 @@ export function useConsoleSocket() {
           screenFrame.value = msg.frame
         }
         break
+      case 'screen-share-status':
+        /** 设备屏幕共享状态变化（等待授权/共享中/被拒绝等） */
+        if (msg.deviceId === selectedDeviceId.value) {
+          screenShareStatus.value = msg.status
+        }
+        break
     }
   }
 
@@ -380,6 +391,7 @@ export function useConsoleSocket() {
     domChangeVersion,
     domChangeData,
     screenFrame,
+    screenShareStatus,
     selectedDeviceId,
     connected,
     connect,

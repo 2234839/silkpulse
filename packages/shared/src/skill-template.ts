@@ -44,6 +44,7 @@ export const SKILL_PROMPT_TEMPLATE = `# Clarosight —— 远程设备调试工�
 | GET | \`/<id>/errors?limit=10\` | 最近 N 条错误（text/plain，含 source map 解析） |
 | GET | \`/<id>/network?limit=10\` | 最近 N 条网络请求（text/plain，失败请求标记 FAIL） |
 | GET | \`/<id>/element/tree?idx=N\` | DOM 元素子树（JSON，不传 idx 从根开始） |
+| GET | \`/<id>/screenshot?idx=N\` | **截图**（返回图片，不传 idx 截全页，传 idx 截指定元素） |
 | POST | \`/<id>/exec\` | 在远程页面执行 JS（body: \`{ "code": "..." }\`） |
 
 ### exec 示例
@@ -76,6 +77,7 @@ exec 的 code 作为 **async 函数体**执行，写 \`return\` 返回结果。
 - \`__clarosight_type(idx, text)\` — 逐字输入（触发 keydown/keyup）
 - \`__clarosight_wait(ms)\` — 异步等待
 - \`__clarosight_snapshot()\` — 取页面快照
+- \`__clarosight_screenshot(idx?, opts?)\` — 截图（不传 idx 截全页，传 idx 截指定元素，返回 dataURL）
 - \`__clarosight_sourcemap(line, col, url?)\` — source map 解析（压缩代码定位源码）
 
 ## snapshot 阅读指南
@@ -92,7 +94,8 @@ select #9 check=bj:北京 <bj:北京|sh:上海>  ← 下拉框（setValue 传 va
 1. \`GET /api/agent/devices\` → 拿到在线设备列表和 id
 2. \`GET /<id>/inspect\` → 一键聚合诊断（最高效入口）
 3. 需要深入时用 \`/<id>/logs|errors|network\` 逐项查看
-4. \`POST /<id>/exec?snapshot=0\` → 执行诊断代码定位问题
+4. \`GET /<id>/screenshot\` → 截图看页面真实渲染效果（传 \`?idx=N\` 截指定元素）
+5. \`POST /<id>/exec?snapshot=0\` → 执行诊断代码定位问题
 
 exec 超时 10 秒，长任务需拆分。`
 

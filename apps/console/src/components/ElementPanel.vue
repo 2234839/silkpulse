@@ -35,8 +35,10 @@ const props = defineProps<{
   domChangeVersion?: number
   /** 最近一次 DOM 变化的详细数据 */
   domChangeData?: DomChangeData | null
-  /** 最新的屏幕共享帧（来自 console socket） */
+  /** 最新的截图帧（来自 console socket） */
   screenFrame?: import('@clarosight/shared').ScreenFrame | null
+  /** 远端设备截图状态（来自 console socket） */
+  screenShareStatus?: import('@clarosight/shared').ScreenShareStatus | null
   /** 发送控制台消息到 server */
   sendConsoleMessage?: (msg: ConsoleMessage) => void
 }>()
@@ -71,7 +73,7 @@ interface ElementNode {
 }
 
 /** ─── 布局预览 ─── */
-/** 左侧面板视图：tree = DOM 树，preview = 布局框图，screen = 屏幕共享 */
+/** 左侧面板视图：tree = DOM 树，preview = 布局框图，screen = 截图 */
 const leftView = ref<'tree' | 'preview' | 'screen'>('tree')
 /** 布局预览模式下诊断面板是否悬浮显示（关闭后不挡预览） */
 const floatDiagnosticVisible = ref(true)
@@ -95,24 +97,33 @@ const {
   canShowLabel,
 } = useLayoutPreview(snapshotData, sentinelRef)
 
-/** ─── 屏幕共享 ─── */
+/** ─── 远程截图 ─── */
 /** 帧合成器实例 */
 let compositor: FrameCompositor | null = null
-/** 共享 canvas ref */
+/** 截图画布 ref */
 const screenCanvasRef = ref<HTMLCanvasElement | null>(null)
-/** 屏幕共享状态 */
-const screenShareStatus = ref<'idle' | 'sharing' | 'denied' | 'error'>('idle')
 
-/** 启动屏幕共享 */
+/** 截图状态文本（由远端 SDK 上报） */
+const screenStatusText = computed(() => {
+  switch (props.screenShareStatus) {
+    case 'sharing': return '截图进行中'
+    case 'stopped': return '已停止'
+    case 'error': return '截图出错'
+    default: return null
+  }
+})
+
+/** 截图是否活跃 */
+const isScreenActive = computed(() => props.screenShareStatus === 'sharing')
+
+/** 开始截图 */
 function startScreenShare() {
-  screenShareStatus.value = 'sharing'
   props.sendConsoleMessage?.({ type: 'start-screen-share', deviceId: props.deviceId })
 }
 
-/** 停止屏幕共享 */
+/** 停止截图 */
 function stopScreenShare() {
   props.sendConsoleMessage?.({ type: 'stop-screen-share', deviceId: props.deviceId })
-  screenShareStatus.value = 'idle'
   compositor?.clear()
 }
 
@@ -538,7 +549,7 @@ onMounted(() => {
             @click="leftView = 'screen'"
             class="px-2 py-0.5 text-xs font-medium transition-colors"
             :class="leftView === 'screen' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
-          >屏幕共享</button>
+          >截图</button>
       </div>
       <button
         v-if="leftView === 'tree'"
@@ -613,10 +624,10 @@ onMounted(() => {
         class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
         @mousedown="onTreePanelResize"
       ></div>
-      <!-- 右：诊断面板（两种模式共用，定位不同） -->
+      <!-- 右：诊断面板（tree / preview 模式共用，定位不同；screen 模式隐藏） -->
       <!-- tree 模式 → flex-1 常驻；preview 模式 → absolute 悬浮卡片（可关闭/恢复） -->
       <div
-        v-show="leftView === 'tree' || floatDiagnosticVisible"
+        v-show="leftView !== 'screen' && (leftView === 'tree' || floatDiagnosticVisible)"
         :class="leftView === 'tree'
           ? 'flex-1 overflow-y-auto p-4 min-w-0'
           : 'absolute top-2 right-2 bottom-2 w-[340px] max-w-[60%] bg-surface/95 backdrop-blur border border-base rounded-lg shadow-2xl overflow-y-auto p-3 z-30'"
@@ -772,13 +783,13 @@ onMounted(() => {
     </div>
     <!-- ═══ 布局预览模式：画布占满全宽 ═══ -->
     <template v-if="leftView === 'preview'">
-      <div class="flex-1 flex flex-col overflow-hidden" ref="sentinelRef">
+      <div class="flex-1 flex flex-col overflow-hidden min-w-0" ref="sentinelRef">
         <div class="flex-1 overflow-auto">
           <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">加载快照...</div>
           <div v-else-if="!snapshotData" class="text-faint text-center py-8 text-xs">快照不可用</div>
           <template v-else>
             <div
-              class="relative mx-auto bg-white dark:bg-gray-900 border border-base"
+              class="relative mx-auto bg-white dark:bg-gray-900 border border-base max-w-full"
               :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
             >
               <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
@@ -820,35 +831,34 @@ onMounted(() => {
       </div>
     </template>
 
-    <!-- ═══ 屏幕共享模式：实时远程画面 ═══ -->
+    <!-- ═══ 截图模式：点击按钮截取远端页面 ═══ -->
     <template v-if="leftView === 'screen'">
       <div class="flex-1 flex flex-col overflow-hidden">
         <!-- 控制栏 -->
         <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2 flex-shrink-0">
           <div class="flex items-center gap-2">
             <button
-              v-if="screenShareStatus !== 'sharing'"
+              v-if="!isScreenActive"
               @click="startScreenShare"
               class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
-            >请求用户共享屏幕</button>
+            >开始截图</button>
             <button
               v-else
               @click="stopScreenShare"
               class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
-            >停止共享</button>
-            <span v-if="screenShareStatus === 'sharing'" class="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-              <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-              等待用户授权...
+            >停止截图</button>
+            <span v-if="screenStatusText" class="flex items-center gap-1 text-xs" :class="props.screenShareStatus === 'sharing' ? 'text-green-600 dark:text-green-400' : 'text-muted'">
+              <span v-if="isScreenActive" class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+              {{ screenStatusText }}
             </span>
           </div>
         </div>
 
         <!-- 画面显示区 -->
         <div class="flex-1 overflow-auto flex items-center justify-center bg-gray-900/5 dark:bg-black/20">
-          <div v-if="screenShareStatus === 'idle'" class="text-center py-12 px-4">
-            <div class="text-4xl mb-3 opacity-30">🖥️</div>
-            <p class="text-sm text-muted mb-1">屏幕共享未启动</p>
-            <p class="text-xs text-faint">点击「请求用户共享屏幕」后，用户浏览器会弹出授权弹窗</p>
+          <div v-if="!isScreenActive && !screenFrame" class="text-center py-12 px-4">
+            <div class="text-4xl mb-3 opacity-30">📸</div>
+            <p class="text-sm text-muted mb-1">点击「开始截图」捕获远端页面</p>
           </div>
           <canvas
             v-else
