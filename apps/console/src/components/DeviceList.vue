@@ -40,6 +40,29 @@ const filteredDevices = computed(() => {
   )
 })
 
+/** 无项目归属的标签名 */
+const NO_PROJECT = '未分组'
+/** 分组 key（projectId 或 NO_PROJECT）→ 项目名 */
+function groupLabel(key: string): string {
+  if (key === NO_PROJECT) return NO_PROJECT
+  return props.projectNameMap[key] ?? key.slice(0, 8)
+}
+
+/** 按项目分组的设备列表（超管模式用） */
+const groupedDevices = computed(() => {
+  const groups: { key: string; label: string; devices: typeof filteredDevices.value }[] = []
+  const map = new Map<string, typeof filteredDevices.value>()
+  for (const d of filteredDevices.value) {
+    const key = d.projectId ?? NO_PROJECT
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(d)
+  }
+  for (const [key, devices] of map) {
+    groups.push({ key, label: groupLabel(key), devices })
+  }
+  return groups
+})
+
 /** 标签编辑状态 */
 const editingTagDeviceId = ref<string | null>(null)
 const tagDraft = ref('')
@@ -138,6 +161,90 @@ function relativeTime(ts: number): string {
       />
     </div>
     <ul>
+    <!-- 超管模式：按项目分组 -->
+    <template v-if="isAdmin">
+      <template v-for="group in groupedDevices" :key="group.key">
+        <div class="px-4 py-1.5 bg-base/50 border-b border-light sticky top-0 z-10">
+          <span class="text-xs font-semibold text-secondary">{{ group.label }}</span>
+          <span class="text-faint font-normal ml-1">({{ group.devices.length }})</span>
+        </div>
+        <li
+          v-for="d in group.devices"
+          :key="d.id"
+          @click="emit('select', d.id)"
+          class="px-4 py-3 border-b border-light cursor-pointer hover:bg-base relative"
+          :class="selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : ''"
+        >
+          <!-- 有错误时左侧红条 -->
+          <span
+            v-if="d.errorCount > 0"
+            class="absolute left-0 top-0 bottom-0 w-1 bg-red-400"
+          />
+          <div class="text-sm font-medium text-primary truncate">
+            <img
+              v-if="d.icon"
+              :src="d.icon"
+              @error="onFaviconError"
+              class="inline-block w-4 h-4 mr-1 align-text-bottom rounded-sm"
+              alt=""
+            /><span v-else class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
+            <!-- 编辑标签按钮 -->
+            <button
+              v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
+              @click.stop="startEditTags(d.id)"
+              class="ml-1 text-faint hover:text-blue-500 text-xs align-middle"
+              title="编辑标签/备注"
+            >🏷️</button>
+          </div>
+          <div class="text-xs text-muted truncate">{{ d.url }}</div>
+          <!-- tags 徽章 + 备注 -->
+          <div v-if="(d.tags?.length || d.note) && editingTagDeviceId !== d.id" class="flex flex-wrap items-center gap-1 mt-1">
+            <span
+              v-for="tag in (d.tags ?? [])"
+              :key="tag"
+              class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-soft text-blue-key"
+            >{{ tag }}</span>
+            <span v-if="d.note" class="text-[10px] text-faint italic truncate max-w-[140px]" :title="d.note">{{ d.note }}</span>
+          </div>
+          <!-- 内联编辑态 -->
+          <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
+            <input
+              v-model="tagDraft"
+              placeholder="标签（逗号分隔）"
+              class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
+              @keydown.enter="saveTags"
+              @keydown.escape="cancelEditTags"
+            />
+            <input
+              v-model="noteDraft"
+              placeholder="备注（可选）"
+              class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
+              @keydown.enter="saveTags"
+              @keydown.escape="cancelEditTags"
+            />
+            <div class="flex gap-1">
+              <button @click="saveTags" class="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700">保存</button>
+              <button @click="cancelEditTags" class="px-2 py-0.5 text-[10px] bg-elevated text-secondary rounded bg-elevated-hover">取消</button>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-xs text-faint">{{ detectOS(d.userAgent) }}</span>
+            <span class="text-xs text-faint">· {{ d.deviceType }} {{ d.viewportWidth }}×{{ d.viewportHeight }}</span>
+            <span v-if="d.onlineAt" class="text-xs text-faint" :title="new Date(d.onlineAt).toLocaleString()">· {{ relativeTime(d.onlineAt) }}</span>
+            <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium">{{ d.errorCount }} 错误</span>
+          </div>
+        </li>
+      </template>
+      <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
+        暂无在线设备
+      </li>
+      <li v-else-if="filteredDevices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
+        无匹配设备
+      </li>
+    </template>
+
+    <!-- 项目用户/游客模式：平铺显示 -->
+    <template v-else>
       <li
         v-for="d in filteredDevices"
         :key="d.id"
@@ -145,7 +252,6 @@ function relativeTime(ts: number): string {
         class="px-4 py-3 border-b border-light cursor-pointer hover:bg-base relative"
         :class="selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : ''"
       >
-        <!-- 有错误时左侧红条 -->
         <span
           v-if="d.errorCount > 0"
           class="absolute left-0 top-0 bottom-0 w-1 bg-red-400"
@@ -158,13 +264,6 @@ function relativeTime(ts: number): string {
             class="inline-block w-4 h-4 mr-1 align-text-bottom rounded-sm"
             alt=""
           /><span v-else class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span>{{ d.title }}
-          <!-- 项目归属徽章 -->
-          <span
-            v-if="isAdmin && d.projectId"
-            class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-soft text-purple-key align-middle"
-            :title="`所属项目: ${projectNameMap[d.projectId] ?? d.projectId}`"
-          >{{ projectNameMap[d.projectId] ?? d.projectId.slice(0, 6) }}</span>
-          <!-- 编辑标签按钮 -->
           <button
             v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
             @click.stop="startEditTags(d.id)"
@@ -173,7 +272,6 @@ function relativeTime(ts: number): string {
           >🏷️</button>
         </div>
         <div class="text-xs text-muted truncate">{{ d.url }}</div>
-        <!-- tags 徽章 + 备注 -->
         <div v-if="(d.tags?.length || d.note) && editingTagDeviceId !== d.id" class="flex flex-wrap items-center gap-1 mt-1">
           <span
             v-for="tag in (d.tags ?? [])"
@@ -182,7 +280,6 @@ function relativeTime(ts: number): string {
           >{{ tag }}</span>
           <span v-if="d.note" class="text-[10px] text-faint italic truncate max-w-[140px]" :title="d.note">{{ d.note }}</span>
         </div>
-        <!-- 内联编辑态 -->
         <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
           <input
             v-model="tagDraft"
@@ -216,6 +313,7 @@ function relativeTime(ts: number): string {
       <li v-else-if="filteredDevices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
         无匹配设备
       </li>
+    </template>
     </ul>
   </aside>
 </template>

@@ -663,6 +663,16 @@ export function handleProjectApiRoute(
 
   const [, projectId, subPath] = match
 
+  /**
+   * Playground 项目由环境变量管理，禁止轮换密钥、禁用、删除。
+   * 只允许 GET（查看）。
+   */
+  const isPlaygroundProject = projectId === AuthManager.PLAYGROUND_PROJECT_ID
+  if (isPlaygroundProject && method !== 'GET') {
+    jsonResponse(res, 403, { error: 'Playground 项目由环境变量管理，不支持此操作' })
+    return true
+  }
+
   /** 重新生成密钥 */
   if (subPath === '/rotate' && method === 'POST') {
     const newKey = auth.projects.rotateKey(projectId)
