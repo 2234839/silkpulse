@@ -23,36 +23,49 @@ const PLACEHOLDER_API_KEY = '__API_KEY__'
 export const SKILL_PROMPT_TEMPLATE = `# Clarosight —— 远程设备调试工具
 
 你可以通过以下 HTTP API 直接调试远程设备（线上页面、用户浏览器等）。
+所有接口返回 text/plain（除 exec 返回 JSON），可直接读取，无需解析 JSON。
 
 ## 连接信息
 
 - Server: ${PLACEHOLDER_SERVER_URL}
-- API Key: ${PLACEHOLDER_API_KEY}
-- 所有请求需携带 Header: \`Authorization: Bearer ${PLACEHOLDER_API_KEY}\`
+- 鉴权：\`Authorization: Bearer ${PLACEHOLDER_API_KEY}\` header 或 \`?key=${PLACEHOLDER_API_KEY}\` query 参数
 - 建议加 \`Accept-Encoding: gzip\` 头减少传输量
 
 ## API 列表
 
-所有接口前缀：\`${PLACEHOLDER_SERVER_URL}/api/devices\`
+所有接口前缀：\`${PLACEHOLDER_SERVER_URL}/api/agent/devices\`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | \`/<id>/inspect\` | **一键诊断聚合**（错误 + 失败网络 + 快照，最高效入口） |
-| GET | \`/<id>/snapshot\` | 页面快照（AI 友好的 compact 文本） |
-| GET | \`/<id>/logs?limit=20\` | 最近 N 条 console 日志 |
-| GET | \`/<id>/errors?limit=10\` | 最近 N 条错误（带 source map 解析） |
-| GET | \`/<id>/network?limit=10\` | 最近 N 条网络请求（含响应体） |
-| POST | \`/<id>/exec\` | 在远程页面执行 JS 代码（body: \`{ "code": "..." }\`） |
-
-查看所有在线设备：\`GET ${PLACEHOLDER_SERVER_URL}/api/devices\` → \`{ devices: [{ id, url, title }] }\`
+| GET | 查在线设备 | \`GET ${PLACEHOLDER_SERVER_URL}/api/agent/devices\` → JSON \`{ devices: [{ id, url, title, errors }] }\` |
+| GET | \`/<id>/inspect\` | **一键诊断聚合**（错误 + 失败请求 + 页面快照，最高效入口） |
+| GET | \`/<id>/snapshot\` | 页面快照（compact 文本，含可见元素树 + 最近错误） |
+| GET | \`/<id>/logs?limit=20\` | 最近 N 条 console 日志（text/plain） |
+| GET | \`/<id>/errors?limit=10\` | 最近 N 条错误（text/plain，含 source map 解析） |
+| GET | \`/<id>/network?limit=10\` | 最近 N 条网络请求（text/plain，失败请求标记 FAIL） |
+| GET | \`/<id>/element/tree?idx=N\` | DOM 元素子树（JSON，不传 idx 从根开始） |
+| POST | \`/<id>/exec\` | 在远程页面执行 JS（body: \`{ "code": "..." }\`） |
 
 ### exec 示例
 
 \`\`\`bash
+# 基本执行（返回 JSON: { success, result, error, logs, snapshot? }）
 curl -s -X POST -H "Authorization: Bearer ${PLACEHOLDER_API_KEY}" -H "Content-Type: application/json" \\
   -d '{"code":"return document.title"}' \\
-  "${PLACEHOLDER_SERVER_URL}/api/devices/<deviceId>/exec"
+  "${PLACEHOLDER_SERVER_URL}/api/agent/devices/<deviceId>/exec"
+
+# 简单查询不需要快照，加 ?snapshot=0 节省 token
+curl -s -X POST "${PLACEHOLDER_SERVER_URL}/api/agent/devices/<deviceId>/exec?snapshot=0" \\
+  -H "Authorization: Bearer ${PLACEHOLDER_API_KEY}" -H "Content-Type: application/json" \\
+  -d '{"code":"return { url: location.href, title: document.title }"}'
 \`\`\`
+
+exec 返回值说明：
+- \`success\`：布尔，是否成功
+- \`result\`：JSON 序列化后的返回值（你写的 return 值）
+- \`error\`：失败时的错误信息
+- \`logs\`：执行期间的 console 输出数组（可能为空）
+- \`snapshot\`：执行后的页面快照（加 ?snapshot=0 禁用）
 
 exec 的 code 作为 **async 函数体**执行，写 \`return\` 返回结果。
 
@@ -76,10 +89,10 @@ select #9 check=bj:北京 <bj:北京|sh:上海>  ← 下拉框（setValue 传 va
 
 ## 典型诊断流程
 
-1. \`GET /api/devices\` → 拿到在线设备列表和 id
-2. \`GET /<id>/inspect\` → 一键聚合诊断（最高效）
+1. \`GET /api/agent/devices\` → 拿到在线设备列表和 id
+2. \`GET /<id>/inspect\` → 一键聚合诊断（最高效入口）
 3. 需要深入时用 \`/<id>/logs|errors|network\` 逐项查看
-4. \`POST /<id>/exec\` → 执行诊断代码定位问题
+4. \`POST /<id>/exec?snapshot=0\` → 执行诊断代码定位问题
 
 exec 超时 10 秒，长任务需拆分。`
 

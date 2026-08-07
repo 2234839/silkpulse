@@ -16,6 +16,7 @@ import { WebSocketServer } from 'ws'
 import { DeviceRegistry } from './device-registry.js'
 import { setupWebSocket } from './ws-relay.js'
 import { handleApiRoute } from './api.js'
+import { handleAgentApiRoute } from './agent-api.js'
 import { AuthManager, ProjectStore, handleProjectApiRoute, readAndCacheBody, type AuthContext } from './auth.js'
 import { maybeGzipResponse } from './gzip.js'
 
@@ -64,7 +65,10 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
     const authCtx = auth.authorizeHttpRequest(req)
     ;(req as unknown as { __authCtx?: AuthContext }).__authCtx = authCtx
 
-    /** 1.5 先交给 API 路由 */
+    /** 1.5 先交给 agent API 路由（/api/agent/*） */
+    if (await handleAgentApiRoute(req, res, registry, authCtx)) return
+
+    /** 1.6 再交给内部 API 路由（/api/devices/* 等） */
     if (await handleApiRoute(req, res, registry, notifyDeviceListChanged, auth, authCtx)) return
 
     const url = new URL(req.url ?? '/', 'http://localhost')

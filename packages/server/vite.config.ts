@@ -9,7 +9,7 @@ export default defineConfig({
     exports: false,
     /** 强制把运行时依赖打包进 bundle，这样 Docker 镜像里不需要额外安装 */
     deps: {
-      alwaysBundle: ["ws", "@clarosight/feature-detect"],
+      alwaysBundle: ["ws", "@clarosight/feature-detect", "@clarosight/shared"],
     },
   },
   lint: {

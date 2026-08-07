@@ -28,7 +28,7 @@ const MAX_BODY = 2 * 1024 * 1024
  * - oversize=true 表示超 MAX_BODY，调用方应回 413
  * - 客户端中断（aborted/error）时 resolve 空串，不让 promise 泄漏
  */
-function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boolean }> {
+export function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boolean }> {
   return new Promise((resolve) => {
     /** Buffer 收集（兼容 gzip 二进制），超限保护基于累计字节数 */
     const chunks: Buffer[] = []
@@ -60,7 +60,7 @@ function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boole
 }
 
 /** 发送 JSON 响应（自动 gzip 压缩） */
-function sendJson(res: ServerResponse, data: unknown, status = 200) {
+export function sendJson(res: ServerResponse, data: unknown, status = 200) {
   const json = JSON.stringify(data)
   const { body, headers } = maybeGzipResponse(res.req!, json, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -71,7 +71,7 @@ function sendJson(res: ServerResponse, data: unknown, status = 200) {
 }
 
 /** 发送纯文本响应（自动 gzip 压缩） */
-function sendText(res: ServerResponse, text: string, status = 200) {
+export function sendText(res: ServerResponse, text: string, status = 200) {
   const { body, headers } = maybeGzipResponse(res.req!, text, {
     'Content-Type': 'text/plain; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
@@ -551,7 +551,7 @@ export async function execOnDevice(
  * - childCount：子元素数（前端用来决定是否显示"展开"箭头）
  * - hasShadow：该元素是 shadow host（前端展开时需请求 shadow 子树）
  */
-function buildElementTreeCode(parentIdx: number | null, shadow = false): string {
+export function buildElementTreeCode(parentIdx: number | null, shadow = false): string {
   if (shadow) {
     return `
 const host = __clarosight_getElement(${parentIdx})
@@ -616,7 +616,7 @@ return result
  *
  * 每个结果带 ancestors 路径（idx 数组），前端可据此展开树到匹配位置。
  */
-function buildElementFilterCode(query: string): string {
+export function buildElementFilterCode(query: string): string {
   const q = JSON.stringify(query.toLowerCase())
   return `
 const query = ${q}
