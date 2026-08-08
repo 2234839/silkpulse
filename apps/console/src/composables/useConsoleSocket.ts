@@ -13,6 +13,7 @@ import type {
   ErrorEntry,
   ScreenFrame,
   ScreenShareStatus,
+  MouseEventData,
   ServerToConsoleMessage,
 } from '@clarosight/shared'
 import { useAuth } from './useAuth'
@@ -56,6 +57,13 @@ export function useConsoleSocket() {
   const screenFrame = shallowRef<ScreenFrame | null>(null)
   /** 远端设备屏幕共享状态 */
   const screenShareStatus = shallowRef<ScreenShareStatus | null>(null)
+  /**
+   * 远端设备最新鼠标事件（归一化坐标 0~1）
+   *
+   * ElementPanel watch 它在画面/布局预览上渲染虚拟光标。
+   * 用 shallowRef：鼠标 move 频率高，浅比较避免深层响应式开销。
+   */
+  const deviceMouse = shallowRef<MouseEventData | null>(null)
   /**
    * 每个 storage key 的最后修改时间戳（运行期间 SDK 捕获）
    *
@@ -358,6 +366,12 @@ export function useConsoleSocket() {
           screenShareStatus.value = msg.status
         }
         break
+      case 'device-mouse':
+        /** 远端鼠标/触摸事件 → 更新 deviceMouse（ElementPanel watch 渲染虚拟光标） */
+        if (msg.deviceId === selectedDeviceId.value) {
+          deviceMouse.value = msg.mouse
+        }
+        break
     }
   }
 
@@ -392,6 +406,7 @@ export function useConsoleSocket() {
     domChangeData,
     screenFrame,
     screenShareStatus,
+    deviceMouse,
     selectedDeviceId,
     connected,
     connect,

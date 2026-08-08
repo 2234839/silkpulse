@@ -19,6 +19,7 @@ import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
 import { installStorageWatcher, setStorageWatcherActive } from './storage-watcher.js'
 import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './dom-watcher.js'
 import { startScreenShare, stopScreenShare } from './screen-capture.js'
+import { startMouseTracker } from './mouse-tracker.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
 const DEVICE_ID_KEY = '__clarosight_device_id__'
@@ -219,6 +220,9 @@ export function init(options: InitOptions): void {
 
   /** 5. 连接 server */
   connect({ url: wsUrl, info })
+
+  /** 5.0 启动鼠标采集（始终开启，轻量数据，价值高） */
+  startMouseTracker((mouse) => send({ type: 'device-mouse', mouse }))
 
   /** 5.1 异步采集 base64 icon（避免跨域 ORB/CORS 拦截，控制台直接渲染 data URL） */
   collectPageIconDataUrl().then((iconDataUrl) => {

@@ -24,6 +24,24 @@ export type DeviceMessage =
   | { type: 'exec-result'; execId: string; result: ExecResult }
   | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; changes: DomChangeData }
+  | { type: 'device-mouse'; mouse: MouseEventData }
+
+/**
+ * 远端设备鼠标/触摸事件数据（实时同步用户操作到控制台）
+ *
+ * SDK 采集 pointermove/click 事件（节流 ~50ms），上报归一化坐标 + 事件类型。
+ * 控制台在画面/布局预览上渲染虚拟光标。
+ */
+export interface MouseEventData {
+  /** 事件类型 */
+  type: 'move' | 'down' | 'up' | 'click'
+  /** 归一化 X 坐标（0~1，相对于视口宽度） */
+  x: number
+  /** 归一化 Y 坐标（0~1，相对于视口高度） */
+  y: number
+  /** 时间戳 */
+  t: number
+}
 
 /**
  * DOM 变化数据（MutationObserver 采集，Element 面板实时刷新用）
@@ -68,6 +86,7 @@ export type ServerToConsoleMessage =
   | { type: 'screen-share-status'; deviceId: string; status: ScreenShareStatus }
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
+  | { type: 'device-mouse'; deviceId: string; mouse: MouseEventData }
   /** server → 控制台的心跳响应 */
   | { type: 'pong' }
 

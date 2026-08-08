@@ -332,6 +332,16 @@ export function setupWebSocket(
             })
             break
           }
+          case 'device-mouse': {
+            /** 远端设备鼠标/触摸事件，转发给控制台渲染虚拟光标 */
+            if (!device) return
+            broadcast(deviceId, {
+              type: 'device-mouse',
+              deviceId,
+              mouse: msg.mouse,
+            })
+            break
+          }
         }
       })
 

@@ -106,6 +106,8 @@ export function stopScreenShare(): void {
     clearInterval(frameTimer)
     frameTimer = null
   }
+  /** 先回报 stopped 状态，再清空回调 */
+  statusCallback?.('stopped')
   prevCanvas = null
   diffCtx = null
   sender = null

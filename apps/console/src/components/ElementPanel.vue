@@ -37,8 +37,10 @@ const props = defineProps<{
   domChangeData?: DomChangeData | null
   /** 最新的截图帧（来自 console socket） */
   screenFrame?: import('@clarosight/shared').ScreenFrame | null
-  /** 远端设备截图状态（来自 console socket） */
+  /** 远端设备画面共享状态（来自 console socket） */
   screenShareStatus?: import('@clarosight/shared').ScreenShareStatus | null
+  /** 远端设备鼠标事件（归一化坐标 0~1） */
+  deviceMouse?: import('@clarosight/shared').MouseEventData | null
   /** 发送控制台消息到 server */
   sendConsoleMessage?: (msg: ConsoleMessage) => void
 }>()
@@ -97,34 +99,72 @@ const {
   canShowLabel,
 } = useLayoutPreview(snapshotData, sentinelRef)
 
-/** ─── 远程截图 ─── */
+/** ─── 远程画面 ─── */
 /** 帧合成器实例 */
 let compositor: FrameCompositor | null = null
-/** 截图画布 ref */
+/** 画面 canvas ref */
 const screenCanvasRef = ref<HTMLCanvasElement | null>(null)
 
-/** 截图状态文本（由远端 SDK 上报） */
+/** 实时画面状态文本（由远端 SDK 上报） */
 const screenStatusText = computed(() => {
   switch (props.screenShareStatus) {
-    case 'sharing': return '截图进行中'
+    case 'sharing': return '实时中'
     case 'stopped': return '已停止'
-    case 'error': return '截图出错'
+    case 'error': return '出错'
     default: return null
   }
 })
 
-/** 截图是否活跃 */
+/** 实时画面是否活跃 */
 const isScreenActive = computed(() => props.screenShareStatus === 'sharing')
 
-/** 开始截图 */
+/** 开始实时画面 */
 function startScreenShare() {
   props.sendConsoleMessage?.({ type: 'start-screen-share', deviceId: props.deviceId })
 }
 
-/** 停止截图 */
+/** 停止实时画面 */
 function stopScreenShare() {
   props.sendConsoleMessage?.({ type: 'stop-screen-share', deviceId: props.deviceId })
   compositor?.clear()
+}
+
+/** ─── 一次性快照 ─── */
+/** 快照 loading */
+const snapshotLoading = ref(false)
+/** 快照图片 URL（blob） */
+const snapshotUrl = ref<string | null>(null)
+/** 快照放大 dialog */
+const snapshotDialogVisible = ref(false)
+
+/**
+ * 截取远端页面当前视口的一次性快照
+ *
+ * 调用 /api/devices/:id/screenshot 接口（不传 idx = 整个 viewport），
+ * 返回二进制图片直接显示。每次点击覆盖上一张。
+ */
+async function takeSnapshot() {
+  if (!props.deviceId) return
+  /** 清理旧快照 */
+  if (snapshotUrl.value) {
+    URL.revokeObjectURL(snapshotUrl.value)
+    snapshotUrl.value = null
+  }
+  snapshotLoading.value = true
+  try {
+    const res = await apiFetch(`/api/devices/${props.deviceId}/screenshot?format=jpg&quality=0.8&scale=1`)
+    if (!res.ok) {
+      const text = await res.text()
+      console.error('[快照失败]', text)
+      return
+    }
+    const blob = await res.blob()
+    snapshotUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    console.error('[快照异常]', err)
+  } finally {
+    snapshotLoading.value = false
+  }
 }
 
 /** watch 屏幕帧 → 合成到 canvas */
@@ -136,6 +176,56 @@ watch(
       compositor = new FrameCompositor(screenCanvasRef.value)
     }
     compositor.drawFrame(frame)
+  },
+)
+
+/** ─── 远端鼠标光标 ─── */
+/** 鼠标点击涟漪动画状态 */
+const mouseClickFlash = ref(0)
+/** 画面区域的 ref（用于计算光标像素位置） */
+const screenAreaRef = ref<HTMLDivElement | null>(null)
+/** 布局预览区域的 ref */
+const previewAreaRef = ref<HTMLDivElement | null>(null)
+
+/**
+ * 远端鼠标在画面区域的像素位置
+ *
+ * deviceMouse 坐标是归一化的（0~1），乘以画面区域尺寸得到像素。
+ */
+const screenCursorPos = computed(() => {
+  const m = props.deviceMouse
+  if (!m || !screenAreaRef.value) return null
+  const rect = screenAreaRef.value.getBoundingClientRect()
+  return {
+    x: m.x * rect.width,
+    y: m.y * rect.height,
+    type: m.type,
+  }
+})
+
+/**
+ * 远端鼠标在布局预览区域的像素位置
+ *
+ * 布局预览的 canvas 尺寸 = viewport 尺寸 × scale，
+ * 归一化坐标乘以 canvas 尺寸即可定位。
+ */
+const previewCursorPos = computed(() => {
+  const m = props.deviceMouse
+  if (!m) return null
+  return {
+    x: m.x * canvasWidth.value,
+    y: m.y * canvasHeight.value,
+    type: m.type,
+  }
+})
+
+/** watch 鼠标 click 事件 → 触发涟漪动画 */
+watch(
+  () => props.deviceMouse,
+  (m) => {
+    if (m?.type === 'click') {
+      mouseClickFlash.value++
+    }
   },
 )
 
@@ -743,7 +833,7 @@ onMounted(() => {
             @click="leftView = 'screen'"
             class="px-2 py-0.5 text-xs font-medium transition-colors"
             :class="leftView === 'screen' ? 'bg-blue-600 text-white' : 'bg-elevated text-muted hover:text-primary'"
-          >截图</button>
+          >画面</button>
       </div>
       <button
         v-if="leftView === 'tree'"
@@ -1050,7 +1140,27 @@ onMounted(() => {
             <div
               class="relative mx-auto bg-white dark:bg-gray-900 border border-base max-w-full"
               :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px', marginTop: '8px', marginBottom: '8px' }"
+              ref="previewAreaRef"
             >
+              <!-- 远端鼠标虚拟光标 -->
+              <div
+                v-if="previewCursorPos"
+                class="absolute pointer-events-none z-50"
+                :style="{
+                  left: previewCursorPos.x + 'px',
+                  top: previewCursorPos.y + 'px',
+                  transform: 'translate(-50%, -50%)',
+                }"
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" class="drop-shadow-md">
+                  <path d="M3 3 L3 16 L7 12 L10 18 L12 17 L9 11 L14 11 Z" fill="white" stroke="black" stroke-width="1"/>
+                </svg>
+                <div
+                  v-if="mouseClickFlash > 0 && previewCursorPos.type === 'click'"
+                  :key="mouseClickFlash"
+                  class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-blue-500 animate-ping"
+                ></div>
+              </div>
               <!-- 元素渲染：优先用真实视觉样式，fallback 到色块分类 -->
               <!-- 点击穿透：画布统一处理 click，通过 elementsFromPoint 找最内层元素 -->
               <div
@@ -1092,22 +1202,31 @@ onMounted(() => {
       </div>
     </template>
 
-    <!-- ═══ 截图模式：点击按钮截取远端页面 ═══ -->
+    <!-- ═══ 画面模式：实时画面 + 一次性快照 ═══ -->
     <template v-if="leftView === 'screen'">
       <div class="flex-1 flex flex-col overflow-hidden">
         <!-- 控制栏 -->
         <div class="px-3 py-2 border-b border-base bg-surface flex items-center justify-between gap-2 flex-shrink-0">
           <div class="flex items-center gap-2">
+            <!-- 一次性快照按钮 -->
+            <button
+              @click="takeSnapshot"
+              :disabled="snapshotLoading"
+              class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              title="截取远端页面当前视口（一次性）"
+            >📸 {{ snapshotLoading ? '截图中...' : '快照' }}</button>
+            <!-- 实时画面开关 -->
+            <div class="w-px h-4 bg-base"></div>
             <button
               v-if="!isScreenActive"
               @click="startScreenShare"
-              class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
-            >开始截图</button>
+              class="px-3 py-1 bg-elevated text-xs rounded hover:bg-base transition-colors"
+            >▶ 实时画面</button>
             <button
               v-else
               @click="stopScreenShare"
               class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
-            >停止截图</button>
+            >⏹ 停止实时</button>
             <span v-if="screenStatusText" class="flex items-center gap-1 text-xs" :class="props.screenShareStatus === 'sharing' ? 'text-green-600 dark:text-green-400' : 'text-muted'">
               <span v-if="isScreenActive" class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
               {{ screenStatusText }}
@@ -1116,23 +1235,53 @@ onMounted(() => {
         </div>
 
         <!-- 画面显示区 -->
-        <div class="flex-1 overflow-auto flex items-center justify-center bg-gray-900/5 dark:bg-black/20">
-          <div v-if="!isScreenActive && !screenFrame" class="text-center py-12 px-4">
-            <div class="text-4xl mb-3 opacity-30">📸</div>
-            <p class="text-sm text-muted mb-1">点击「开始截图」捕获远端页面</p>
+        <div class="flex-1 overflow-auto flex items-center justify-center bg-gray-900/5 dark:bg-black/20 relative" ref="screenAreaRef">
+          <!-- 远端鼠标虚拟光标 -->
+          <div
+            v-if="screenCursorPos"
+            class="absolute pointer-events-none z-50"
+            :style="{
+              left: screenCursorPos.x + 'px',
+              top: screenCursorPos.y + 'px',
+              transform: 'translate(-50%, -50%)',
+            }"
+          >
+            <svg width="24" height="24" viewBox="0 0 20 20" class="drop-shadow-lg">
+              <path d="M3 3 L3 16 L7 12 L10 18 L12 17 L9 11 L14 11 Z" fill="white" stroke="black" stroke-width="1"/>
+            </svg>
+            <div
+              v-if="mouseClickFlash > 0 && screenCursorPos.type === 'click'"
+              :key="mouseClickFlash"
+              class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border-2 border-blue-500 animate-ping"
+            ></div>
           </div>
+          <!-- 有实时画面时优先显示 -->
           <canvas
-            v-else
+            v-if="isScreenActive || screenFrame"
             ref="screenCanvasRef"
             class="max-w-full max-h-full shadow-lg rounded"
             :style="{ objectFit: 'contain' }"
           ></canvas>
+          <!-- 有快照时显示 -->
+          <img
+            v-else-if="snapshotUrl"
+            :src="snapshotUrl"
+            @click="snapshotDialogVisible = true"
+            class="max-w-full max-h-full shadow-lg rounded cursor-zoom-in hover:opacity-90 transition-opacity"
+            alt="页面快照"
+          />
+          <!-- 空状态 -->
+          <div v-else class="text-center py-12 px-4">
+            <div class="text-4xl mb-3 opacity-30">📸</div>
+            <p class="text-sm text-muted mb-1">点击「📸 快照」截取当前页面</p>
+            <p class="text-xs text-faint">或开启「实时画面」持续查看</p>
+          </div>
         </div>
       </div>
     </template>
     </div>
 
-    <!-- ═══ 截图放大 Dialog ═══ -->
+    <!-- ═══ 快照放大 Dialog ═══ -->
     <Teleport to="body">
       <div
         v-if="screenshotDialogVisible"
