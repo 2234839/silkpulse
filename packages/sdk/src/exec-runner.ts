@@ -157,10 +157,17 @@ export function installHelpers(): void {
       /**
        * 如果目标状态和当前状态相同，.click() 会反而在 checkbox 上取消勾选。
        * 此时需要先重置为反状态，再 .click() 让浏览器切到目标状态。
-       * radio 不存在此问题（.click() 只会选中不会取消）。
        */
       if (input.checked === shouldCheck && el.type === 'checkbox') {
         setNativeChecked(input, !shouldCheck)
+      }
+      /**
+       * radio 如果已经选中，.click() 无法改变状态，框架检测不到变化。
+       * 先手动取消选中触发 onChange(checked=false)，然后 .click() 重新选中触发 onChange(checked=true)。
+       */
+      if (el.type === 'radio' && input.checked) {
+        setNativeChecked(input, false)
+        input.dispatchEvent(new Event('change', { bubbles: true }))
       }
       /**
        * radio 互斥：浏览器 .click() 的 pre-click activation 会自动取消同组其他 radio，
@@ -253,11 +260,23 @@ export function installHelpers(): void {
    * 用于诊断 hover 展开的下拉菜单、tooltip、CSS :hover 样式变化。
    * CSS :hover 伪类无法通过 JS 直接触发，但 mouseover/mouseenter 事件能
    * 覆盖依赖 JS 的 hover 逻辑（大部分框架组件的下拉/tooltip）。
+   *
+   * 连续 hover 不同元素时，会对上一个 hovered 元素先触发 mouseout/mouseleave，
+   * 模拟真实鼠标移动行为（React onMouseLeave / Vue @mouseleave 需要此事件）。
    */
   w.__silkpulse_hover = (idx: number): boolean => {
     const el = getElement(idx)
     if (!el) return false
     const target = el as HTMLElement
+
+    /** 对上一个 hovered 元素触发离开事件 */
+    const prev = (w as unknown as { __silkpulse_lastHover?: Element }).__silkpulse_lastHover
+    if (prev && prev !== target && prev.isConnected) {
+      prev.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, cancelable: true, relatedTarget: target }))
+      prev.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false, cancelable: true, relatedTarget: target }))
+    }
+    ;(w as unknown as { __silkpulse_lastHover?: Element }).__silkpulse_lastHover = target
+
     target.focus?.()
     target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }))
     target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }))

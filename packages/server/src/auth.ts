@@ -434,15 +434,15 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 限流检查
+    // 尝试超管密钥（超管不受限流影响）
+    if (this.adminKey && safeEqual(token, this.adminKey)) {
+      return { role: 'admin' }
+    }
+
+    // 限流检查（仅对非超管请求）
     const ip = getClientIp(req)
     if (!this.rateLimiter.check(ip)) {
       return { role: 'anonymous' }
-    }
-
-    // 尝试超管密钥
-    if (this.adminKey && safeEqual(token, this.adminKey)) {
-      return { role: 'admin' }
     }
 
     // 尝试项目密钥（包括 Playground 项目）

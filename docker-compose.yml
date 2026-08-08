@@ -9,5 +9,6 @@ services:
       - ./data:/data
     environment:
       - CLAROSIGHT_ADMIN_KEY=${CLAROSIGHT_ADMIN_KEY:-}
+      - SILKPULSE_ADMIN_KEY=${CLAROSIGHT_ADMIN_KEY:-}
     restart: unless-stopped
     mem_limit: 512m

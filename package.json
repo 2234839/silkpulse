@@ -12,6 +12,7 @@
     "start": "vp run @silkpulse/server#start",
     "typecheck": "pnpm exec tsc --noEmit -p packages/shared/tsconfig.json && pnpm exec tsc --noEmit -p packages/sdk/tsconfig.json && pnpm exec tsc --noEmit -p packages/server/tsconfig.json",
     "test": "node scripts/headless-test.mjs",
+    "test:events": "node scripts/framework-event-test.mjs",
     "check": "vp check",
     "docker:build": "pnpm build && docker build -t gs/silkpulse:latest .",
     "docker:run": "docker run --rm -p 8080:8080 gs/silkpulse:latest"
