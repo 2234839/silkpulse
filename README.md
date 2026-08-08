@@ -4,6 +4,11 @@
 
 定位 = PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。
 
+## 在线体验
+
+- **控制台**：[https://silkpulse.heartstack.space](https://silkpulse.heartstack.space)（输入密钥或以访客身份登录）
+- **测试页**（已接入 SDK，可直接在控制台中看到）：[https://silkpulse.heartstack.space/test-page.html](https://silkpulse.heartstack.space/test-page.html)
+
 ## 为什么用 silkpulse
 
 用户报告"线上页面白屏""手机上打不开"时，开发者无法用本地 DevTools 调试远程设备。silkpulse 让 **AI agent 直接接入远程页面**——看页面结构、读 console/网络/错误、执行诊断代码、操作元素，完成"远程诊断→操作→验证"的完整闭环。

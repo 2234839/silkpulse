@@ -17,7 +17,7 @@
  *   SDK 的 exec 会捕获这些 console.log 作为 logs 返回。
  */
 
-const SERVER = process.env.SILKPULSE_SERVER ?? 'https://clarosight.heartstack.space'
+const SERVER = process.env.SILKPULSE_SERVER ?? 'https://silkpulse.heartstack.space'
 const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY ?? '9bc0af165928751a919613f607a2de17247c9237c0a18d24'
 
 const PASS = '\x1b[32m✓\x1b[0m'
