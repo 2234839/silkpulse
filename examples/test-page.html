@@ -134,8 +134,8 @@
     document.cookie = 'cs-auth=cookie-value; path=/'
   </script>
 
-  <!-- clarosight SDK 注入：data-server 指定 server 地址 -->
-  <script src="http://localhost:8080/sdk.js" data-server="http://localhost:8080"></script>
+  <!-- clarosight SDK 注入：使用相对路径，自动适配部署域名 -->
+  <script src="/sdk.js"></script>
   <script>
     const logEl = document.getElementById('log')
     const show = (msg) => { logEl.textContent = msg }

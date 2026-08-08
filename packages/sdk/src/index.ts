@@ -315,7 +315,8 @@ export function init(options: InitOptions): void {
  */
 function autoInit(): void {
   const script = document.currentScript as HTMLScriptElement | null
-  const server = script?.dataset.server
+  /** 优先用 data-server；未指定时从 script.src 推导（同源部署场景） */
+  const server = script?.dataset.server ?? (script?.src ? new URL(script.src).origin : '')
   if (!server) return
 
   /** data-tags 用逗号分隔，data-note 为单行备注 */
