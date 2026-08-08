@@ -6,7 +6,7 @@
  * 平衡 AI 复现请求所需信息与隐私/体积。
  */
 
-import type { NetworkEntry, WsFrame, SseEvent } from '@clarosight/shared'
+import type { NetworkEntry, WsFrame, SseEvent } from '@silkpulse/shared'
 
 type NetworkSink = (entry: NetworkEntry) => void
 /** WebSocket 帧追加回调（seq 关联连接条目，frame 新帧） */
@@ -377,7 +377,7 @@ function installXhrHook(sink: NetworkSink): void {
   const originalSetHeader = Xhr.prototype.setRequestHeader
 
   /** 在 xhr 实例上挂载采集上下文（用 Symbol 避免冲突） */
-  const ctxKey = Symbol('clarosight-ctx')
+  const ctxKey = Symbol('silkpulse-ctx')
 
   interface XhrCtx {
     url: string

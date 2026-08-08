@@ -5,7 +5,7 @@
  * 色块样式、颜色分类等。供 ElementPanel 的布局预览视图使用。
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, type Ref } from 'vue'
-import type { SnapshotData, SnapshotElement } from '@clarosight/shared'
+import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
 
 /** 容器标签 —— 只画虚线边框，不填充背景色 */
 const CONTAINER_TAGS = new Set([

@@ -9,7 +9,7 @@
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入。
  */
 import { ref, computed, watch } from 'vue'
-import type { NetworkEntry } from '@clarosight/shared'
+import type { NetworkEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 import ObjectInspector from './ObjectInspector.vue'
 

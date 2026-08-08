@@ -8,7 +8,7 @@
  * const compositor = new FrameCompositor(canvas)
  * compositor.drawFrame(frame)  // 收到帧时调用
  */
-import type { ScreenFrame } from '@clarosight/shared'
+import type { ScreenFrame } from '@silkpulse/shared'
 
 export class FrameCompositor {
   private ctx: CanvasRenderingContext2D | null = null

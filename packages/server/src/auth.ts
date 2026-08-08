@@ -2,7 +2,7 @@
  * 安全鉴权模块 —— 项目管理 + 密钥验证 + 请求鉴权
  *
  * 鉴权架构：
- * - 超管密钥 (Admin Key)：环境变量 CLAROSIGHT_ADMIN_KEY 配置，全量权限
+ * - 超管密钥 (Admin Key)：环境变量 SILKPULSE_ADMIN_KEY 配置，全量权限
  * - 项目 (Project)：每个项目有唯一 projectId + apiKey，SDK 接入时携带
  * - 设备连接鉴权：WebSocket 连接 URL query 中携带 projectId + apiKey
  * - API 鉴权：Authorization: Bearer <key>（超管密钥或项目密钥）
@@ -137,7 +137,7 @@ class RateLimiter {
 /**
  * 项目管理器 —— 负责项目的 CRUD + 密钥验证 + 持久化
  *
- * 数据存储为 JSON 文件（~/.clarosight/projects.json 或指定路径）。
+ * 数据存储为 JSON 文件（~/.silkpulse/projects.json 或指定路径）。
  * 适合个人/小团队场景，无需数据库依赖。
  */
 export class ProjectStore {
@@ -352,7 +352,7 @@ export class AuthManager {
   private cleanupTimer: ReturnType<typeof setInterval>
 
   constructor(projectStore: ProjectStore) {
-    this.adminKey = process.env.CLAROSIGHT_ADMIN_KEY
+    this.adminKey = process.env.SILKPULSE_ADMIN_KEY
     this.projects = projectStore
 
     /** Playground 游客模式：初始化时创建/确保存在一个真实的公开项目 */
@@ -373,9 +373,9 @@ export class AuthManager {
     return !!this.adminKey
   }
 
-  /** Playground 密钥（环境变量 CLAROSIGHT_PLAYGROUND_KEY 配置） */
+  /** Playground 密钥（环境变量 SILKPULSE_PLAYGROUND_KEY 配置） */
   get playgroundKey(): string | undefined {
-    return process.env.CLAROSIGHT_PLAYGROUND_KEY
+    return process.env.SILKPULSE_PLAYGROUND_KEY
   }
 
   /** 是否启用了 Playground（游客访问）模式 */
@@ -390,7 +390,7 @@ export class AuthManager {
   static readonly PLAYGROUND_PROJECT_NAME = 'Playground'
 
   /**
-   * 确保 Playground 项目存在：如果配置了 CLAROSIGHT_PLAYGROUND_KEY，
+   * 确保 Playground 项目存在：如果配置了 SILKPULSE_PLAYGROUND_KEY，
    * 就创建一个真实的公开项目（固定 ID + 固定名称），
    * apiKeyHash = hash(playgroundKey)。
    * 这样游客的权限隔离、设备归属、接入代码全部复用现有项目逻辑，零特殊处理。

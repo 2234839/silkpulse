@@ -8,7 +8,7 @@
  * 1. 用户输入 → 防抖 150ms → 通过 exec 通道在远程设备执行探测代码
  * 2. root 模式（如输入 "loc"）：探测 window 所有可访问的全局变量名，过滤匹配 prefix 的
  * 3. property 模式（如输入 "document.quer"）：获取 document 的所有属性，过滤匹配 prefix 的
- * 4. 静态词表（JS 关键字 + 内置全局 + clarosight 辅助函数）同步即时展示
+ * 4. 静态词表（JS 关键字 + 内置全局 + silkpulse 辅助函数）同步即时展示
  *
  * 缓存策略：property 模式按 expr 缓存（同一对象不重复探测），root 模式每次实时。
  */
@@ -54,22 +54,22 @@ const JS_GLOBALS = [
   'getComputedStyle', 'structuredClone',
 ]
 
-/** clarosight 辅助函数 */
-const CLAROSIGHT_HELPERS = [
-  '__clarosight_click', '__clarosight_setValue', '__clarosight_type',
-  '__clarosight_pressKey', '__clarosight_scroll', '__clarosight_scrollIntoView',
-  '__clarosight_hover', '__clarosight_wait', '__clarosight_snapshot',
+/** silkpulse 辅助函数 */
+const SILKPULSE_HELPERS = [
+  '__silkpulse_click', '__silkpulse_setValue', '__silkpulse_type',
+  '__silkpulse_pressKey', '__silkpulse_scroll', '__silkpulse_scrollIntoView',
+  '__silkpulse_hover', '__silkpulse_wait', '__silkpulse_snapshot',
 ]
 
 /** 静态补全项 */
 const STATIC_ITEMS: CompletionItem[] = [
   ...JS_KEYWORDS.map((k) => ({ text: k, label: k, kind: 'keyword' as const })),
   ...JS_GLOBALS.map((g) => ({ text: g, label: g, kind: 'global' as const, detail: '内置全局' })),
-  ...CLAROSIGHT_HELPERS.map((h) => ({ text: h, label: h, kind: 'helper' as const, detail: 'clarosight 辅助函数' })),
+  ...SILKPULSE_HELPERS.map((h) => ({ text: h, label: h, kind: 'helper' as const, detail: 'silkpulse 辅助函数' })),
 ]
 
 /** 内置全局集合（探测时过滤掉这些） */
-const BUILTIN_SET = new Set([...JS_GLOBALS, ...CLAROSIGHT_HELPERS, 'window', 'globalThis', 'self', 'top', 'parent', 'frames'])
+const BUILTIN_SET = new Set([...JS_GLOBALS, ...SILKPULSE_HELPERS, 'window', 'globalThis', 'self', 'top', 'parent', 'frames'])
 
 /* ==================== 探测代码生成（eval 模式，不需要 return） ==================== */
 

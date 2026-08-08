@@ -10,7 +10,7 @@
  * - 采集始终开启（不按 watcher 控制），因为鼠标数据轻量且价值高
  */
 
-import type { MouseEventData } from '@clarosight/shared'
+import type { MouseEventData } from '@silkpulse/shared'
 
 /** move 事件最小间隔 ms */
 const MOVE_THROTTLE = 50

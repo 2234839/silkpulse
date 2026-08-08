@@ -4,7 +4,7 @@
  * 将 SnapshotElement 的 rect + style 转换为 CSS 属性对象，
  * 供 Vue/React/原生 DOM 任意渲染层使用。
  */
-import type { SnapshotElement } from '@clarosight/shared'
+import type { SnapshotElement } from '@silkpulse/shared'
 
 /** 容器标签 —— 只画虚线边框，不填充背景色 */
 const CONTAINER_TAGS = new Set([

@@ -18,7 +18,7 @@ import type {
   ServerToConsoleMessage,
   ConsoleMessage,
   DeviceInfo,
-} from '@clarosight/shared'
+} from '@silkpulse/shared'
 
 /** 生成设备 ID（8 位十六进制） */
 function generateDeviceId(): string {

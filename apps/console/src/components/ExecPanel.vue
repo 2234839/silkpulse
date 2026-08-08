@@ -9,7 +9,7 @@
  * 执行历史通过 useExecHistory() 持久化到 localStorage。
  */
 import { ref, nextTick } from 'vue'
-import type { SerializedValue } from '@clarosight/shared'
+import type { SerializedValue } from '@silkpulse/shared'
 import { useExecHistory } from '../composables/useExecHistory'
 import { apiFetch } from '../utils/api'
 import ObjectInspector from './ObjectInspector.vue'
@@ -173,7 +173,7 @@ function handleMultilineIndent(
           >
             {{ execRunning ? '执行中...' : '执行 (Ctrl+↵)' }}
           </button>
-          <span class="text-xs text-faint">Tab 缩进 · 辅助函数：__clarosight_click / setValue / type / wait / snapshot / sourcemap</span>
+          <span class="text-xs text-faint">Tab 缩进 · 辅助函数：__silkpulse_click / setValue / type / wait / snapshot / sourcemap</span>
         </div>
       </div>
       <!-- 结果展示区 -->

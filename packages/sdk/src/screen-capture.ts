@@ -26,7 +26,7 @@
  * - 从原始画面裁剪包围盒区域编码成 JPEG
  */
 import { snapdom } from '@zumer/snapdom'
-import type { ScreenFrame, ScreenShareStatus } from '@clarosight/shared'
+import type { ScreenFrame, ScreenShareStatus } from '@silkpulse/shared'
 
 /** 抓帧间隔 ms（2fps，截图比视频流重，用较低帧率） */
 const FRAME_INTERVAL = 500
@@ -232,7 +232,7 @@ async function captureFrame(): Promise<void> {
     prevCanvas = curCanvas
   } catch (e) {
     /** 截图失败（可能跨域资源 taint），静默跳过本帧 */
-    console.warn('[clarosight] 截图失败:', e)
+    console.warn('[silkpulse] 截图失败:', e)
   } finally {
     capturing = false
   }

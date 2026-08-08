@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clarosight 测试页</title>
+  <title>silkpulse 测试页</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; }
     .demo { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 16px 0; }
@@ -14,8 +14,8 @@
   </style>
 </head>
 <body>
-  <h1>clarosight 测试页</h1>
-  <p>这个页面注入了 clarosight SDK，用来验证远程调试能力。</p>
+  <h1>silkpulse 测试页</h1>
+  <p>这个页面注入了 silkpulse SDK，用来验证远程调试能力。</p>
 
   <div class="demo">
     <h3>交互元素</h3>
@@ -51,7 +51,7 @@
     <div id="log">（点击按钮试试）</div>
   </div>
 
-  <!-- clarosight SDK 注入：data-server 指定 server 地址 -->
+  <!-- silkpulse SDK 注入：data-server 指定 server 地址 -->
   <script src="http://localhost:8081/sdk.js" data-server="http://localhost:8081"></script>
   <script>
     const logEl = document.getElementById('log')
@@ -102,16 +102,16 @@
     /** error：运行时错误（同步抛出，触发 window error 事件） */
     document.getElementById('runtime-error-btn').addEventListener('click', () => {
       show('已触发运行时错误')
-      setTimeout(() => { throw new Error('clarosight 测试：同步运行时错误') }, 0)
+      setTimeout(() => { throw new Error('silkpulse 测试：同步运行时错误') }, 0)
     })
 
     /** error：未处理的 Promise rejection */
     document.getElementById('promise-error-btn').addEventListener('click', () => {
       show('已触发 Promise 错误')
-      Promise.reject(new Error('clarosight 测试：未处理的 Promise 错误'))
+      Promise.reject(new Error('silkpulse 测试：未处理的 Promise 错误'))
     })
 
-    console.info('clarosight 测试页已加载')
+    console.info('silkpulse 测试页已加载')
   </script>
 </body>
 </html>

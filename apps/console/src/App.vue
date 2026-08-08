@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * clarosight 控制台主组件
+ * silkpulse 控制台主组件
  *
  * 布局：左侧设备列表，右侧选中设备的 console / network / errors / snapshot 面板
  *
@@ -208,7 +208,7 @@ onMounted(async () => {
         @click="sidebarOpen = true"
         title="打开设备列表"
       >☰</button>
-      <h1 class="text-base sm:text-lg font-semibold flex-shrink-0">clarosight</h1>
+      <h1 class="text-base sm:text-lg font-semibold flex-shrink-0">silkpulse</h1>
       <!-- 副标题：窄屏隐藏 -->
       <span class="hidden lg:inline text-xs text-gray-400">远程设备调试控制台</span>
       <!-- 游客模式标识 -->

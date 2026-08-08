@@ -71,7 +71,7 @@ async function handleGuestLogin() {
     <div class="w-96 max-w-full mx-4 space-y-6">
       <div class="text-center">
         <div class="text-5xl mb-3">🔐</div>
-        <h1 class="text-2xl font-bold mb-1">clarosight</h1>
+        <h1 class="text-2xl font-bold mb-1">silkpulse</h1>
         <p class="text-gray-400 text-sm">输入密钥以访问控制台</p>
       </div>
       <div class="space-y-3">

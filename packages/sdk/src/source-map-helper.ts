@@ -3,13 +3,13 @@
  *
  * 两种用法：
  * 1. 错误自动解析：error-catcher 捕获到带 source/line/col 的错误，异步解析填充 mapped
- * 2. exec 辅助函数：AI 主动调用 __clarosight_sourcemap(line, col, sourceUrl)
+ * 2. exec 辅助函数：AI 主动调用 __silkpulse_sourcemap(line, col, sourceUrl)
  *
  * 浏览器端解析的合理性：被调试页面同源可访问自己的 .map 文件（server 端通常无法访问线上 .map）
  * 解析失败静默（map 不公开 / 跨域 / 无 map 时），绝不阻塞错误采集主流程
  */
 
-import type { SourceMapPosition } from '@clarosight/shared'
+import type { SourceMapPosition } from '@silkpulse/shared'
 import { parseSourceMap, originalPositionFor, type SourceMapData } from './source-map-consumer.js'
 
 /** source map 缓存：mapUrl → 解析结果（避免重复 fetch + 解析同一文件） */

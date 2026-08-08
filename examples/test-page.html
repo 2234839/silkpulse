@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clarosight 测试页</title>
+  <title>silkpulse 测试页</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; }
     .demo { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 16px 0; }
@@ -14,8 +14,8 @@
   </style>
 </head>
 <body>
-  <h1>clarosight 测试页</h1>
-  <p>这个页面注入了 clarosight SDK，用来验证远程调试能力。</p>
+  <h1>silkpulse 测试页</h1>
+  <p>这个页面注入了 silkpulse SDK，用来验证远程调试能力。</p>
 
   <div class="demo">
     <h3>交互元素</h3>
@@ -73,7 +73,7 @@
   </div>
 
   <div class="demo">
-    <h3>滚动 + hover（验证 __clarosight_scroll / __clarosight_hover）</h3>
+    <h3>滚动 + hover（验证 __silkpulse_scroll / __silkpulse_hover）</h3>
     <div id="scroll-box" style="height:100px;overflow:auto;border:1px solid #ccc;padding:8px;">
       <div id="scroll-content">
         <p>滚动行 1</p><p>滚动行 2</p><p>滚动行 3</p>
@@ -84,7 +84,7 @@
     <button id="hover-btn">悬停看我</button>
     <div id="hover-result" style="display:none;color:#059669;font-weight:bold;">已悬停 ✓</div>
 
-    <h3>键盘交互（验证 __clarosight_pressKey）</h3>
+    <h3>键盘交互（验证 __silkpulse_pressKey）</h3>
     <input id="keyboard-input" placeholder="聚焦后按 Enter 提交 / Escape 清空" style="width:100%;padding:6px;margin-top:8px;">
     <div id="keyboard-result" style="margin-top:6px;color:#7c3aed;font-weight:bold;"></div>
   </div>
@@ -126,15 +126,15 @@
     <div id="log">（点击按钮试试）</div>
   </div>
 
-  <!-- 初始化 storage 测试数据（验证 __clarosight_storage 查询能力） -->
+  <!-- 初始化 storage 测试数据（验证 __silkpulse_storage 查询能力） -->
   <script>
     localStorage.setItem('cs-token', 'test-token-abc123')
-    localStorage.setItem('cs-user', JSON.stringify({ id: 1, name: 'clarosight' }))
+    localStorage.setItem('cs-user', JSON.stringify({ id: 1, name: 'silkpulse' }))
     sessionStorage.setItem('cs-tab', 'session-data')
     document.cookie = 'cs-auth=cookie-value; path=/'
   </script>
 
-  <!-- clarosight SDK 注入：使用相对路径，自动适配部署域名 -->
+  <!-- silkpulse SDK 注入：使用相对路径，自动适配部署域名 -->
   <script src="/sdk.js"></script>
   <script>
     const logEl = document.getElementById('log')
@@ -194,7 +194,7 @@
 
     /**
      * 自定义组件：div[role=button] 监听 mousedown 而非 click。
-     * 模拟线上常见的自定义按钮组件（只绑 mousedown/mouseup），验证 __clarosight_click
+     * 模拟线上常见的自定义按钮组件（只绑 mousedown/mouseup），验证 __silkpulse_click
      * 触发完整鼠标事件序列而非只 .click()，否则对此类组件无效。
      */
     document.getElementById('custom-btn').addEventListener('mousedown', () => {
@@ -206,7 +206,7 @@
       console.log('选择城市:', e.target.value)
     })
 
-    /** checkbox/radio change：验证 __clarosight_setValue 对 checkbox/radio 的支持 */
+    /** checkbox/radio change：验证 __silkpulse_setValue 对 checkbox/radio 的支持 */
     document.getElementById('agree').addEventListener('change', (e) => {
       console.log('同意条款:', e.target.checked ? '已同意' : '未同意')
     })
@@ -216,7 +216,7 @@
       })
     })
 
-    /** hover：mouseover 显示提示（验证 __clarosight_hover 触发 hover 逻辑） */
+    /** hover：mouseover 显示提示（验证 __silkpulse_hover 触发 hover 逻辑） */
     document.getElementById('hover-btn').addEventListener('mouseover', () => {
       document.getElementById('hover-result').style.display = 'block'
       console.log('hover 触发')
@@ -234,7 +234,7 @@
         : '无匹配结果'
     })
 
-    /** 键盘交互：Enter 提交、Escape 清空（验证 __clarosight_pressKey 触发 keydown） */
+    /** 键盘交互：Enter 提交、Escape 清空（验证 __silkpulse_pressKey 触发 keydown） */
     const kbInput = document.getElementById('keyboard-input')
     const kbResult = document.getElementById('keyboard-result')
     kbInput.addEventListener('keydown', (e) => {
@@ -296,7 +296,7 @@
 
     /** network：POST 请求（带请求体，验证 reqBody/resBody 采集） */
     document.getElementById('post-btn').addEventListener('click', async () => {
-      const payload = { name: 'clarosight', action: 'test', ts: Date.now() }
+      const payload = { name: 'silkpulse', action: 'test', ts: Date.now() }
       console.log('POST 发起: /api/echo', payload)
       try {
         const res = await fetch('/api/echo', {
@@ -350,13 +350,13 @@
     /** error：运行时错误（同步抛出，触发 window error 事件） */
     document.getElementById('runtime-error-btn').addEventListener('click', () => {
       show('已触发运行时错误')
-      setTimeout(() => { throw new Error('clarosight 测试：同步运行时错误') }, 0)
+      setTimeout(() => { throw new Error('silkpulse 测试：同步运行时错误') }, 0)
     })
 
     /** error：未处理的 Promise rejection */
     document.getElementById('promise-error-btn').addEventListener('click', () => {
       show('已触发 Promise 错误')
-      Promise.reject(new Error('clarosight 测试：未处理的 Promise 错误'))
+      Promise.reject(new Error('silkpulse 测试：未处理的 Promise 错误'))
     })
 
     /**
@@ -365,7 +365,7 @@
      */
     document.getElementById('spam-log-btn').addEventListener('click', () => {
       for (let i = 0; i < 10; i++) {
-        console.log('clarosight spam: 重复日志测试')
+        console.log('silkpulse spam: 重复日志测试')
       }
     })
 
@@ -377,7 +377,7 @@
       const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/test-ws`)
       ws.addEventListener('open', () => {
         console.log('WS 已连接，发送消息')
-        ws.send('clarosight ws 测试消息')
+        ws.send('silkpulse ws 测试消息')
       })
       ws.addEventListener('message', (e) => {
         console.log('WS 收到 echo:', e.data)
@@ -418,7 +418,7 @@
     /** 设置 checkbox 半选状态（indeterminate 只能通过 JS 设置，HTML 属性无效） */
     document.getElementById('ind-cb').indeterminate = true
 
-    console.info('clarosight 测试页已加载')
+    console.info('silkpulse 测试页已加载')
   </script>
 </body>
 </html>

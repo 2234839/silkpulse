@@ -11,7 +11,7 @@
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入。
  */
 import { ref, computed, useTemplateRef, watch, nextTick } from 'vue'
-import type { LogEntry, SerializedValue } from '@clarosight/shared'
+import type { LogEntry, SerializedValue } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 import { apiFetch } from '../utils/api'
 import { useExecHistory } from '../composables/useExecHistory'

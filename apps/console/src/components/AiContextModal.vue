@@ -5,7 +5,7 @@
  * 展示生成好的设备诊断上下文文本，支持一键复制。
  */
 import { useAiContext } from '../composables/useAiContext'
-import type { LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
+import type { LogEntry, NetworkEntry, ErrorEntry } from '@silkpulse/shared'
 
 const props = defineProps<{
   modelValue: boolean

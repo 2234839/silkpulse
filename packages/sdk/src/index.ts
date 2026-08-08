@@ -1,15 +1,15 @@
 /**
- * clarosight SDK 入口 —— 装配所有采集器，连接 server
+ * silkpulse SDK 入口 —— 装配所有采集器，连接 server
  *
  * 注入方式：
  * 1. IIFE 脚本：<script src="http://server/sdk.js"></script>（自动初始化）
- * 2. 主动调用：ClarosightSDK.init({ server: 'ws://localhost:8080' })
+ * 2. 主动调用：SilkPulseSDK.init({ server: 'ws://localhost:8080' })
  *
  * 采集器：log-collector / network-collector / error-catcher
  * 通道：ws-client（上报 + exec 回传）
  */
 
-import type { DeviceInfo, ServerToDeviceMessage, LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
+import type { DeviceInfo, ServerToDeviceMessage, LogEntry, NetworkEntry, ErrorEntry } from '@silkpulse/shared'
 import { connect, send, onMessage, disconnect } from './ws-client.js'
 import { installLogCollector } from './log-collector.js'
 import { installNetworkCollector } from './network-collector.js'
@@ -22,7 +22,7 @@ import { startScreenShare, stopScreenShare } from './screen-capture.js'
 import { startMouseTracker } from './mouse-tracker.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
-const DEVICE_ID_KEY = '__clarosight_device_id__'
+const DEVICE_ID_KEY = '__silkpulse_device_id__'
 
 /** 初始化选项 */
 export interface InitOptions {

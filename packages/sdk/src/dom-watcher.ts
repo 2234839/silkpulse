@@ -11,7 +11,7 @@
  * 控制台收到后按 parentIdxs 刷新对应已展开节点。
  */
 
-import type { DomChangeData } from '@clarosight/shared'
+import type { DomChangeData } from '@silkpulse/shared'
 
 /** 上报回调（SDK index.ts 注入 ws send） */
 type Sink = (changes: DomChangeData) => void
@@ -32,15 +32,15 @@ let active = false
 /**
  * 尝试给元素打 idx 并收集
  *
- * 元素可能还未被 __clarosight_ensureIdx 注册（新插入的节点），
+ * 元素可能还未被 __silkpulse_ensureIdx 注册（新插入的节点），
  * 打 idx 失败时跳过（不在此处注册——避免树未展开时打太多无效 idx）。
  */
 function tryCollectIdx(el: Element | null, kind: DomChangeData['kinds'][number]): void {
   if (!el) return
   const w = window as unknown as {
-    __clarosight_ensureIdx?: (el: Element) => number
+    __silkpulse_ensureIdx?: (el: Element) => number
   }
-  const ensure = w.__clarosight_ensureIdx
+  const ensure = w.__silkpulse_ensureIdx
   if (!ensure) return
   const idx = ensure(el)
   if (idx >= 0) {

@@ -9,7 +9,7 @@
  * 以 idx 为 key 做映射，O(n) 时间复杂度。
  * 控制台渲染层拿到 diff 后只操作受影响的节点，避免全量重渲染。
  */
-import type { SnapshotData, SnapshotElement } from '@clarosight/shared'
+import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
 
 /** 单个元素的变更补丁 */
 export interface ElementPatch {

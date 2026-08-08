@@ -23,7 +23,7 @@
  * - StoragePanel IndexedDB 记录（只读）
  */
 import { ref, computed, watch } from 'vue'
-import type { SerializedValue } from '@clarosight/shared'
+import type { SerializedValue } from '@silkpulse/shared'
 
 const props = withDefaults(defineProps<{
   /** 结构化序列化值（优先使用，来自远程 exec） */

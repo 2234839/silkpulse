@@ -1,13 +1,13 @@
 /**
  * 快照文本序列化 —— 把 exec 返回的 JSON 快照序列化为 AI 友好的 compact 文本
  *
- * 移植自 pilot 的 compact.ts，针对 clarosight「任意线上 H5」场景简化：
+ * 移植自 pilot 的 compact.ts，针对 silkpulse「任意线上 H5」场景简化：
  * - 去掉 src/line（无源码定位，非本地开发场景）
  * - 去掉 _btns/li 深度合并（保留核心的交互元素序列化）
  * - 保留：元素过滤、连续同类合并、稳定 idx、token 友好的单行格式
  */
 
-import type { SnapshotData, SnapshotElement } from '@clarosight/shared'
+import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
 
 /** compact 过滤：保留交互元素、标题、有 id 的元素、含文本的内容元素 */
 function filterCompact(data: SnapshotData): SnapshotElement[] {
@@ -33,7 +33,7 @@ function serializeCompactText(els: SnapshotElement[]): string {
   const INTERACTIVE_TAGS = new Set(['button', 'input', 'textarea', 'select', 'a', 'option'])
   return els.map((e) => {
     const parts: string[] = [e.tag]
-    /** 交互元素显示 idx，供 AI 通过 __clarosight_click(i) 等精确操作 */
+    /** 交互元素显示 idx，供 AI 通过 __silkpulse_click(i) 等精确操作 */
     if (e.idx != null) parts.push(`#${e.idx}`)
     /** iframe 内的元素标注来源 frame，让 AI 知道元素不在主文档 */
     if (e.frame != null) parts.push(`[frame:${e.frame}]`)
@@ -71,7 +71,7 @@ function serializeCompactText(els: SnapshotElement[]): string {
 
 /**
  * 完整快照文本（带 meta 头部）—— exec 返回的 result 是 JSON 字符串，这里解析后序列化
- * 入参 rawResult 是设备端 __clarosight_snapshot() 返回的 JSON 字符串
+ * 入参 rawResult 是设备端 __silkpulse_snapshot() 返回的 JSON 字符串
  */
 export function sendSnapshot(rawResult: string | undefined): string {
   if (!rawResult) return '[快照为空]'

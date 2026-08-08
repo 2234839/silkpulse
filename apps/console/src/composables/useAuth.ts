@@ -6,7 +6,7 @@
  */
 import { ref, readonly } from 'vue'
 
-const STORAGE_KEY = '__clarosight_auth_key__'
+const STORAGE_KEY = '__silkpulse_auth_key__'
 
 /** 密钥输入值 */
 const apiKey = ref<string>('')

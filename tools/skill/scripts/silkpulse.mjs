@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * clarosight skill CLI —— AI agent 通过它操作远程设备
+ * silkpulse skill CLI —— AI agent 通过它操作远程设备
  *
  * 用法：
- *   node clarosight.mjs devices                          列出在线设备
- *   node clarosight.mjs snapshot <deviceId>              取设备页面快照（compact 文本）
- *   node clarosight.mjs exec <deviceId> <code>           在设备页面执行 JS
- *   node clarosight.mjs logs <deviceId> [N|since]        拉取设备 console 日志（N=最近N条）
- *   node clarosight.mjs network <deviceId> [N|since]     拉取设备 network 记录（N=最近N条）
- *   node clarosight.mjs errors <deviceId> [N|since]      拉取设备错误（N=最近N条，省 token）
- *   node clarosight.mjs tag <deviceId> <tags> [note]     设置设备标签/备注
+ *   node silkpulse.mjs devices                          列出在线设备
+ *   node silkpulse.mjs snapshot <deviceId>              取设备页面快照（compact 文本）
+ *   node silkpulse.mjs exec <deviceId> <code>           在设备页面执行 JS
+ *   node silkpulse.mjs logs <deviceId> [N|since]        拉取设备 console 日志（N=最近N条）
+ *   node silkpulse.mjs network <deviceId> [N|since]     拉取设备 network 记录（N=最近N条）
+ *   node silkpulse.mjs errors <deviceId> [N|since]      拉取设备错误（N=最近N条，省 token）
+ *   node silkpulse.mjs tag <deviceId> <tags> [note]     设置设备标签/备注
  *
  * 环境变量：
- *   CLAROSIGHT_SERVER  server 地址，默认 http://localhost:8080
+ *   SILKPULSE_SERVER  server 地址，默认 http://localhost:8080
  */
 
-const SERVER = process.env.CLAROSIGHT_SERVER ?? 'http://localhost:8080'
+const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8080'
 
 const [cmd, ...args] = process.argv.slice(2)
 
@@ -173,7 +173,7 @@ async function main() {
       let code = args.slice(1).join(' ')
       if (!code) {
         if (process.stdin.isTTY) {
-          console.error('缺少要执行的 code（可在命令行传入，或通过管道：echo "..." | clarosight exec <id>）')
+          console.error('缺少要执行的 code（可在命令行传入，或通过管道：echo "..." | silkpulse exec <id>）')
           process.exit(1)
         }
         code = await readStdin()
@@ -316,7 +316,7 @@ async function main() {
       const device = devicesResp.devices.find((d) => d.id === id)
       const snapshot = await snapshotRes.text()
 
-      console.log('# clarosight 设备诊断聚合')
+      console.log('# silkpulse 设备诊断聚合')
       console.log('')
       console.log(`- 页面: ${device?.title ?? id}`)
       console.log(`- URL: ${device?.url ?? '未知'}`)
@@ -432,7 +432,7 @@ async function main() {
       console.log('')
       console.log('---')
       console.log(`提示：可在该设备执行诊断代码，例如：`)
-      console.log(`  clarosight exec ${id.slice(0, 8)} --code "return __clarosight_snapshot()"`)
+      console.log(`  silkpulse exec ${id.slice(0, 8)} --code "return __silkpulse_snapshot()"`)
       break
     }
 
@@ -471,8 +471,8 @@ async function main() {
         console.log('1) script 标签（最常用）：')
         console.log(`   <script src="${SERVER}/sdk.js" data-server="${SERVER}"></script>`)
         console.log('')
-        console.log('2) bookmarklet：clarosight inject bookmarklet')
-        console.log('3) userscript： clarosight inject userscript')
+        console.log('2) bookmarklet：silkpulse inject bookmarklet')
+        console.log('3) userscript： silkpulse inject userscript')
       }
       break
     }
@@ -481,38 +481,38 @@ async function main() {
     case '--help':
     case '-h':
     case undefined: {
-      console.log(`clarosight skill —— AI 远程设备调试工具
+      console.log(`silkpulse skill —— AI 远程设备调试工具
 
 用法：
-  clarosight devices                       列出在线设备
-  clarosight snapshot <id>                 取设备页面快照（AI 友好的 compact 文本）
-  clarosight exec <id> <code>              在设备页面执行 JS（支持 return）
-  clarosight logs <id> [N|--tail=N|--since=N]   拉取日志（N=最近N条，--since=游标增量）
-  clarosight network <id> [N|--tail=N|--since=N] 拉取网络记录（同上）
-  clarosight errors <id> [N|--tail=N|--since=N] 拉取设备错误（N=最近N条，省 token）
-  clarosight inspect <id>                  一键诊断聚合（错误+失败网络+快照，AI 最常用）
-  clarosight tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）
-  clarosight inject [bookmarklet|userscript]  生成接入片段
+  silkpulse devices                       列出在线设备
+  silkpulse snapshot <id>                 取设备页面快照（AI 友好的 compact 文本）
+  silkpulse exec <id> <code>              在设备页面执行 JS（支持 return）
+  silkpulse logs <id> [N|--tail=N|--since=N]   拉取日志（N=最近N条，--since=游标增量）
+  silkpulse network <id> [N|--tail=N|--since=N] 拉取网络记录（同上）
+  silkpulse errors <id> [N|--tail=N|--since=N] 拉取设备错误（N=最近N条，省 token）
+  silkpulse inspect <id>                  一键诊断聚合（错误+失败网络+快照，AI 最常用）
+  silkpulse tag <id> <tags> [note]        设置设备标签/备注（多设备区分用）
+  silkpulse inject [bookmarklet|userscript]  生成接入片段
 
 exec 的 code 也可通过 stdin 传入（适合复杂多行代码）：
-  echo "return document.title" | clarosight exec <id>
+  echo "return document.title" | silkpulse exec <id>
 
 设备 id 支持前缀模糊匹配。code 作为 async 函数体执行，可写多条语句，用 return 返回值。
 exec code 中可直接用的辅助函数：
-  __clarosight_click(idx)           点击 snapshot 中的元素
-  __clarosight_setValue(idx, val)   设置表单值（input/textarea/select，触发 input+change）
-  __clarosight_type(idx, text)      模拟键盘逐字输入（触发 keydown/keyup 序列）
-  __clarosight_scroll(idx, x, y)    滚动元素（idx<0 时滚窗口），触发懒加载
-  __clarosight_scrollIntoView(idx)  滚动元素到可视区域
-  __clarosight_hover(idx)           鼠标悬停（触发 mouseover/mouseenter）
-  __clarosight_pressKey(idx,key,mods?) 按键（Enter/Escape/方向键，派发 keydown+keyup）
-  __clarosight_wait(ms)             异步等待
-  __clarosight_snapshot()           手动取快照
-  __clarosight_sourcemap(line,col,srcUrl?)  解析 source map（压缩位置→原始源码位置）
-  __clarosight_sourcemapStack(frames)       批量解析堆栈帧
+  __silkpulse_click(idx)           点击 snapshot 中的元素
+  __silkpulse_setValue(idx, val)   设置表单值（input/textarea/select，触发 input+change）
+  __silkpulse_type(idx, text)      模拟键盘逐字输入（触发 keydown/keyup 序列）
+  __silkpulse_scroll(idx, x, y)    滚动元素（idx<0 时滚窗口），触发懒加载
+  __silkpulse_scrollIntoView(idx)  滚动元素到可视区域
+  __silkpulse_hover(idx)           鼠标悬停（触发 mouseover/mouseenter）
+  __silkpulse_pressKey(idx,key,mods?) 按键（Enter/Escape/方向键，派发 keydown+keyup）
+  __silkpulse_wait(ms)             异步等待
+  __silkpulse_snapshot()           手动取快照
+  __silkpulse_sourcemap(line,col,srcUrl?)  解析 source map（压缩位置→原始源码位置）
+  __silkpulse_sourcemapStack(frames)       批量解析堆栈帧
 
 环境变量：
-  CLAROSIGHT_SERVER  server 地址，默认 http://localhost:8080`)
+  SILKPULSE_SERVER  server 地址，默认 http://localhost:8080`)
       break
     }
 

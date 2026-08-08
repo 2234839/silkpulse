@@ -1,5 +1,5 @@
 /**
- * clarosight 核心协议类型 —— server / sdk / 控制台 / skill 共用的消息契约
+ * silkpulse 核心协议类型 —— server / sdk / 控制台 / skill 共用的消息契约
  *
  * 通信架构：
  * - 设备 ↔ server：单一 WebSocket，设备上报采集数据，server 下发指令（exec）

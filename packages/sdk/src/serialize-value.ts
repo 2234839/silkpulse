@@ -11,7 +11,7 @@
  * - 特殊类型（Date/RegExp/Error/Map/Set/Element 等）有专属 type + preview
  */
 
-import type { SerializedValue, SerializedProperty } from '@clarosight/shared'
+import type { SerializedValue, SerializedProperty } from '@silkpulse/shared'
 
 /** 最大递归深度（防止深层嵌套爆栈和性能问题） */
 const MAX_DEPTH = 5

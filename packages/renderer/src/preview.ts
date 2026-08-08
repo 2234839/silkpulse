@@ -3,7 +3,7 @@
  *
  * 根据容器宽度和快照视口尺寸，计算缩放比例、画布尺寸、可见元素列表。
  */
-import type { SnapshotData, SnapshotElement } from '@clarosight/shared'
+import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
 
 /** 预览画布的内边距（左右各留一些空隙） */
 export const PREVIEW_PADDING = 32

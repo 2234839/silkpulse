@@ -7,7 +7,7 @@
 import { ref, watch } from 'vue'
 
 type Theme = 'light' | 'dark'
-const STORAGE_KEY = 'clarosight-theme'
+const STORAGE_KEY = 'silkpulse-theme'
 
 const theme = ref<Theme>(loadTheme())
 

@@ -82,7 +82,7 @@ export async function handleAgentApiRoute(
       const failedNetwork = device.network.all()
         .filter((n) => n.status === 0 || n.status >= 400)
         .slice(-limitParam(10))
-      const snapshotResult = await execOnDevice(registry, deviceId, 'return __clarosight_snapshot()')
+      const snapshotResult = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
       const parts: string[] = []
       parts.push(`# 诊断报告 — ${device.info.title}\n# ${device.info.url}\n`)
       /** 错误 */
@@ -121,7 +121,7 @@ export async function handleAgentApiRoute(
      * GET /api/agent/devices/:id/snapshot —— 页面快照（text/plain）
      */
     case 'snapshot': {
-      const result = await execOnDevice(registry, deviceId, 'return __clarosight_snapshot()')
+      const result = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
       if (!result.success) {
         sendText(res, `[快照失败] ${result.error}`, 500)
         return true
@@ -147,7 +147,7 @@ export async function handleAgentApiRoute(
       const quality = url.searchParams.get('quality') ?? '0.8'
       const scale = url.searchParams.get('scale') ?? '1'
       const idxArg = idx ? Number(idx) : 'undefined'
-      const code = `return await __clarosight_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
+      const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
         sendText(res, `[截图失败] ${result.error}`, 500)

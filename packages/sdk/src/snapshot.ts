@@ -3,7 +3,7 @@
  *
  * 核心设计（移植自 pilot）：
  * 1. 只采叶子节点 + 有信息量元素（交互/标题/有 id/有文本），~80 行压缩页面状态
- * 2. 稳定索引（data-clarosight-idx），跨快照复用，AI 引用元素不漂移
+ * 2. 稳定索引（data-silkpulse-idx），跨快照复用，AI 引用元素不漂移
  * 3. 穿透 shadow DOM（open mode）
  *
  * 针对线上 H5 场景的简化（相比 pilot）：
@@ -12,13 +12,13 @@
  * - 去掉 _btns/li 深度合并
  *
  * 暴露全局：
- * - __clarosight_snapshot()  → 返回 SnapshotData JSON
- * - __clarosight_elements    → 元素引用注册表（exec 操作用）
- * - __clarosight_click(idx)  → 点击元素
- * - __clarosight_setValue(idx, val)  → 设置表单值
+ * - __silkpulse_snapshot()  → 返回 SnapshotData JSON
+ * - __silkpulse_elements    → 元素引用注册表（exec 操作用）
+ * - __silkpulse_click(idx)  → 点击元素
+ * - __silkpulse_setValue(idx, val)  → 设置表单值
  */
 
-import type { SnapshotData, SnapshotElement } from '@clarosight/shared'
+import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
 
 /** 不可见标签（采集时跳过） */
 const SKIP_TAGS: Record<string, true> = {
@@ -381,14 +381,14 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
 
   if (isStructural && !hasText && !isInteractive && !hasId && !hasValue) return null
 
-  /** 稳定索引：复用 data-clarosight-idx，否则分配新的 */
+  /** 稳定索引：复用 data-silkpulse-idx，否则分配新的 */
   let idx: number
-  const existing = el.getAttribute('data-clarosight-idx')
+  const existing = el.getAttribute('data-silkpulse-idx')
   if (existing !== null) {
     idx = parseInt(existing, 10)
   } else {
     idx = maxIdx.v++
-    el.setAttribute('data-clarosight-idx', String(idx))
+    el.setAttribute('data-silkpulse-idx', String(idx))
   }
   elementsRegistry.set(idx, el)
 
@@ -445,7 +445,7 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
       /**
        * select 的 value 输出 value:text 格式
        *
-       * AI 操作 select 需要知道 option 的 value（__clarosight_setValue 传 value），
+       * AI 操作 select 需要知道 option 的 value（__silkpulse_setValue 传 value），
        * 但纯 value（如 "bj"）无语义，需配 text（"北京"）让 AI 理解含义。
        * 格式 "bj:北京" 兼顾两者——AI 看到 val=bj:北京 知道当前选"北京"，
        * setValue(idx, "bj") 可切换。
@@ -487,7 +487,7 @@ function processElement(el: Element, maxIdx: { v: number }, frame?: string): Sna
    * 当前聚焦元素标记
    *
    * AI 远程操作表单时需知道光标位置：诊断"输入后提交失败"时，焦点在哪个输入框
-   * 是关键上下文；AI 执行 __clarosight_type 前能从快照判断是否需要先 click 定位。
+   * 是关键上下文；AI 执行 __silkpulse_type 前能从快照判断是否需要先 click 定位。
    * 用 ownerDocument 而非 document，穿透 iframe 时判断的是 iframe 内的聚焦元素。
    */
   if (el.ownerDocument && el.ownerDocument.activeElement === el) {
@@ -570,10 +570,10 @@ export function getElement(idx: number): Element | undefined {
 /**
  * 确保元素有稳定 idx（Element 面板用）
  *
- * 已有 data-clarosight-idx 就复用；没有就分配新 idx（取当前 registry 最大 idx + 1）
- * 并写入 elementsRegistry，让 __clarosight_click(idx) 等操作能定位到这个元素。
+ * 已有 data-silkpulse-idx 就复用；没有就分配新 idx（取当前 registry 最大 idx + 1）
+ * 并写入 elementsRegistry，让 __silkpulse_click(idx) 等操作能定位到这个元素。
  *
- * 与 processElement 的分配逻辑对齐：不写 data-clarosight-idx 属性（避免污染 DOM，
+ * 与 processElement 的分配逻辑对齐：不写 data-silkpulse-idx 属性（避免污染 DOM，
  * 该属性只在 snapshot 真正采集时才打），只维护 registry 映射。
  * 返回 -1 表示元素已脱离文档（isConnected=false）。
  */

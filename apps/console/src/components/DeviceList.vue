@@ -6,7 +6,7 @@
  * 内联标签编辑。
  */
 import { ref, computed } from 'vue'
-import type { DeviceInfo } from '@clarosight/shared'
+import type { DeviceInfo } from '@silkpulse/shared'
 import { apiFetch } from '../utils/api'
 
 const props = defineProps<{

@@ -15,7 +15,7 @@ import type {
   NetworkEntry,
   ErrorEntry,
   ExecResult,
-} from '@clarosight/shared'
+} from '@silkpulse/shared'
 
 /** 环形缓冲区大小常量 */
 const MAX_LOGS = 500

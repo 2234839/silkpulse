@@ -8,7 +8,7 @@
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入，本组件不自行订阅。
  */
 import { ref, computed } from 'vue'
-import type { ErrorEntry } from '@clarosight/shared'
+import type { ErrorEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 
 const props = defineProps<{

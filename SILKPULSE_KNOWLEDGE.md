@@ -1,4 +1,4 @@
-# clarosight 项目知识与避坑指南（压缩版）
+# silkpulse 项目知识与避坑指南（压缩版）
 
 > 一份从多次迭代实战中提炼的工程知识库。新会话/新协作者读这一份即可掌握所有非显而易见的约定、陷阱、命令。
 > **原则：知之为知之是知也** —— 记录的都是踩过坑、验证过的事实，不是猜测。
@@ -7,7 +7,7 @@
 
 ## 0. 一句话定位
 
-**clarosight = PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。**
+**silkpulse = PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。**
 让 AI agent 直接接入远程页面（线上 H5 / 移动端 / webview 等无法用本地 DevTools 调试的环境），完成"远程诊断 → 操作 → 验证"闭环。
 
 **AI 接入方式 = skill + HTTP API（非 MCP）**。这是已敲定的核心决策。
@@ -22,7 +22,7 @@
   └──────────┬─────────
         WebSocket
              ▼
-clarosight server (Node + TS)
+silkpulse server (Node + TS)
   · 设备注册表 + 环形缓冲区（日志500/网络100/错误50）
   · WS 中继：设备 ↔ 控制台
   · HTTP API：AI skill 入口
@@ -41,7 +41,7 @@ clarosight server (Node + TS)
 ## 2. Monorepo 结构
 
 ```
-clarosight/
+silkpulse/
 ├── packages/
 │   ├── shared/   # 共享类型（三方消息契约）—— 仅类型，无运行时代码
 │   ├── server/   # Node server：WS 中转 + HTTP API + 静态资源
@@ -49,7 +49,7 @@ clarosight/
 ├── apps/
 │   └── console/  # Vue3 + TS + Tailwind v4 控制台 UI
 ├── tools/
-│   └── skill/    # AI skill：SKILL.md + CLI 脚本（clarosight.mjs）
+│   └── skill/    # AI skill：SKILL.md + CLI 脚本（silkpulse.mjs）
 ├── examples/
 │   └── test-page.html   # 测试页（含全场景：交互/搜索/表单/网络/错误/键盘/iframe）
 └── scripts/
@@ -77,23 +77,23 @@ pnpm build   # vp run -r build && pnpm run copy:assets
 ```bash
 # 正式
 pnpm start
-# 或 node packages/server/dist/bin/clarosight.mjs --port 8083
+# 或 node packages/server/dist/bin/silkpulse.mjs --port 8083
 
 # 测试时重启（杀掉旧实例）
-kill $(lsof -ti :8083); sleep 1; node packages/server/dist/bin/clarosight.mjs --port 8083 &
+kill $(lsof -ti :8083); sleep 1; node packages/server/dist/bin/silkpulse.mjs --port 8083 &
 sleep 2  # 等 server 起来
 ```
 
 ### 无头测试
 ```bash
-CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
+SILKPULSE_SERVER=http://localhost:8083 pnpm test
 ```
 
 ### 标准迭代循环（改代码后）
 ```bash
 pnpm typecheck && pnpm build && \
-  (kill $(lsof -ti :8083); sleep 1; node packages/server/dist/bin/clarosight.mjs --port 8083 &) && \
-  sleep 2 && CLAROSIGHT_SERVER=http://localhost:8083 pnpm test
+  (kill $(lsof -ti :8083); sleep 1; node packages/server/dist/bin/silkpulse.mjs --port 8083 &) && \
+  sleep 2 && SILKPULSE_SERVER=http://localhost:8083 pnpm test
 ```
 
 ### Git 提交（个人项目，直接提交 master，不开分支）
@@ -117,18 +117,18 @@ git add -A && git commit -m "feat(xxx): 描述"
 
 | 函数 | 说明 |
 |---|---|
-| `__clarosight_click(idx)` | 点击元素 |
-| `__clarosight_setValue(idx, val)` | 设表单值，**支持 input/textarea/select/checkbox/radio** |
-| `__clarosight_type(idx, text)` | 逐字输入（keydown/keyup 序列，React 受控组件兼容） |
-| `__clarosight_pressKey(idx, key, mods?)` | 按键（Enter/Escape/方向键/组合键）；idx<0 对 activeElement |
-| `__clarosight_scroll(idx, x, y)` | 滚动（idx<0 滚窗口） |
-| `__clarosight_scrollIntoView(idx, block?)` | 滚入视野 |
-| `__clarosight_hover(idx)` | 悬停（mouseover/mouseenter） |
-| `__clarosight_wait(ms)` | 异步等待 |
-| `__clarosight_snapshot()` | 取快照 |
-| `__clarosight_sourcemap(line, col, sourceUrl?)` | source map 解析 |
-| `__clarosight_sourcemapStack(frames[])` | 批量解析堆栈 |
-| `__clarosight_storage(type?)` | 查询 localStorage/sessionStorage/cookie |
+| `__silkpulse_click(idx)` | 点击元素 |
+| `__silkpulse_setValue(idx, val)` | 设表单值，**支持 input/textarea/select/checkbox/radio** |
+| `__silkpulse_type(idx, text)` | 逐字输入（keydown/keyup 序列，React 受控组件兼容） |
+| `__silkpulse_pressKey(idx, key, mods?)` | 按键（Enter/Escape/方向键/组合键）；idx<0 对 activeElement |
+| `__silkpulse_scroll(idx, x, y)` | 滚动（idx<0 滚窗口） |
+| `__silkpulse_scrollIntoView(idx, block?)` | 滚入视野 |
+| `__silkpulse_hover(idx)` | 悬停（mouseover/mouseenter） |
+| `__silkpulse_wait(ms)` | 异步等待 |
+| `__silkpulse_snapshot()` | 取快照 |
+| `__silkpulse_sourcemap(line, col, sourceUrl?)` | source map 解析 |
+| `__silkpulse_sourcemapStack(frames[])` | 批量解析堆栈 |
+| `__silkpulse_storage(type?)` | 查询 localStorage/sessionStorage/cookie |
 
 **实现要点**：
 - `setValue` / `type` 对 input/textarea/select 用**原生 setter**（`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set`）绕过 React/Vue 对 `el.value` 的 setter 覆盖，否则受控组件不生效
@@ -152,7 +152,7 @@ git add -A && git commit -m "feat(xxx): 描述"
 
 ### 陷阱 2：serializeResult 截断导致快照解析失败
 **症状**：页面元素增多后，server 日志报 `[快照解析失败]`。
-**根因**：`__clarosight_snapshot()` 的 JSON 超过截断阈值被截断 → `JSON.parse` 失败。
+**根因**：`__silkpulse_snapshot()` 的 JSON 超过截断阈值被截断 → `JSON.parse` 失败。
 **修复**：`MAX_RESULT_LEN` 从 4000 提升到 **20000**（典型快照 2-8KB，大页面 15KB+，20K 既能容纳完整快照又能挡住 `return document` 失误）。
 
 ### 陷阱 3：v-model 覆盖光标/选区
@@ -227,11 +227,11 @@ git add -A && git commit -m "feat(xxx): 描述"
 ## 10. 当前状态（截至 2026-08-06）
 
 - 分支：`master`，已迭代至 53+ 轮
-- 最近提交：inspect CLI WebSocket 连接独立段（WS 条目从失败/慢请求分析中分离，不再被 readyState=0 误判为失败）；WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__clarosight_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__clarosight_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
+- 最近提交：inspect CLI WebSocket 连接独立段（WS 条目从失败/慢请求分析中分离，不再被 readyState=0 误判为失败）；WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__silkpulse_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__silkpulse_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
 - 测试：无头测试 **94 项**全通过
 - network 面板支持 WebSocket：WS 连接作为 network 条目，点击展示 send/recv/event 帧时间线（对齐 DevTools WS Messages）
-- `__clarosight_setValue` 已支持 checkbox/radio（含 radio 同组互斥，合成事件下手动取消同组）
-- `__clarosight_click` 触发 mouseover→mousedown→mouseup→click 完整序列（覆盖 div[role=button] 监听 mousedown 的自定义组件）
+- `__silkpulse_setValue` 已支持 checkbox/radio（含 radio 同组互斥，合成事件下手动取消同组）
+- `__silkpulse_click` 触发 mouseover→mousedown→mouseup→click 完整序列（覆盖 div[role=button] 监听 mousedown 的自定义组件）
 
 ---
 
@@ -245,7 +245,7 @@ git add -A && git commit -m "feat(xxx): 描述"
 3. `pnpm typecheck`
 4. **根目录 `pnpm build`**（不是 apps/console）
 5. 重启 8083 server
-6. `CLAROSIGHT_SERVER=http://localhost:8083 pnpm test`
+6. `SILKPULSE_SERVER=http://localhost:8083 pnpm test`
 7. 更新 README（测试数 + 功能描述）
 8. 直接提交 master
 

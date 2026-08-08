@@ -1,12 +1,12 @@
 /**
  * useAiContext —— 将当前设备状态打包为 AI 可读诊断上下文
  *
- * clarosight 的 AI-native 灵魂：人在控制台看到问题时，一键把设备现场
+ * silkpulse 的 AI-native 灵魂：人在控制台看到问题时，一键把设备现场
  * （错误 + 快照 + 网络 + 日志）压缩成一段 token 友好的文本，
- * 粘贴给任意 AI agent 即可开始诊断，或直接喂给 clarosight skill。
+ * 粘贴给任意 AI agent 即可开始诊断，或直接喂给 silkpulse skill。
  */
 import { ref } from 'vue'
-import type { LogEntry, NetworkEntry, ErrorEntry } from '@clarosight/shared'
+import type { LogEntry, NetworkEntry, ErrorEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 import { apiFetch } from '../utils/api'
 
@@ -64,7 +64,7 @@ export function useAiContext() {
 /** 聚合设备现场为一段 AI 可读文本 */
 function buildContext(input: AiContextInput & { snapshot: string }): string {
   const lines: string[] = []
-  lines.push(`# clarosight 设备诊断上下文`)
+  lines.push(`# silkpulse 设备诊断上下文`)
   lines.push(``)
   lines.push(`- 页面: ${input.title}`)
   lines.push(`- URL: ${input.url}`)
@@ -141,8 +141,8 @@ function buildContext(input: AiContextInput & { snapshot: string }): string {
 
   lines.push(``)
   lines.push(`---`)
-  lines.push(`提示：可用 clarosight skill 在该设备执行诊断代码，例如：`)
-  lines.push(`  clarosight exec ${input.deviceId.slice(0, 8)} --code "return __clarosight_snapshot()"`)
+  lines.push(`提示：可用 silkpulse skill 在该设备执行诊断代码，例如：`)
+  lines.push(`  silkpulse exec ${input.deviceId.slice(0, 8)} --code "return __silkpulse_snapshot()"`)
 
   return lines.join('\n')
 }

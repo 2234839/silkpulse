@@ -6,15 +6,15 @@
  * 1. 渐进式加载 —— 极短系统提示词（~50 token），agent 按需 curl 拉取完整文档
  * 2. 完整提示词 —— 一键复制所有 API 文档，agent 直接全量加载
  *
- * 提示词模板来自 @clarosight/shared（服务端 + 控制台共用同一份）。
+ * 提示词模板来自 @silkpulse/shared（服务端 + 控制台共用同一份）。
  */
 import { computed, ref, watch } from 'vue'
 import { copyText } from '../utils/clipboard'
-import { renderSkillPrompt, renderSkillSystemPrompt } from '@clarosight/shared'
+import { renderSkillPrompt, renderSkillSystemPrompt } from '@silkpulse/shared'
 
 const props = defineProps<{
   modelValue: boolean
-  /** 当前服务访问地址（如 https://clarosight.heartstack.space） */
+  /** 当前服务访问地址（如 https://silkpulse.heartstack.space） */
   serverUrl: string
   /** 当前用户的 API key（超管密钥或项目密钥） */
   apiKey: string
@@ -31,14 +31,14 @@ const copyState = ref<'idle' | 'copied' | 'error'>('idle')
 /** 渲染完整提示词（替换占位符） */
 const fullPrompt = computed(() => {
   const key = props.apiKey || '<你的API密钥>'
-  const origin = props.serverUrl || 'https://clarosight.heartstack.space'
+  const origin = props.serverUrl || 'https://silkpulse.heartstack.space'
   return renderSkillPrompt(origin, key)
 })
 
 /** 渲染渐进式加载系统提示词 */
 const lazyPrompt = computed(() => {
   const key = props.apiKey || '<你的API密钥>'
-  const origin = props.serverUrl || 'https://clarosight.heartstack.space'
+  const origin = props.serverUrl || 'https://silkpulse.heartstack.space'
   return renderSkillSystemPrompt(origin, key)
 })
 
@@ -136,7 +136,7 @@ watch(() => props.modelValue, (v) => {
         <p class="text-xs text-muted">
           <template v-if="activeTab === 'lazy'">
             🚀 提示词中的 curl 地址指向
-            <code class="text-blue-500">{{ serverUrl }}/api/skill/clarosight</code>，
+            <code class="text-blue-500">{{ serverUrl }}/api/skill/silkpulse</code>，
             agent 按需拉取完整 API 文档。
           </template>
           <template v-else>

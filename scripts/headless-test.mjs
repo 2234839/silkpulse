@@ -1,14 +1,14 @@
 /**
  * 无头浏览器端到端测试 —— puppeteer-core + 系统 chromium
  *
- * 验证：控制台 UI、SDK 注入连接、snapshot、exec、__clarosight_click、console/error 采集
+ * 验证：控制台 UI、SDK 注入连接、snapshot、exec、__silkpulse_click、console/error 采集
  */
 import puppeteer from 'puppeteer-core'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const SERVER = process.env.CLAROSIGHT_SERVER ?? 'http://localhost:8081'
+const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8081'
 
 /**
  * 探测 chromium 可执行文件路径
@@ -73,7 +73,7 @@ async function main() {
     const consolePage = await browser.newPage()
     await consolePage.goto(SERVER, { waitUntil: 'networkidle0', timeout: 10000 })
     const title = await consolePage.title()
-    if (title.includes('clarosight')) ok(`控制台 UI 加载（title="${title}"）`)
+    if (title.includes('silkpulse')) ok(`控制台 UI 加载（title="${title}"）`)
     else fail(`控制台标题异常: "${title}"`)
 
     const appLen = await consolePage.evaluate(() => document.getElementById('app')?.innerHTML?.length ?? 0)
@@ -170,35 +170,35 @@ async function main() {
       const clickRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_click(${idx}); return document.querySelector("#log").textContent` }),
+        body: JSON.stringify({ code: `__silkpulse_click(${idx}); return document.querySelector("#log").textContent` }),
       })).json()
       if (clickRes.success && clickRes.result?.includes('你好')) {
-        ok(`exec + __clarosight_click(${idx}) 生效，输出: ${clickRes.result}`)
+        ok(`exec + __silkpulse_click(${idx}) 生效，输出: ${clickRes.result}`)
       } else fail(`exec click 异常: ${JSON.stringify(clickRes)}`)
     } else fail('snapshot 未找到 button idx')
 
     /**
-     * 5.1a __clarosight_click 对自定义组件（div[role=button] 监听 mousedown）生效
+     * 5.1a __silkpulse_click 对自定义组件（div[role=button] 监听 mousedown）生效
      *
      * 验证完整鼠标事件序列：自定义组件只绑 mousedown 不绑 click，
-     * 若 __clarosight_click 只调 .click() 则对此类组件无效（"点了没反应"）。
+     * 若 __silkpulse_click 只调 .click() 则对此类组件无效（"点了没反应"）。
      * div[role=button] 非原生交互标签，快照里显示 id 不显示 idx，
-     * 所以从 data-clarosight-idx 属性取 idx（SDK 给每个采集元素打的标记）。
+     * 所以从 data-silkpulse-idx 属性取 idx（SDK 给每个采集元素打的标记）。
      */
     {
       const customRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `const el = document.querySelector('#custom-btn'); const di = el?.getAttribute('data-clarosight-idx'); if (di == null) return 'no-idx'; __clarosight_click(Number(di)); return document.querySelector('#custom-result').textContent` }),
+        body: JSON.stringify({ code: `const el = document.querySelector('#custom-btn'); const di = el?.getAttribute('data-silkpulse-idx'); if (di == null) return 'no-idx'; __silkpulse_click(Number(di)); return document.querySelector('#custom-result').textContent` }),
       })).json()
       if (customRes.success && customRes.result?.includes('自定义按钮已触发')) {
-        ok(`exec + __clarosight_click 对 div[role=button]（mousedown）生效`)
+        ok(`exec + __silkpulse_click 对 div[role=button]（mousedown）生效`)
       } else {
         fail(`exec click(div[role=button]) 异常: ${JSON.stringify(customRes)}`)
       }
     }
 
-    /** 5.1 __clarosight_type —— 模拟键盘输入到搜索框，验证 keyup 触发 + value 正确写入 */
+    /** 5.1 __silkpulse_type —— 模拟键盘输入到搜索框，验证 keyup 触发 + value 正确写入 */
     const snapText3 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
     /** 找 search-input 的 idx（快照里 input 带 placeholder="输入关键词"） */
     const searchMatch = snapText3.match(/input #(\d+)[^\n]*关键词/)
@@ -213,7 +213,7 @@ async function main() {
       const typeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_type(${searchIdx}, "苹"); return document.querySelector("#search-result").textContent + "|||" + document.querySelector("#search-input").value` }),
+        body: JSON.stringify({ code: `__silkpulse_type(${searchIdx}, "苹"); return document.querySelector("#search-result").textContent + "|||" + document.querySelector("#search-input").value` }),
       })).json()
       /**
        * exec 的 serializeResult 对字符串会 JSON.stringify（加引号），所以 result 形如
@@ -221,12 +221,12 @@ async function main() {
        */
       const resultStr = typeRes.result ?? ''
       if (typeRes.success && resultStr.includes('苹果') && resultStr.includes('|||苹')) {
-        ok(`exec + __clarosight_type(${searchIdx}, "苹") 生效（result: ${resultStr.slice(0, 60)}）`)
+        ok(`exec + __silkpulse_type(${searchIdx}, "苹") 生效（result: ${resultStr.slice(0, 60)}）`)
       } else fail(`exec type 异常: ${JSON.stringify(typeRes).slice(0, 200)}`)
     } else fail('snapshot 未找到搜索框 idx')
 
     /**
-     * 5.15 exec + __clarosight_setValue 对 select 元素
+     * 5.15 exec + __silkpulse_setValue 对 select 元素
      *
      * select 的 value setter 在 HTMLSelectElement.prototype 上（非 HTMLInputElement），
      * 之前 setNativeValue 只查 input/textarea 的原型，select 上设值无效。
@@ -251,7 +251,7 @@ async function main() {
         const setRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: `__clarosight_setValue(${selectIdx}, "sh"); return document.querySelector("#city-select").value` }),
+          body: JSON.stringify({ code: `__silkpulse_setValue(${selectIdx}, "sh"); return document.querySelector("#city-select").value` }),
         })).json()
         await new Promise((r) => setTimeout(r, 500))
         /** setValue 后应有新的"选择城市: sh"日志（change 事件触发的 console.log） */
@@ -259,7 +259,7 @@ async function main() {
         const hasCityLog = logsAfter.slice(logsAfter.length - logsBeforeCount > 0 ? logsAfter.length - 10 : 0).some((l) => l.message.includes('选择城市') && l.message.includes('sh'))
         const resultStr = setRes.result ?? ''
         if (selectMatch && hasValueFormat && setRes.success && resultStr.includes('sh') && hasCityLog) {
-          ok(`exec + __clarosight_setValue(${selectIdx}, "sh") 对 select 生效（value="${resultStr.replace(/"/g, '')}"，change 事件触发 ✓，快照 options 含 value:text ✓）`)
+          ok(`exec + __silkpulse_setValue(${selectIdx}, "sh") 对 select 生效（value="${resultStr.replace(/"/g, '')}"，change 事件触发 ✓，快照 options 含 value:text ✓）`)
         } else {
           fail(`exec setValue(select) 异常: value=${resultStr}，change日志=${hasCityLog}，options格式=${hasValueFormat}`)
         }
@@ -267,7 +267,7 @@ async function main() {
     }
 
     /**
-     * 5.16 exec + __clarosight_setValue 对 checkbox/radio
+     * 5.16 exec + __silkpulse_setValue 对 checkbox/radio
      *
      * checkbox：val='true' 勾选，'false' 取消（用原生 checked setter，框架兼容）
      * radio：val 有值即选中（同组其他自动取消）
@@ -284,7 +284,7 @@ async function main() {
       const cbRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `const cb = document.querySelector('#agree'); cb.checked = false; __clarosight_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'true'); return cb.checked` }),
+        body: JSON.stringify({ code: `const cb = document.querySelector('#agree'); cb.checked = false; __silkpulse_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'true'); return cb.checked` }),
       })).json()
       const cbOk = cbRes.success && cbRes.result === 'true'
 
@@ -292,7 +292,7 @@ async function main() {
       const cbUncheckRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'false'); return document.querySelector('#agree').checked` }),
+        body: JSON.stringify({ code: `__silkpulse_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'false'); return document.querySelector('#agree').checked` }),
       })).json()
       const cbUncheckOk = cbUncheckRes.success && cbUncheckRes.result === 'false'
 
@@ -311,7 +311,7 @@ async function main() {
       const radioRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_setValue(${proMatch ? proMatch[1] : -1}, 'pro'); const pro = document.querySelector('input[name="plan"][value="pro"]'); const free = document.querySelector('input[name="plan"][value="free"]'); return { pro: pro?.checked, free: free?.checked }` }),
+        body: JSON.stringify({ code: `__silkpulse_setValue(${proMatch ? proMatch[1] : -1}, 'pro'); const pro = document.querySelector('input[name="plan"][value="pro"]'); const free = document.querySelector('input[name="plan"][value="free"]'); return { pro: pro?.checked, free: free?.checked }` }),
       })).json()
       const radioOk = radioRes.success && radioRes.result?.includes('"pro":true') && radioRes.result?.includes('"free":false')
 
@@ -360,7 +360,7 @@ async function main() {
      * 5.25 快照采集当前聚焦元素 —— AI 远程操作表单需知道光标位置
      *
      * 诊断"输入后提交失败"时，焦点在哪个输入框是关键上下文。
-     * AI 执行 __clarosight_type 前能从快照判断是否需要先 click 定位。
+     * AI 执行 __silkpulse_type 前能从快照判断是否需要先 click 定位。
      */
     {
       /** 聚焦 name-input */
@@ -460,7 +460,7 @@ async function main() {
     }
 
     /**
-     * 5.45 exec + __clarosight_scroll + __clarosight_hover
+     * 5.45 exec + __silkpulse_scroll + __silkpulse_hover
      *
      * scroll：滚动 #scroll-box 内部（overflow:auto），验证 scrollTop 变化。
      * scrollIntoView：将元素滚入视野。
@@ -476,7 +476,7 @@ async function main() {
       const scrollRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_scroll(${scrollMatch ? scrollMatch[1] : -1}, 0, 500); return document.querySelector("#scroll-box").scrollTop > 0` }),
+        body: JSON.stringify({ code: `__silkpulse_scroll(${scrollMatch ? scrollMatch[1] : -1}, 0, 500); return document.querySelector("#scroll-box").scrollTop > 0` }),
       })).json()
       const scrollOk = scrollRes.success && scrollRes.result === 'true'
 
@@ -484,7 +484,7 @@ async function main() {
       const hoverRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_hover(${hoverMatch ? hoverMatch[1] : -1}); return getComputedStyle(document.querySelector("#hover-result")).display` }),
+        body: JSON.stringify({ code: `__silkpulse_hover(${hoverMatch ? hoverMatch[1] : -1}); return getComputedStyle(document.querySelector("#hover-result")).display` }),
       })).json()
       /** result 被 serializeResult JSON.stringify，带引号 */
       const hoverOk = hoverRes.success && hoverRes.result?.includes('block')
@@ -497,7 +497,7 @@ async function main() {
     }
 
     /**
-     * 5.46 exec + __clarosight_pressKey —— 键盘交互（Enter 提交 / Escape 清空）
+     * 5.46 exec + __silkpulse_pressKey —— 键盘交互（Enter 提交 / Escape 清空）
      *
      * pressKey 派发 keydown + keyup 事件，验证：
      * 1. Enter 触发 keydown 监听器 → keyboard-result 显示"已提交"
@@ -513,7 +513,7 @@ async function main() {
       const enterRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_setValue(${kbMatch ? kbMatch[1] : -1}, '测试Enter'); __clarosight_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Enter'); return document.querySelector('#keyboard-result')?.textContent` }),
+        body: JSON.stringify({ code: `__silkpulse_setValue(${kbMatch ? kbMatch[1] : -1}, '测试Enter'); __silkpulse_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Enter'); return document.querySelector('#keyboard-result')?.textContent` }),
       })).json()
       const enterOk = enterRes.success && enterRes.result?.includes('已提交') && enterRes.result?.includes('测试Enter')
 
@@ -521,7 +521,7 @@ async function main() {
       const escRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `__clarosight_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Escape'); return { result: document.querySelector('#keyboard-result')?.textContent, inputVal: document.querySelector('#keyboard-input')?.value }` }),
+        body: JSON.stringify({ code: `__silkpulse_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Escape'); return { result: document.querySelector('#keyboard-result')?.textContent, inputVal: document.querySelector('#keyboard-input')?.value }` }),
       })).json()
       const escOk = escRes.success && escRes.result?.includes('已清空') && escRes.result?.includes('"inputVal":""')
 
@@ -529,7 +529,7 @@ async function main() {
       const activeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: `document.querySelector('#keyboard-input').focus(); __clarosight_pressKey(-1, 'Enter'); return document.activeElement?.id` }),
+        body: JSON.stringify({ code: `document.querySelector('#keyboard-input').focus(); __silkpulse_pressKey(-1, 'Enter'); return document.activeElement?.id` }),
       })).json()
       const activeOk = activeRes.success && activeRes.result?.includes('keyboard-input')
 
@@ -643,7 +643,7 @@ async function main() {
 
     /** 7.1 POST body 采集 —— 验证 reqBody/resBody 被正确捕获 */
     const postEntry = network.find((n) => n.method === 'POST' && n.url.includes('/api/echo'))
-    if (postEntry && postEntry.reqBody && postEntry.reqBody.includes('clarosight') && postEntry.resBody) {
+    if (postEntry && postEntry.reqBody && postEntry.reqBody.includes('silkpulse') && postEntry.resBody) {
       ok(`POST body 采集成功（reqBody ${postEntry.reqBody.length} 字符，resBody ${postEntry.resBody.length} 字符）`)
     } else {
       fail(`POST body 采集异常: ${JSON.stringify({ method: postEntry?.method, hasReq: !!postEntry?.reqBody, hasRes: !!postEntry?.resBody })}`)
@@ -736,7 +736,7 @@ async function main() {
       await testPage.evaluate(async () => {
         await fetch('/api/echo', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Clarosight-Test': 'header-collect' },
+          headers: { 'Content-Type': 'application/json', 'X-SilkPulse-Test': 'header-collect' },
           body: JSON.stringify({ purpose: 'header-test' }),
         })
       })
@@ -752,11 +752,11 @@ async function main() {
       })
       await new Promise((r) => setTimeout(r, 800))
       const netHeaders = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
-      const fetchH = netHeaders.find((n) => n.method === 'POST' && n.reqHeaders && n.reqHeaders['x-clarosight-test'])
+      const fetchH = netHeaders.find((n) => n.method === 'POST' && n.reqHeaders && n.reqHeaders['x-silkpulse-test'])
       const xhrH = netHeaders.find((n) => n.method === 'GET' && n.reqHeaders && n.reqHeaders['x-xhr-custom'])
 
       /** fetch：应有 content-type + 自定义 x- 头 + 响应头 */
-      const fetchOk = fetchH && fetchH.reqHeaders['content-type'] === 'application/json' && fetchH.reqHeaders['x-clarosight-test'] === 'header-collect' && fetchH.resHeaders
+      const fetchOk = fetchH && fetchH.reqHeaders['content-type'] === 'application/json' && fetchH.reqHeaders['x-silkpulse-test'] === 'header-collect' && fetchH.resHeaders
       /** xhr：应有自定义头（setRequestHeader 采集）+ 响应头（getAllResponseHeaders 采集） */
       const xhrOk = xhrH && xhrH.reqHeaders['x-xhr-custom'] === 'xhr-header-val' && xhrH.resHeaders
 
@@ -883,7 +883,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 500))
       const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
       /** 筛出 spam 日志条目 */
-      const spamEntries = logsAfter.filter((l) => l.message.includes('clarosight spam'))
+      const spamEntries = logsAfter.filter((l) => l.message.includes('silkpulse spam'))
       /** 应只有 1 条，且 repeat=10（总共出现 10 次：第一条上报 + 9 次重复聚合） */
       const aggregatedOk = spamEntries.length === 1 && spamEntries[0].repeat === 10
       if (aggregatedOk) {
@@ -999,9 +999,9 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300))
       const visibleLis = document.querySelectorAll('ul li').length
       return { visibleLis }
-    }, 'clarosight')
+    }, 'silkpulse')
     if (searchResult.visibleLis >= 2) {
-      ok(`控制台设备搜索生效（搜索 "clarosight" 匹配 ${searchResult.visibleLis} 个）`)
+      ok(`控制台设备搜索生效（搜索 "silkpulse" 匹配 ${searchResult.visibleLis} 个）`)
     } else {
       fail(`设备搜索异常: ${JSON.stringify(searchResult)}`)
     }
@@ -1252,30 +1252,30 @@ async function main() {
         fail(`source map 解析失败: mapped=${JSON.stringify(crashErr.mapped)}（source=${crashErr.source}）`)
       }
 
-      /** 16. __clarosight_sourcemap exec 辅助函数 —— AI 主动解析堆栈位置 */
+      /** 16. __silkpulse_sourcemap exec 辅助函数 —— AI 主动解析堆栈位置 */
       const smExecRes = await fetch(`${SERVER}/api/devices/${smDev.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: 'return await __clarosight_sourcemap(1, 14, location.origin + "/test-fixtures/crash.js")',
+          code: 'return await __silkpulse_sourcemap(1, 14, location.origin + "/test-fixtures/crash.js")',
         }),
       }).then((r) => r.json())
       if (smExecRes.success) {
         const pos = JSON.parse(smExecRes.result)
         if (pos && pos.source === 'crash.ts' && pos.line === 2) {
-          ok(`__clarosight_sourcemap exec 辅助函数: 1:14 → ${pos.source}:${pos.line}:${pos.column}`)
+          ok(`__silkpulse_sourcemap exec 辅助函数: 1:14 → ${pos.source}:${pos.line}:${pos.column}`)
         } else {
-          fail(`__clarosight_sourcemap 返回异常: ${smExecRes.result}`)
+          fail(`__silkpulse_sourcemap 返回异常: ${smExecRes.result}`)
         }
       } else {
-        fail(`__clarosight_sourcemap 执行失败: ${smExecRes.error}`)
+        fail(`__silkpulse_sourcemap 执行失败: ${smExecRes.error}`)
       }
     } else {
       fail('source map 测试前置失败：无在线设备')
     }
 
     /**
-     * 16.5 __clarosight_storage —— 查询 localStorage / sessionStorage / cookie
+     * 16.5 __silkpulse_storage —— 查询 localStorage / sessionStorage / cookie
      *
      * 远程调试高频需求：登录态/token 在 localStorage、会话信息在 cookie。
      * 验证三种类型都能正确返回 {key: value}，且值截断逻辑正常。
@@ -1287,7 +1287,7 @@ async function main() {
         const localRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: `return __clarosight_storage('local')` }),
+          body: JSON.stringify({ code: `return __silkpulse_storage('local')` }),
         })).json()
         const localOk = localRes.success && localRes.result?.includes('cs-token') && localRes.result?.includes('test-token-abc123') && localRes.result?.includes('cs-user')
 
@@ -1295,7 +1295,7 @@ async function main() {
         const sessionRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: `return __clarosight_storage('session')` }),
+          body: JSON.stringify({ code: `return __silkpulse_storage('session')` }),
         })).json()
         const sessionOk = sessionRes.success && sessionRes.result?.includes('cs-tab') && sessionRes.result?.includes('session-data')
 
@@ -1303,17 +1303,17 @@ async function main() {
         const cookieRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: `return __clarosight_storage('cookie')` }),
+          body: JSON.stringify({ code: `return __silkpulse_storage('cookie')` }),
         })).json()
         const cookieOk = cookieRes.success && cookieRes.result?.includes('cs-auth') && cookieRes.result?.includes('cookie-value')
 
         if (localOk && sessionOk && cookieOk) {
-          ok(`__clarosight_storage 查询生效（localStorage ✓ sessionStorage ✓ cookie ✓）`)
+          ok(`__silkpulse_storage 查询生效（localStorage ✓ sessionStorage ✓ cookie ✓）`)
         } else {
-          fail(`__clarosight_storage 异常：local=${localOk} session=${sessionOk} cookie=${cookieOk}（local=${localRes.result?.slice(0, 100)} cookie=${cookieRes.result?.slice(0, 100)}）`)
+          fail(`__silkpulse_storage 异常：local=${localOk} session=${sessionOk} cookie=${cookieOk}（local=${localRes.result?.slice(0, 100)} cookie=${cookieRes.result?.slice(0, 100)}）`)
         }
       } else {
-        fail('__clarosight_storage 测试前置失败：无在线设备')
+        fail('__silkpulse_storage 测试前置失败：无在线设备')
       }
     }
 
@@ -1351,10 +1351,10 @@ async function main() {
         body: JSON.stringify({
           /** 找到 iframe 内按钮的 idx（snapshot 里带 frame 标识的那个）并点击 */
           code: `
-            const snap = __clarosight_snapshot()
+            const snap = __silkpulse_snapshot()
             const btn = snap.els.find(e => e.frame === 'embed-frame' && e.tag === 'button')
             if (!btn) return { error: '未找到 iframe 按钮', count: snap.els.filter(e => e.frame).length }
-            const clicked = __clarosight_click(btn.idx)
+            const clicked = __silkpulse_click(btn.idx)
             return { clicked, idx: btn.idx, text: btn.text }
           `,
         }),
@@ -1580,7 +1580,7 @@ async function main() {
      */
     {
       /** 先清空 localStorage 历史，确保干净起点 */
-      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.evaluate(() => localStorage.removeItem('silkpulse-exec-history'))
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
       await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
@@ -1659,7 +1659,7 @@ async function main() {
 
     /** 20.5 exec 编辑器 Tab/Shift+Tab —— 单行缩进/反缩进 + 多行选区批量缩进/反缩进 */
     {
-      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.evaluate(() => localStorage.removeItem('silkpulse-exec-history'))
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
       await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
@@ -1756,7 +1756,7 @@ async function main() {
     /** 21. exec 执行历史 —— 控制台 UI 执行代码后历史侧栏记录、点击回填、清空 */
     {
       /** 先清空 localStorage 历史，确保干净起点 */
-      await consolePage.evaluate(() => localStorage.removeItem('clarosight-exec-history'))
+      await consolePage.evaluate(() => localStorage.removeItem('silkpulse-exec-history'))
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
       /** 选中第一个设备 */
@@ -1813,7 +1813,7 @@ async function main() {
 
       /** 验证历史持久化到 localStorage */
       const persisted = await consolePage.evaluate(() => {
-        const raw = localStorage.getItem('clarosight-exec-history')
+        const raw = localStorage.getItem('silkpulse-exec-history')
         if (!raw) return null
         try { return JSON.parse(raw) } catch { return null }
       })
@@ -2003,20 +2003,20 @@ async function main() {
 
     /** 20. skill CLI —— network 命令展示 headers + inspect 聚合命令 */
     {
-      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/clarosight.mjs')
+      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/silkpulse.mjs')
       /** network 命令：应输出含请求头/响应头 */
       const netOut = execSync(
         `node ${skillScript} network ${device.id}`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       const netHasHeaders = netOut.includes('请求头') || netOut.includes('content-type')
 
       /** inspect 命令：应聚合 错误 + 异常网络 + 慢请求 Top + 快照 */
       const inspectOut = execSync(
         `node ${skillScript} inspect ${device.id}`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
-      const inspectOk = inspectOut.includes('clarosight 设备诊断聚合')
+      const inspectOk = inspectOut.includes('silkpulse 设备诊断聚合')
         && inspectOut.includes('## 错误')
         && inspectOut.includes('## 异常网络请求')
         && inspectOut.includes('## 慢请求 Top')
@@ -2044,11 +2044,11 @@ async function main() {
        */
       const logsFull = execSync(
         `node ${skillScript} logs ${device.id}`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       const logsTail = execSync(
         `node ${skillScript} logs ${device.id} 5`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       const fullLines = logsFull.split('\n').filter((l) => l.trim().startsWith('['))
       const tailLines = logsTail.split('\n').filter((l) => l.trim().startsWith('['))
@@ -2085,11 +2085,11 @@ async function main() {
 
       const errorsFull = execSync(
         `node ${skillScript} errors ${device.id}`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       const errorsTail = execSync(
         `node ${skillScript} errors ${device.id} 3`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       /** errors 输出每条以 [时间戳] 开头，空行分隔 */
       const fullErrLines = errorsFull.split('\n').filter((l) => l.trim().startsWith('['))
@@ -2451,10 +2451,10 @@ async function main() {
       })
 
       /** skill CLI 验证：devices 命令输出含"在线" */
-      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/clarosight.mjs')
+      const skillScript = path.join(process.cwd(), 'tools/skill/scripts/silkpulse.mjs')
       const devicesOut = execSync(
         `node ${skillScript} devices`,
-        { env: { ...process.env, CLAROSIGHT_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
       )
       const skillHasOnline = devicesOut.includes('在线')
 

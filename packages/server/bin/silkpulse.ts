@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * clarosight CLI 入口 —— 启动调试服务器
+ * silkpulse CLI 入口 —— 启动调试服务器
  *
  * 用法：
- *   clarosight                  # 默认端口 8080
- *   clarosight --port 3000      # 指定端口
- *   clarosight -p 3000          # 简写
+ *   silkpulse                  # 默认端口 8080
+ *   silkpulse --port 3000      # 指定端口
+ *   silkpulse -p 3000          # 简写
  */
 
 import path from 'node:path'
@@ -27,7 +27,7 @@ function parseArgs(args: string[]): { port?: number } {
 }
 
 /**
- * 路径定位：bundle 后此文件位于 <pkg>/dist/bin/clarosight.mjs
+ * 路径定位：bundle 后此文件位于 <pkg>/dist/bin/silkpulse.mjs
  * - staticRoot: <pkg>/public（sdk.js + 控制台 UI）
  * - demoPagePath 由 createServer 内部多路径查找（bundle 后 __dirname 不可靠）
  */

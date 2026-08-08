@@ -1,5 +1,5 @@
 /**
- * WebSocket 客户端 —— 连接 clarosight server，处理重连 + 消息路由
+ * WebSocket 客户端 —— 连接 silkpulse server，处理重连 + 消息路由
  *
  * 职责：
  * 1. 连接 /ws/device，发送 register（含设备元信息）
@@ -12,7 +12,7 @@ import type {
   DeviceMessage,
   ServerToDeviceMessage,
   DeviceInfo,
-} from '@clarosight/shared'
+} from '@silkpulse/shared'
 
 /** 连接选项 */
 export interface WsClientOptions {

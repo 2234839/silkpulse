@@ -1,5 +1,5 @@
 /**
- * clarosight server 入口 —— 启动 HTTP + WebSocket 服务
+ * silkpulse server 入口 —— 启动 HTTP + WebSocket 服务
  *
  * 服务职责：
  * 1. WebSocket /ws/device   —— 接收设备端 SDK 连接（采集数据上报 + exec 指令下发）
@@ -22,25 +22,25 @@ import { maybeGzipResponse } from './gzip.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-export interface ClarosightServerOptions {
+export interface SilkPulseServerOptions {
   /** HTTP 端口，默认 8080 */
   port?: number
   /** 静态资源根目录（控制台 UI + sdk），默认 dist同级的 public */
   staticRoot?: string
   /** demo 测试页路径（/demo 路由 serve），默认 dist 同级的 ../../../examples/test-page.html */
   demoPagePath?: string
-  /** 项目数据文件路径（默认 ~/.clarosight/projects.json） */
+  /** 项目数据文件路径（默认 ~/.silkpulse/projects.json） */
   projectDataPath?: string
 }
 
 /**
- * 创建并启动 clarosight server
+ * 创建并启动 silkpulse server
  */
-export function createServer(options: ClarosightServerOptions = {}): http.Server {
+export function createServer(options: SilkPulseServerOptions = {}): http.Server {
   const port = options.port ?? 8080
 
-  /** 项目数据持久化路径：优先 options，否则用环境变量，最后默认 ~/.clarosight/projects.json */
-  const defaultDataDir = process.env.CLAROSIGHT_DATA_DIR ?? path.join(process.env.HOME ?? '/tmp', '.clarosight')
+  /** 项目数据持久化路径：优先 options，否则用环境变量，最后默认 ~/.silkpulse/projects.json */
+  const defaultDataDir = process.env.SILKPULSE_DATA_DIR ?? path.join(process.env.HOME ?? '/tmp', '.silkpulse')
   const projectDataPath = options.projectDataPath ?? path.join(defaultDataDir, 'projects.json')
   const projectStore = new ProjectStore(projectDataPath)
   const auth = new AuthManager(projectStore)
@@ -134,7 +134,7 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
           const qApiKey = url.searchParams.get('apiKey')
           const qProjectId = url.searchParams.get('projectId')
           /** 默认用超管密钥（demo 页面是 server 本地测试页，用超管密钥直连） */
-          const envAdminKey = process.env.CLAROSIGHT_ADMIN_KEY
+          const envAdminKey = process.env.SILKPULSE_ADMIN_KEY
           const injectAttrs = qApiKey && qProjectId
             ? `data-api-key="${qApiKey}" data-project-id="${qProjectId}"`
             : envAdminKey
@@ -307,14 +307,14 @@ export function createServer(options: ClarosightServerOptions = {}): http.Server
   const { notifyDeviceListChanged } = setupWebSocket(wss, registry)
 
   server.listen(port, () => {
-    console.log(`\n  clarosight 服务已启动 → http://localhost:${port}`)
+    console.log(`\n  silkpulse 服务已启动 → http://localhost:${port}`)
     console.log(`  控制台：浏览器打开 http://localhost:${port}`)
     console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
     console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
     if (auth.isAuthEnabled()) {
       console.log(`  🔒 鉴权已启用（${auth.hasAdminKey() ? '超管密钥 + ' : ''}${projectStore.list().length} 个项目）`)
     } else {
-      console.log(`  ⚠️  鉴权未启用（设置 CLAROSIGHT_ADMIN_KEY 环境变量来开启）`)
+      console.log(`  ⚠️  鉴权未启用（设置 SILKPULSE_ADMIN_KEY 环境变量来开启）`)
     }
     console.log('')
   })
@@ -390,8 +390,8 @@ function guessContentType(filePath: string): string {
 /** 控制台未构建时的占位 HTML */
 function controlUnavailableHtml(): string {
   return `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px">
-<h1>clarosight server 已启动</h1>
-<p>控制台 UI 尚未构建。请执行：<code>pnpm --filter @clarosight/console-ui build</code></p>
+<h1>silkpulse server 已启动</h1>
+<p>控制台 UI 尚未构建。请执行：<code>pnpm --filter @silkpulse/console-ui build</code></p>
 <p>SDK 接入：在目标页面注入 <code>&lt;script src="/sdk.js"&gt;&lt;/script&gt;</code></p>
 <p>HTTP API：<code>GET /api/devices</code> 查看在线设备</p>
 </body></html>`
@@ -408,7 +408,7 @@ function injectScriptCode(origin: string, projectId?: string): string {
     `s.dataset.server='${origin}'`,
     projectId ? `s.dataset.projectId='${projectId}'` : '',
   ].filter(Boolean).join(';')
-  return `(function(){var k='__clarosight_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
+  return `(function(){var k='__silkpulse_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
 }
 
 /**
@@ -426,10 +426,10 @@ function buildBookmarklet(origin: string, projectId?: string): string {
 function buildUserscript(origin: string, projectId?: string): string {
   const code = injectScriptCode(origin, projectId)
   return `// ==UserScript==
-// @name         clarosight 远程调试注入
-// @namespace    clarosight
+// @name         silkpulse 远程调试注入
+// @namespace    silkpulse
 // @version      0.1.0
-// @description  自动注入 clarosight SDK，将当前页面接入远程调试
+// @description  自动注入 silkpulse SDK，将当前页面接入远程调试
 // @match        *://*/*
 // @grant        none
 // @run-at       document-end

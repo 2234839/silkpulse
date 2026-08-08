@@ -17,7 +17,7 @@
  * 在错误停止重复（2s 无新错误）或出现不同错误时 flush 汇总。
  */
 
-import type { ErrorEntry } from '@clarosight/shared'
+import type { ErrorEntry } from '@silkpulse/shared'
 import { resolveOriginalPosition } from './source-map-helper.js'
 
 type ErrorSink = (entry: ErrorEntry) => void

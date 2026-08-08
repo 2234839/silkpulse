@@ -1,14 +1,14 @@
-# clarosight
+# silkpulse
 
 **AI 原生的远程设备调试器** —— 让 AI 直接查看、诊断、操作远程页面（线上 H5、移动端、webview 等无法用本地 DevTools 调试的环境）。
 
 定位 = PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。
 
-## 为什么用 clarosight
+## 为什么用 silkpulse
 
-用户报告"线上页面白屏""手机上打不开"时，开发者无法用本地 DevTools 调试远程设备。clarosight 让 **AI agent 直接接入远程页面**——看页面结构、读 console/网络/错误、执行诊断代码、操作元素，完成"远程诊断→操作→验证"的完整闭环。
+用户报告"线上页面白屏""手机上打不开"时，开发者无法用本地 DevTools 调试远程设备。silkpulse 让 **AI agent 直接接入远程页面**——看页面结构、读 console/网络/错误、执行诊断代码、操作元素，完成"远程诊断→操作→验证"的完整闭环。
 
-| | PageSpy | chii | vite-plugin-pilot | **clarosight** |
+| | PageSpy | chii | vite-plugin-pilot | **silkpulse** |
 |---|---|---|---|---|
 | 远程设备调试 | ✅ | ✅ | ❌（仅本地 dev server） | ✅ |
 | AI-native | ❌ | ❌ | ✅ | ✅ |
@@ -27,18 +27,18 @@
 
 ### AI 操作（exec 通道）
 AI 在远程设备执行任意诊断 JS，内置辅助函数：
-- `__clarosight_click(idx)` — 点击快照中的元素（触发完整鼠标事件序列，覆盖监听 mousedown 的自定义组件）
-- `__clarosight_setValue(idx, val)` — 设置表单值（框架兼容，**支持 input/textarea/select/checkbox/radio**；checkbox 传 `true`/`false` 勾选/取消，radio 选中并自动取消同组互斥）
-- `__clarosight_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup，**React/Vue 受控组件兼容**——用原生 setter 累加 value，绕过框架对 `el.value` 的 setter 覆盖）
-- `__clarosight_scroll(idx, x, y)` — 滚动元素内部（idx<0 时滚动整个窗口），触发懒加载/检查 sticky
-- `__clarosight_scrollIntoView(idx, block?)` — 滚动元素到可视区域（居中/顶部/底部）
-- `__clarosight_hover(idx)` — 鼠标悬停（触发 mouseover/mouseenter），展开下拉菜单/tooltip
-- `__clarosight_pressKey(idx, key, mods?)` — 按键（Enter/Escape/方向键/快捷键，派发 keydown+keyup；idx<0 对当前焦点元素；mods 可选修饰键）
-- `__clarosight_wait(ms)` — 异步等待
-- `__clarosight_snapshot()` — 手动取快照
-- `__clarosight_sourcemap(line, col, sourceUrl?)` — 解析 source map，压缩位置 → 原始源码位置
-- `__clarosight_sourcemapStack(frames[])` — 批量解析堆栈帧
-- `__clarosight_storage(type?)` — 查询 localStorage/sessionStorage/cookie（返回 `{key:value}`，诊断登录态/会话/配置异常）
+- `__silkpulse_click(idx)` — 点击快照中的元素（触发完整鼠标事件序列，覆盖监听 mousedown 的自定义组件）
+- `__silkpulse_setValue(idx, val)` — 设置表单值（框架兼容，**支持 input/textarea/select/checkbox/radio**；checkbox 传 `true`/`false` 勾选/取消，radio 选中并自动取消同组互斥）
+- `__silkpulse_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup，**React/Vue 受控组件兼容**——用原生 setter 累加 value，绕过框架对 `el.value` 的 setter 覆盖）
+- `__silkpulse_scroll(idx, x, y)` — 滚动元素内部（idx<0 时滚动整个窗口），触发懒加载/检查 sticky
+- `__silkpulse_scrollIntoView(idx, block?)` — 滚动元素到可视区域（居中/顶部/底部）
+- `__silkpulse_hover(idx)` — 鼠标悬停（触发 mouseover/mouseenter），展开下拉菜单/tooltip
+- `__silkpulse_pressKey(idx, key, mods?)` — 按键（Enter/Escape/方向键/快捷键，派发 keydown+keyup；idx<0 对当前焦点元素；mods 可选修饰键）
+- `__silkpulse_wait(ms)` — 异步等待
+- `__silkpulse_snapshot()` — 手动取快照
+- `__silkpulse_sourcemap(line, col, sourceUrl?)` — 解析 source map，压缩位置 → 原始源码位置
+- `__silkpulse_sourcemapStack(frames[])` — 批量解析堆栈帧
+- `__silkpulse_storage(type?)` — 查询 localStorage/sessionStorage/cookie（返回 `{key:value}`，诊断登录态/会话/配置异常）
 
 ### 多形态接入
 - **script 标签**：能改源码时
@@ -49,7 +49,7 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 多设备场景下区分"哪台是哪台"：
 - **接入时预设**：`<script src=".../sdk.js" data-tags="生产,用户A" data-note="iPhone 15"></script>`
 - **运行时修改**：控制台 UI 内联编辑（选中设备点 🏷️），或 `POST /api/devices/:id/tags`
-- **AI 可用**：`clarosight tag <id> "标签1,标签2" 备注内容`
+- **AI 可用**：`silkpulse tag <id> "标签1,标签2" 备注内容`
 - **持久保留**：SPA 路由变化、断线重连都不覆盖 server 侧标签
 
 ### 可靠性
@@ -68,14 +68,14 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 
 ```
 远程设备 (被调试页面)
-  │  clarosight SDK (注入)  ← <script src="http://server/sdk.js">
+  │  silkpulse SDK (注入)  ← <script src="http://server/sdk.js">
   │   · console/network/error 采集
   │   · compact 快照 (移植 pilot)
   │   · exec 通道 (接收指令 → eval → 回传)
   └──────────┬──────────
          WebSocket (上报 + 接收指令)
              ▼
-clarosight server (Node + TS)
+silkpulse server (Node + TS)
   · 设备注册表 + 环形缓冲区
   · WS 中转：设备 ↔ 控制台
   · HTTP API：AI skill 调用入口
@@ -97,13 +97,13 @@ vp run -r build    # 构建所有包并复制产物到 server/public
 
 ```bash
 vp run start    # 默认端口 8080
-# 或 node packages/server/dist/bin/clarosight.mjs --port 3000
+# 或 node packages/server/dist/bin/silkpulse.mjs --port 3000
 ```
 
 ### 部署到生产
 
 构建后只需要三个产物目录，无需 `node_modules`（ws 等依赖已通过 `vite.config.ts` 的 `pack.deps.alwaysBundle` 打包进 bundle）：
-- `packages/server/dist/` — server bundle（含 `bin/clarosight.mjs` 入口）
+- `packages/server/dist/` — server bundle（含 `bin/silkpulse.mjs` 入口）
 - `packages/server/public/` — 控制台 UI + SDK（`sdk.js`）
 - `examples/test-page.html` — demo 测试页
 
@@ -113,20 +113,20 @@ vp run start    # 默认端口 8080
 vp run -r build
 
 # 上传到服务器
-rsync -avz --delete packages/server/dist/   root@<server>:/app/clarosight/dist/
-rsync -avz --delete packages/server/public/ root@<server>:/app/clarosight/public/
-rsync -avz examples/test-page.html          root@<server>:/app/clarosight/examples/
+rsync -avz --delete packages/server/dist/   root@<server>:/app/silkpulse/dist/
+rsync -avz --delete packages/server/public/ root@<server>:/app/silkpulse/public/
+rsync -avz examples/test-page.html          root@<server>:/app/silkpulse/examples/
 
 # 在服务器上启动（用 PM2 / systemd 管理进程）
-CLAROSIGHT_ADMIN_KEY=<你的密钥> node /app/clarosight/dist/bin/clarosight.mjs --port 8080
+SILKPULSE_ADMIN_KEY=<你的密钥> node /app/silkpulse/dist/bin/silkpulse.mjs --port 8080
 ```
 
 #### 方式二：Docker
 
 ```bash
 vp run -r build
-docker build -t clarosight .
-docker run -d -p 8080:8080 -e CLAROSIGHT_ADMIN_KEY=<你的密钥> -v ./data:/data clarosight
+docker build -t silkpulse .
+docker run -d -p 8080:8080 -e SILKPULSE_ADMIN_KEY=<你的密钥> -v ./data:/data silkpulse
 ```
 
 Dockerfile 示例：
@@ -138,16 +138,16 @@ COPY packages/server/dist/     /app/dist/
 COPY packages/server/public/   /app/public/
 COPY examples/test-page.html   /app/examples/test-page.html
 ENV NODE_ENV=production
-ENV CLAROSIGHT_DATA_DIR=/data
-CMD ["node", "/app/dist/bin/clarosight.mjs", "--port", "8080"]
+ENV SILKPULSE_DATA_DIR=/data
+CMD ["node", "/app/dist/bin/silkpulse.mjs", "--port", "8080"]
 ```
 
 #### 环境变量
 
 | 变量 | 说明 |
 |---|---|
-| `CLAROSIGHT_ADMIN_KEY` | 超管密钥（鉴权用，**必设**） |
-| `CLAROSIGHT_DATA_DIR` | 数据目录（默认 `/data`） |
+| `SILKPULSE_ADMIN_KEY` | 超管密钥（鉴权用，**必设**） |
+| `SILKPULSE_DATA_DIR` | 数据目录（默认 `/data`） |
 | `--port` | 监听端口（默认 `8080`） |
 
 #### 反向代理
@@ -180,28 +180,28 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 ### AI 接入（skill）
 
-AI agent 通过 clarosight skill 操作设备：
+AI agent 通过 silkpulse skill 操作设备：
 
 ```bash
 # 1. 查看在线设备（有错误的自动置顶）
-node tools/skill/scripts/clarosight.mjs devices
+node tools/skill/scripts/silkpulse.mjs devices
 
 # 2. 取页面快照（AI 友好的 compact 文本）
-node tools/skill/scripts/clarosight.mjs snapshot <id>
+node tools/skill/scripts/silkpulse.mjs snapshot <id>
 
 # 3. 执行诊断代码（支持 stdin 传复杂多行代码）
-echo 'return { title: document.title, url: location.href }' | node tools/skill/scripts/clarosight.mjs exec <id>
+echo 'return { title: document.title, url: location.href }' | node tools/skill/scripts/silkpulse.mjs exec <id>
 
 # 4. 查看错误 / 日志 / 网络
-node tools/skill/scripts/clarosight.mjs errors <id> 5         # 最近 5 条错误（每条带 stack，省 token）
-node tools/skill/scripts/clarosight.mjs logs <id> 20          # 最近 20 条日志（省 token，AI 常用）
-node tools/skill/scripts/clarosight.mjs network <id>   # 含关键请求头/响应头
+node tools/skill/scripts/silkpulse.mjs errors <id> 5         # 最近 5 条错误（每条带 stack，省 token）
+node tools/skill/scripts/silkpulse.mjs logs <id> 20          # 最近 20 条日志（省 token，AI 常用）
+node tools/skill/scripts/silkpulse.mjs network <id>   # 含关键请求头/响应头
 
 # 一键诊断聚合（错误 + 失败网络 + 慢请求 + WebSocket 连接 + 日志 + 快照，AI 最高效入口）
-node tools/skill/scripts/clarosight.mjs inspect <id>
+node tools/skill/scripts/silkpulse.mjs inspect <id>
 
 # 5. 生成接入片段
-node tools/skill/scripts/clarosight.mjs inject bookmarklet
+node tools/skill/scripts/silkpulse.mjs inject bookmarklet
 ```
 
 详见 [tools/skill/SKILL.md](tools/skill/SKILL.md)。
@@ -222,7 +222,7 @@ node tools/skill/scripts/clarosight.mjs inject bookmarklet
 ## 项目结构
 
 ```
-clarosight/
+silkpulse/
 ├── packages/
 │   ├── shared/          # 共享协议类型（device/console/server 三方消息契约）
 │   ├── server/          # Node server：WS 中转 + HTTP API + 静态资源
@@ -261,15 +261,15 @@ clarosight/
 vp check
 
 # 启动 server
-node packages/server/dist/bin/clarosight.mjs --port 8083
+node packages/server/dist/bin/silkpulse.mjs --port 8083
 
 # 运行无头测试（puppeteer-core + 系统 chromium）
-CLAROSIGHT_SERVER=http://localhost:8083 vp test
+SILKPULSE_SERVER=http://localhost:8083 vp test
 ```
 
 CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 94 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__clarosight_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select + checkbox/radio，radio 选中时手动取消同组互斥**——合成事件不触发浏览器 pre-click 默认行为，互斥需自行实现；快照 options value:text 双标注）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、**连续重复日志聚合**（循环/spam 相同日志聚合成一条 + repeat 计数，避免占满缓冲区挤掉有价值的诊断日志，与 Chrome DevTools ⓧN 一致）、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集** + **FormData body 字段名采集**（字段名 + 文件名，诊断表单/文件上传不丢字段信息）+ **WebSocket 采集**（劫持 WS 构造函数，连接/send/recv/close 帧时间线，Blob 消息异步读取文本，对齐 DevTools WS Messages 面板））、**echo 端点非 JSON body 不崩溃**（FormData multipart 等非 JSON body 优雅返回文本而非 crash server）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、**复制全部错误**（聚合当前过滤后的错误为文本，对齐 inspect CLI 格式）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**network 详情 JSON body 格式化**（请求体/响应体为 JSON 时自动美化缩进，压缩 JSON 可读性极差）、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合含日志段 + **WebSocket 连接段**（WS 条目独立展示，状态/收发帧数/error 事件，不再被误归入失败网络） + **失败请求响应体**（诊断 4xx/5xx 的错误原因））、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）、**exec 编辑器 Tab/Shift+Tab**（单行缩进/反缩进 + 多行选区批量缩进/反缩进，v-model 双向绑定下用 nextTick 恢复光标/选区）、**exec pressKey 键盘交互**（Enter 提交 / Escape 清空 / idx<0 对 activeElement 按键，派发 keydown+keyup 覆盖主流框架）、**快照序列化截断阈值提升**（serializeResult 4K→20K，页面元素增多后完整快照 JSON 不再被截断导致解析失败，同时仍挡住 `return document` 失误）。
+73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__silkpulse_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select + checkbox/radio，radio 选中时手动取消同组互斥**——合成事件不触发浏览器 pre-click 默认行为，互斥需自行实现；快照 options value:text 双标注）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、**连续重复日志聚合**（循环/spam 相同日志聚合成一条 + repeat 计数，避免占满缓冲区挤掉有价值的诊断日志，与 Chrome DevTools ⓧN 一致）、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集** + **FormData body 字段名采集**（字段名 + 文件名，诊断表单/文件上传不丢字段信息）+ **WebSocket 采集**（劫持 WS 构造函数，连接/send/recv/close 帧时间线，Blob 消息异步读取文本，对齐 DevTools WS Messages 面板））、**echo 端点非 JSON body 不崩溃**（FormData multipart 等非 JSON body 优雅返回文本而非 crash server）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、**复制全部错误**（聚合当前过滤后的错误为文本，对齐 inspect CLI 格式）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**network 详情 JSON body 格式化**（请求体/响应体为 JSON 时自动美化缩进，压缩 JSON 可读性极差）、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合含日志段 + **WebSocket 连接段**（WS 条目独立展示，状态/收发帧数/error 事件，不再被误归入失败网络） + **失败请求响应体**（诊断 4xx/5xx 的错误原因））、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）、**exec 编辑器 Tab/Shift+Tab**（单行缩进/反缩进 + 多行选区批量缩进/反缩进，v-model 双向绑定下用 nextTick 恢复光标/选区）、**exec pressKey 键盘交互**（Enter 提交 / Escape 清空 / idx<0 对 activeElement 按键，派发 keydown+keyup 覆盖主流框架）、**快照序列化截断阈值提升**（serializeResult 4K→20K，页面元素增多后完整快照 JSON 不再被截断导致解析失败，同时仍挡住 `return document` 失误）。
 
 ## License
 

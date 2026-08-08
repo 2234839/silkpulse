@@ -11,7 +11,7 @@
  * 5. 日志限流：滑动窗口防 log 爆炸打爆 WS/server（error 级不限流）
  */
 
-import type { LogEntry } from '@clarosight/shared'
+import type { LogEntry } from '@silkpulse/shared'
 
 /** 单条日志的内部收集回调 */
 type LogSink = (entry: LogEntry) => void
@@ -144,7 +144,7 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       type: 'warn',
-      message: `[clarosight] 日志限流：过去 1s 内丢弃了 ${count} 条非 error 日志（error 级始终上报）`,
+      message: `[silkpulse] 日志限流：过去 1s 内丢弃了 ${count} 条非 error 日志（error 级始终上报）`,
     }
     sink(entry)
   }

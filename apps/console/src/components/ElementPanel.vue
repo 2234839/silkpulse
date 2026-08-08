@@ -18,8 +18,8 @@ import {
   elementColor,
   elementLabel,
 } from '../composables/useLayoutPreview'
-import { FrameCompositor } from '@clarosight/renderer'
-import type { ConsoleMessage, SnapshotElement } from '@clarosight/shared'
+import { FrameCompositor } from '@silkpulse/renderer'
+import type { ConsoleMessage, SnapshotElement } from '@silkpulse/shared'
 
 /** DOM 变化数据（从 useConsoleSocket 传入） */
 interface DomChangeData {
@@ -36,11 +36,11 @@ const props = defineProps<{
   /** 最近一次 DOM 变化的详细数据 */
   domChangeData?: DomChangeData | null
   /** 最新的截图帧（来自 console socket） */
-  screenFrame?: import('@clarosight/shared').ScreenFrame | null
+  screenFrame?: import('@silkpulse/shared').ScreenFrame | null
   /** 远端设备画面共享状态（来自 console socket） */
-  screenShareStatus?: import('@clarosight/shared').ScreenShareStatus | null
+  screenShareStatus?: import('@silkpulse/shared').ScreenShareStatus | null
   /** 远端设备鼠标事件（归一化坐标 0~1） */
-  deviceMouse?: import('@clarosight/shared').MouseEventData | null
+  deviceMouse?: import('@silkpulse/shared').MouseEventData | null
   /** 发送控制台消息到 server */
   sendConsoleMessage?: (msg: ConsoleMessage) => void
 }>()
@@ -511,14 +511,14 @@ function initEditingValue() {
 /**
  * 将编辑后的值同步到远端设备
  *
- * 通过 exec 接口调用 __clarosight_setValue(idx, val)，
+ * 通过 exec 接口调用 __silkpulse_setValue(idx, val)，
  * SDK 端用原生 setter 绕过框架，触发 input/change 事件。
  */
 async function syncValueToRemote(val: string) {
   if (!props.deviceId || selectedElementIdx.value == null) return
   syncingValue.value = true
   try {
-    const code = `return __clarosight_setValue(${selectedElementIdx.value}, ${JSON.stringify(val)})`
+    const code = `return __silkpulse_setValue(${selectedElementIdx.value}, ${JSON.stringify(val)})`
     await apiFetch(`/api/devices/${props.deviceId}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -636,7 +636,7 @@ const elementScreenshotUrl = ref<string | null>(null)
 const screenshotDialogVisible = ref(false)
 
 /**
- * 截取当前选中元素：调用远端 SDK 的 __clarosight_screenshot(idx)
+ * 截取当前选中元素：调用远端 SDK 的 __silkpulse_screenshot(idx)
  *
  * 通过 /api/devices/:id/screenshot?idx=xxx 接口获取二进制图片，
  * 存为 objectURL 在诊断面板内嵌展示，点击可放大查看。

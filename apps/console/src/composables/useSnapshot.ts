@@ -4,7 +4,7 @@
  * 同时获取 compact 文本（AI 友好）和原始 JSON（含 rect 布局信息，供预览渲染）
  */
 import { ref } from 'vue'
-import type { SnapshotData } from '@clarosight/shared'
+import type { SnapshotData } from '@silkpulse/shared'
 import { apiFetch } from '../utils/api'
 
 export function useSnapshot() {

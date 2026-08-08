@@ -8,17 +8,17 @@
  * 4. 回传 {type:'exec-result', execId, result: ExecResult}
  *
  * 暴露给 AI 的页面级辅助函数（exec code 里可直接调用）：
- * - __clarosight_click(idx)
- * - __clarosight_setValue(idx, val) / __clarosight_type(idx, text)
- * - __clarosight_pressKey(idx, key, mods?)
- * - __clarosight_scroll(idx, x, y) / __clarosight_scrollIntoView(idx, block?)
- * - __clarosight_hover(idx)
- * - __clarosight_wait(ms) / __clarosight_snapshot()
- * - __clarosight_sourcemap(...) / __clarosight_sourcemapStack(...)
- * - __clarosight_screenshot(idx?, opts?) — 截取页面或指定元素，返回 dataURL
+ * - __silkpulse_click(idx)
+ * - __silkpulse_setValue(idx, val) / __silkpulse_type(idx, text)
+ * - __silkpulse_pressKey(idx, key, mods?)
+ * - __silkpulse_scroll(idx, x, y) / __silkpulse_scrollIntoView(idx, block?)
+ * - __silkpulse_hover(idx)
+ * - __silkpulse_wait(ms) / __silkpulse_snapshot()
+ * - __silkpulse_sourcemap(...) / __silkpulse_sourcemapStack(...)
+ * - __silkpulse_screenshot(idx?, opts?) — 截取页面或指定元素，返回 dataURL
  */
 
-import type { ServerToDeviceMessage, ExecResult } from '@clarosight/shared'
+import type { ServerToDeviceMessage, ExecResult } from '@silkpulse/shared'
 import { startExecCapture, endExecCapture } from './log-collector.js'
 import { takeSnapshot, getElement, ensureElementIdx } from './snapshot.js'
 import { resolveOriginalPosition, resolveStack } from './source-map-helper.js'
@@ -117,7 +117,7 @@ export function installHelpers(): void {
    * 最后用 .click() 兜底，确保原生默认行为（a 跳转、button 提交）也生效。
    * hover 类的下拉菜单会在 mouseover 时展开，也一并覆盖。
    */
-  w.__clarosight_click = (idx: number): boolean => {
+  w.__silkpulse_click = (idx: number): boolean => {
     const el = getElement(idx) as HTMLElement | undefined
     if (!el) return false
     /** MouseEvent 带 bubbles + cancelable，模拟真实用户点击的事件冒泡与可取消性 */
@@ -139,7 +139,7 @@ export function installHelpers(): void {
    * - radio：val 有值即选中当前，并手动取消同组（同 name）其他 radio —— 合成事件不触发
    *   浏览器的 pre-click 默认行为，互斥需自行实现
    */
-  w.__clarosight_setValue = (idx: number, val: string): boolean => {
+  w.__silkpulse_setValue = (idx: number, val: string): boolean => {
     const el = getElement(idx) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined
     if (!el) return false
     /** checkbox/radio：设 checked 而非 value */
@@ -178,7 +178,7 @@ export function installHelpers(): void {
    * 模拟键盘逐字输入（触发 keydown/keypress/input/keyup 序列）
    * 用于搜索框 autocomplete、监听 keyup 的场景，setValue 不够用时使用
    */
-  w.__clarosight_type = (idx: number, text: string): boolean => {
+  w.__silkpulse_type = (idx: number, text: string): boolean => {
     const el = getElement(idx) as HTMLInputElement | undefined
     if (!el) return false
     el.focus()
@@ -197,8 +197,8 @@ export function installHelpers(): void {
     return true
   }
 
-  /** 异步等待（exec code 中 await __clarosight_wait(100)） */
-  w.__clarosight_wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  /** 异步等待（exec code 中 await __silkpulse_wait(100)） */
+  w.__silkpulse_wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
   /**
    * 滚动页面或元素到指定位置
@@ -208,9 +208,9 @@ export function installHelpers(): void {
    * - 传 idx：滚动该元素内部（如 overflow:auto 的 div）
    *
    * 用途：触发懒加载、检查 sticky 定位、滚动到折叠区域查看内容。
-   * 滚动后 AI 应重新 __clarosight_snapshot() 看页面变化。
+   * 滚动后 AI 应重新 __silkpulse_snapshot() 看页面变化。
    */
-  w.__clarosight_scroll = (idx: number, x: number, y: number): boolean => {
+  w.__silkpulse_scroll = (idx: number, x: number, y: number): boolean => {
     if (idx < 0) {
       window.scrollTo(x, y)
       return true
@@ -227,7 +227,7 @@ export function installHelpers(): void {
    * 用于让某个元素滚入视野：检查懒加载元素、让 sticky header 遮挡的元素可见。
    * block/inline 参数对应原生 scrollIntoViewOptions，默认 'center'（居中展示）。
    */
-  w.__clarosight_scrollIntoView = (idx: number, block: ScrollLogicalPosition = 'center'): boolean => {
+  w.__silkpulse_scrollIntoView = (idx: number, block: ScrollLogicalPosition = 'center'): boolean => {
     const el = getElement(idx)
     if (!el) return false
     ;(el as HTMLElement).scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' })
@@ -241,7 +241,7 @@ export function installHelpers(): void {
    * CSS :hover 伪类无法通过 JS 直接触发，但 mouseover/mouseenter 事件能
    * 覆盖依赖 JS 的 hover 逻辑（大部分框架组件的下拉/tooltip）。
    */
-  w.__clarosight_hover = (idx: number): boolean => {
+  w.__silkpulse_hover = (idx: number): boolean => {
     const el = getElement(idx)
     if (!el) return false
     const target = el as HTMLElement
@@ -263,7 +263,7 @@ export function installHelpers(): void {
    * idx 指定目标元素（先 focus 再按键）；idx<0 时对当前 activeElement 按键。
    * mods 可选修饰键 { ctrl, shift, alt, meta }，用于模拟组合键。
    */
-  w.__clarosight_pressKey = (
+  w.__silkpulse_pressKey = (
     idx: number,
     /** KeyboardEvent.key 值，如 'Enter' / 'Escape' / 'ArrowDown' / 'a' */
     key: string,
@@ -296,26 +296,26 @@ export function installHelpers(): void {
   }
 
   /** 取页面快照（exec code 也可手动调用） */
-  w.__clarosight_snapshot = (): ReturnType<typeof takeSnapshot> => takeSnapshot()
+  w.__silkpulse_snapshot = (): ReturnType<typeof takeSnapshot> => takeSnapshot()
 
   /**
    * source map 解析：把压缩代码位置映射回原始源码位置
-   * 用法：const pos = await __clarosight_sourcemap(line, col, sourceUrl?)
+   * 用法：const pos = await __silkpulse_sourcemap(line, col, sourceUrl?)
    * sourceUrl 省略时用当前页面 URL
    * 返回 { source, line, column, name? } 或 null
    */
-  w.__clarosight_sourcemap = (
+  w.__silkpulse_sourcemap = (
     line: number,
     col: number,
     sourceUrl?: string,
-  ): Promise<import('@clarosight/shared').SourceMapPosition | null> =>
+  ): Promise<import('@silkpulse/shared').SourceMapPosition | null> =>
     resolveOriginalPosition(sourceUrl ?? location.href, line, col)
 
   /**
    * 批量解析堆栈帧（紧凑文本输出，AI 直接读）
-   * 用法：const lines = await __clarosight_sourcemapStack([{url, line, col}, ...])
+   * 用法：const lines = await __silkpulse_sourcemapStack([{url, line, col}, ...])
    */
-  w.__clarosight_sourcemapStack = (
+  w.__silkpulse_sourcemapStack = (
     frames: Array<{ url: string; line: number; col: number }>,
   ): Promise<string[]> => resolveStack(frames)
 
@@ -329,7 +329,7 @@ export function installHelpers(): void {
    * type: 'local'（默认）/ 'session' / 'cookie'
    * 返回 { key: value } 对象，单个值截断到 200 字符（防过大值撑爆 exec 结果）
    */
-  w.__clarosight_storage = (
+  w.__silkpulse_storage = (
     /** 查询类型：localStorage / sessionStorage / cookie */
     type: 'local' | 'session' | 'cookie' = 'local',
   ): Record<string, string> => {
@@ -365,7 +365,7 @@ export function installHelpers(): void {
    * 已有 idx 就复用；没有就分配新的（写入 elementsRegistry）。
    * 返回 -1 表示元素已脱离文档。
    */
-  w.__clarosight_ensureIdx = (el: Element): number => ensureElementIdx(el)
+  w.__silkpulse_ensureIdx = (el: Element): number => ensureElementIdx(el)
 
   /**
    * 按 idx 取元素（Element 面板的 inspect 代码用）
@@ -374,7 +374,7 @@ export function installHelpers(): void {
    * 注意：ensureElementIdx 打的 idx 不写 DOM 属性（避免污染），
    * 所以不能用 querySelector 反查，必须走 elementsRegistry。
    */
-  w.__clarosight_getElement = (idx: number): Element | undefined => getElement(idx)
+  w.__silkpulse_getElement = (idx: number): Element | undefined => getElement(idx)
 
   /**
    * 截取页面或指定元素的截图（返回 dataURL）
@@ -387,11 +387,11 @@ export function installHelpers(): void {
    * @returns dataURL 字符串（可直接用于 <img> 或下载）
    *
    * 用法：
-   * - 全页截图：return await __clarosight_screenshot()
-   * - 指定元素：return await __clarosight_screenshot(42)
-   * - 高质量 PNG：return await __clarosight_screenshot(42, { format:'png', scale:2 })
+   * - 全页截图：return await __silkpulse_screenshot()
+   * - 指定元素：return await __silkpulse_screenshot(42)
+   * - 高质量 PNG：return await __silkpulse_screenshot(42, { format:'png', scale:2 })
    */
-  w.__clarosight_screenshot = async (
+  w.__silkpulse_screenshot = async (
     idx?: number,
     opts?: { format?: 'jpg' | 'png' | 'webp'; quality?: number; scale?: number; backgroundColor?: string },
   ): Promise<string> => {
@@ -401,7 +401,7 @@ export function installHelpers(): void {
     /** 确定截图目标：指定 idx 的元素，或 document.body */
     const target = idx != null ? getElement(idx) : document.body
     if (!target) {
-      throw new Error(`__clarosight_screenshot: idx=${idx} 对应的元素不存在`)
+      throw new Error(`__silkpulse_screenshot: idx=${idx} 对应的元素不存在`)
     }
 
     /** 合并默认选项 */
@@ -444,7 +444,7 @@ export async function handleExec(code: string, execId: string): Promise<void> {
   startExecCapture()
   let success = true
   let result: string | undefined
-  let resultValue: import('@clarosight/shared').SerializedValue | undefined
+  let resultValue: import('@silkpulse/shared').SerializedValue | undefined
   let error: string | undefined
 
   try {

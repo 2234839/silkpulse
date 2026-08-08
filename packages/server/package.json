@@ -1,5 +1,5 @@
 {
-  "name": "@clarosight/server",
+  "name": "@silkpulse/server",
   "version": "0.0.0",
   "type": "module",
   "exports": {
@@ -7,17 +7,17 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "clarosight": "./dist/bin/clarosight.mjs"
+    "silkpulse": "./dist/bin/silkpulse.mjs"
   },
   "scripts": {
-    "build": "vp pack src/index.ts --format esm --out-dir dist && vp pack bin/clarosight.ts --format esm --out-dir dist/bin",
+    "build": "vp pack src/index.ts --format esm --out-dir dist && vp pack bin/silkpulse.ts --format esm --out-dir dist/bin",
     "dev": "vp pack src/index.ts --format esm --out-dir dist --watch",
-    "start": "node dist/bin/clarosight.mjs",
+    "start": "node dist/bin/silkpulse.mjs",
     "check": "vp check"
   },
   "dependencies": {
-    "@clarosight/feature-detect": "workspace:*",
-    "@clarosight/shared": "workspace:*",
+    "@silkpulse/feature-detect": "workspace:*",
+    "@silkpulse/shared": "workspace:*",
     "ws": "catalog:"
   },
   "devDependencies": {

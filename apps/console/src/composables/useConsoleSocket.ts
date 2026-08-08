@@ -15,7 +15,7 @@ import type {
   ScreenShareStatus,
   MouseEventData,
   ServerToConsoleMessage,
-} from '@clarosight/shared'
+} from '@silkpulse/shared'
 import { useAuth } from './useAuth'
 import { apiFetch } from '../utils/api'
 
@@ -376,7 +376,7 @@ export function useConsoleSocket() {
   }
 
   /** 发送控制台消息到 server（start/stop screen-share 等） */
-  function sendConsoleMessage(msg: import('@clarosight/shared').ConsoleMessage): void {
+  function sendConsoleMessage(msg: import('@silkpulse/shared').ConsoleMessage): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))
     }

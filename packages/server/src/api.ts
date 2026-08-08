@@ -9,9 +9,9 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
 import type { AuthManager, AuthContext } from './auth.js'
 import { sendSnapshot } from './snapshot-text.js'
-import { generateFeatureDetectScript } from '@clarosight/feature-detect'
+import { generateFeatureDetectScript } from '@silkpulse/feature-detect'
 import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
-import { renderSkillPrompt } from '@clarosight/shared'
+import { renderSkillPrompt } from '@silkpulse/shared'
 
 /**
  * POST body 最大字节数
@@ -136,7 +136,7 @@ export async function handleApiRoute(
   const skillMatch = pathname.match(/^\/api\/skill\/([^/]+)$/)
   if (skillMatch && req.method === 'GET') {
     const [, skillName] = skillMatch
-    if (skillName !== 'clarosight') {
+    if (skillName !== 'silkpulse') {
       sendJson(res, { error: `未知的 skill: ${skillName}` }, 404)
       return true
     }
@@ -203,7 +203,7 @@ export async function handleApiRoute(
 
     /** /api/devices/:id/snapshot —— 页面快照（默认 text/plain，?format=json 返回原始 JSON） */
     case 'snapshot': {
-      const result = await execOnDevice(registry, deviceId, 'return __clarosight_snapshot()')
+      const result = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
       if (!result.success) {
         sendText(res, `[快照失败] ${result.error}`, 500)
         return true
@@ -241,8 +241,8 @@ export async function handleApiRoute(
       const quality = url.searchParams.get('quality') ?? '0.8'
       const scale = url.searchParams.get('scale') ?? '1'
       const idxArg = idx ? Number(idx) : 'undefined'
-      /** 构造 exec 代码调用 __clarosight_screenshot */
-      const code = `return await __clarosight_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
+      /** 构造 exec 代码调用 __silkpulse_screenshot */
+      const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
         sendText(res, `[截图失败] ${result.error}`, 500)
@@ -297,7 +297,7 @@ export async function handleApiRoute(
      * /api/devices/:id/element/tree?idx=N —— 取某个节点的直接子元素列表
      *
      * 不传 idx 时取 documentElement（<html>）的直接子元素（首屏）。
-     * 每个元素通过 __clarosight_ensureIdx 打稳定 idx，供后续 inspect/操作复用。
+     * 每个元素通过 __silkpulse_ensureIdx 打稳定 idx，供后续 inspect/操作复用。
      * 返回 JSON：[{idx, tag, id, classes, childCount, text?}]
      */
     case 'element/tree': {
@@ -385,7 +385,7 @@ export async function handleApiRoute(
      * GET ?type=local|session|cookie → 返回完整 { key: value }（不截断，console UI 编辑用）
      * POST {action:'set'|'delete', type, key, value?} → 写入/删除
      *
-     * 与 SDK 的 __clarosight_storage 区分：
+     * 与 SDK 的 __silkpulse_storage 区分：
      * - 那个给 AI 用（截断到 200 字符防撑爆上下文）
      * - 这个给 console UI 用（完整值，编辑需要）
      *
@@ -563,7 +563,7 @@ export async function execOnDevice(
   registry: DeviceRegistry,
   deviceId: string,
   code: string
-): Promise<import('@clarosight/shared').ExecResult> {
+): Promise<import('@silkpulse/shared').ExecResult> {
   const device = registry.get(deviceId)
   if (!device) {
     return { success: false, error: `设备 ${deviceId} 不在线` }
@@ -603,7 +603,7 @@ export async function execOnDevice(
  * shadow=true 时取 shadowRoot 的子元素（parentIdx 必须指向 shadow host）。
  *
  * 每个元素返回 {idx, tag, attributes, childCount, text?, hasShadow?}：
- * - idx：__clarosight_ensureIdx 打稳定 idx，供后续 inspect/操作复用
+ * - idx：__silkpulse_ensureIdx 打稳定 idx，供后续 inspect/操作复用
  * - attributes：完整属性列表 [{name, value}]（前端渲染所有属性）
  * - text：叶子元素（无子元素 + 无 shadow）的可见文本（完整返回，前端换行展示）
  * - childCount：子元素数（前端用来决定是否显示"展开"箭头）
@@ -612,12 +612,12 @@ export async function execOnDevice(
 export function buildElementTreeCode(parentIdx: number | null, shadow = false): string {
   if (shadow) {
     return `
-const host = __clarosight_getElement(${parentIdx})
+const host = __silkpulse_getElement(${parentIdx})
 if (!host || !host.shadowRoot) return []
 const result = []
 for (const el of host.shadowRoot.children) {
   const tag = el.tagName.toLowerCase()
-  const idx = __clarosight_ensureIdx(el)
+  const idx = __silkpulse_ensureIdx(el)
   if (idx < 0) continue
   const item = {
     idx, tag,
@@ -638,12 +638,12 @@ return result
 `
   }
   return `
-const parent = ${parentIdx === null ? 'document.documentElement' : `__clarosight_getElement(${parentIdx})`}
+const parent = ${parentIdx === null ? 'document.documentElement' : `__silkpulse_getElement(${parentIdx})`}
 if (!parent) return []
 const result = []
 for (const el of parent.children) {
   const tag = el.tagName.toLowerCase()
-  const idx = __clarosight_ensureIdx(el)
+  const idx = __silkpulse_ensureIdx(el)
   if (idx < 0) continue
   const item = {
     idx, tag,
@@ -687,7 +687,7 @@ const MAX = 50
 function info(el) {
   const tag = el.tagName ? el.tagName.toLowerCase() : '#text'
   const item = {
-    idx: __clarosight_ensureIdx(el),
+    idx: __silkpulse_ensureIdx(el),
     tag,
     attributes: el.attributes ? Array.from(el.attributes).map(a => ({ name: a.name, value: a.value })) : [],
     childCount: el.children ? el.children.length : 0,
@@ -730,12 +730,12 @@ while (queue.length > 0 && results.length < MAX) {
   const children = []
   if (node.children) {
     for (const child of node.children) {
-      children.push({ node: child, path: [...path, { idx: __clarosight_ensureIdx(child), shadow: false }] })
+      children.push({ node: child, path: [...path, { idx: __silkpulse_ensureIdx(child), shadow: false }] })
     }
   }
   if (node.shadowRoot) {
     for (const child of node.shadowRoot.children) {
-      children.push({ node: child, path: [...path, { idx: __clarosight_ensureIdx(child), shadow: true }] })
+      children.push({ node: child, path: [...path, { idx: __silkpulse_ensureIdx(child), shadow: true }] })
     }
   }
   /** 倒序入队（BFS shift 从头部取，倒序入队让 DOM 顺序在前） */
@@ -758,7 +758,7 @@ return results
  */
 function buildElementInspectCode(idx: number): string {
   return `
-const el = __clarosight_getElement(${idx})
+const el = __silkpulse_getElement(${idx})
 if (!el) return { error: '元素不存在或已脱离文档' }
 const cs = getComputedStyle(el)
 const rect = el.getBoundingClientRect()
@@ -836,7 +836,7 @@ const rect = el.getBoundingClientRect()
   const ancestors = []
   let cur = el.parentElement
   for (let i = 0; i < 3 && cur; i++) {
-    const aidx = __clarosight_ensureIdx(cur)
+    const aidx = __silkpulse_ensureIdx(cur)
     ancestors.push({
       idx: aidx,
       tag: cur.tagName.toLowerCase(),
@@ -887,7 +887,7 @@ const rect = el.getBoundingClientRect()
  */
 function buildElementStylesCode(idx: number): string {
   return `
-const el = __clarosight_getElement(${idx})
+const el = __silkpulse_getElement(${idx})
 if (!el) return { error: '元素不存在或已脱离文档' }
 
 /**

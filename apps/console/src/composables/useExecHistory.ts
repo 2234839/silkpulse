@@ -18,7 +18,7 @@ interface ExecHistoryItem {
 
 /** 最多保留的历史条数（避免 localStorage 膨胀） */
 const MAX_ITEMS = 30
-const STORAGE_KEY = 'clarosight-exec-history'
+const STORAGE_KEY = 'silkpulse-exec-history'
 
 /** 全局共享一份历史（同会话内多个组件实例共用） */
 const history = ref<ExecHistoryItem[]>(loadHistory())
