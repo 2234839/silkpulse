@@ -138,21 +138,33 @@ export function installHelpers(): void {
    * - checkbox：val 为 'true'/'1'/'checked' 勾选，'false'/'0' 取消（原生 checked setter 兼容框架）
    * - radio：val 有值即选中当前，并手动取消同组（同 name）其他 radio —— 合成事件不触发
    *   浏览器的 pre-click 默认行为，互斥需自行实现
+   *
+   * React 18 对 checkbox/radio 的 onChange 特殊性：
+   * React 在 root 上委托 click 事件，内部用 inputValueTracking 对比 click 前后的 checked 值。
+   * 如果提前 setChecked 再 dispatchEvent click，React 看到 checked 没变化（和 tracker 相同），不触发 onChange。
+   * 正确做法：让 .click() 的浏览器原生 pre-click activation 来切换 checked 状态，
+   * 这样 React 能检测到 before ≠ after，从而触发 onChange。
    */
   w.__silkpulse_setValue = (idx: number, val: string): boolean => {
     const el = getElement(idx) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined
     if (!el) return false
-    /** checkbox/radio：设 checked 而非 value */
+    /** checkbox/radio：通过 .click() 让浏览器原生切换状态 */
     if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
       const input = el as HTMLInputElement
-      /** radio 一旦选中无法取消；checkbox 按 val 判定 */
       const shouldCheck = el.type === 'radio'
         ? true
         : val === 'true' || val === '1' || val === 'checked'
-      setNativeChecked(input, shouldCheck)
       /**
-       * radio 互斥：合成事件不触发浏览器的 pre-click activation（只有 el.click() 或真实点击才触发），
-       * 所以同组其他已选中的 radio 需手动取消，并对每个被取消的派发 change（与浏览器行为一致）
+       * 如果目标状态和当前状态相同，.click() 会反而在 checkbox 上取消勾选。
+       * 此时需要先重置为反状态，再 .click() 让浏览器切到目标状态。
+       * radio 不存在此问题（.click() 只会选中不会取消）。
+       */
+      if (input.checked === shouldCheck && el.type === 'checkbox') {
+        setNativeChecked(input, !shouldCheck)
+      }
+      /**
+       * radio 互斥：浏览器 .click() 的 pre-click activation 会自动取消同组其他 radio，
+       * 但只在同 frame 内有效。提前手动取消 + dispatchEvent change，覆盖边缘情况。
        */
       if (el.type === 'radio' && input.name) {
         for (const other of document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${cssEscape(input.name)}"]`)) {
@@ -162,8 +174,9 @@ export function installHelpers(): void {
           }
         }
       }
-      /** checkbox/radio 的框架事件常绑在 click/change 上，两种都触发 */
-      input.dispatchEvent(new Event('click', { bubbles: true }))
+      /** .click() 触发浏览器原生 pre-click activation（切换 checked） + 冒泡 click 事件 → React/Vue onChange */
+      input.click()
+      /** 额外派发 change 事件，覆盖不监听 click 只监听 change 的场景 */
       input.dispatchEvent(new Event('change', { bubbles: true }))
       return true
     }
@@ -289,8 +302,10 @@ export function installHelpers(): void {
       metaKey: mods?.meta ?? false,
     }
     const keyDown = new KeyboardEvent('keydown', opts)
+    const keyPress = new KeyboardEvent('keypress', opts)
     const keyUp = new KeyboardEvent('keyup', opts)
     el.dispatchEvent(keyDown)
+    el.dispatchEvent(keyPress)
     el.dispatchEvent(keyUp)
     return true
   }
