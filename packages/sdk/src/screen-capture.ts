@@ -245,27 +245,29 @@ async function captureFrame(): Promise<void> {
  * 而非整个 body（包括滚动区域外的内容）。
  */
 async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
-  /** 确保字体加载完成，避免 snapdom 渲染时字体 fallback 导致文字宽度不一致 */
-  try { await document.fonts.ready } catch { /* 老浏览器无 fonts API */ }
-
   const vw = document.documentElement.clientWidth
   const vh = window.innerHeight
 
   /**
-   * SnapDOM 截取 document.documentElement（html 元素）而非 body：
-   * viewport 的实际可见区域是相对 html 元素的，body 可能有 margin/transform 导致偏移。
-   * clip:'viewport' 只截视口区域。
-   * 不用 burst（并行渲染可能丢异步样式）和 reconcile（二次渲染对比太慢）。
+   * baseCSS 修复 flex/grid 容器内 truncate 文字溢出：
    *
-   * 不用 fast:true —— fast 模式跳过部分 computed style 精确复制，
-   * 导致 text-overflow / overflow 等属性丢失，文字在克隆 DOM 中溢出。
+   * snapdom 克隆 DOM 到 foreignObject 时，对 flex/grid 子项做 min-width:0 处理，
+   * 但当子项 white-space:nowrap（如 Tailwind truncate）时该处理被跳过，
+   * 导致 overflow:hidden + text-overflow:ellipsis 失效，文字溢出容器。
+   *
+   * 注入 !important 的 min-width:0 强制覆盖所有情况，
+   * 因为 baseCSS 在 snapdom 的 <style> 中先于克隆 DOM 的 inline style，
+   * 必须用 !important 才能生效。
    */
   const canvas = await snapdom.toCanvas(document.documentElement, {
     width: vw,
     height: vh,
     backgroundColor: '#ffffff',
-    fast: false,
+    fast: true,
     clip: 'viewport',
+    baseCSS: `
+      * { min-width: 0 !important; }
+    `,
   })
 
   return canvas

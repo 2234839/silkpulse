@@ -444,18 +444,21 @@ export function installHelpers(): void {
     const scale = opts?.scale ?? 1
     const backgroundColor = opts?.backgroundColor ?? '#ffffff'
 
-    /** 根据格式选择 SnapDOM 导出方法（不用 reconcile，太慢且可能与视觉不一致） */
+    /** baseCSS 修复 flex/grid 容器内 truncate 文字溢出（详见 screen-capture.ts 注释） */
+    const baseCSS = `* { min-width: 0 !important; }`
+
+    /** 根据格式选择 SnapDOM 导出方法 */
     if (format === 'png') {
-      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: false })
+      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: true, baseCSS })
       /** SnapDOM 返回 HTMLImageElement，从 src 取 dataURL */
       return img.src
     }
     if (format === 'webp') {
-      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: false })
+      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: true, baseCSS })
       return img.src
     }
     /** 默认 jpg */
-    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: false })
+    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: true, baseCSS })
     return img.src
   }
 }
