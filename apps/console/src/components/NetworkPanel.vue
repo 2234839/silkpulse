@@ -343,8 +343,9 @@ const filteredNetwork = computed(() => {
                   <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
                   <span class="shrink-0 text-purple-key">event: {{ e.event }}</span>
                   <span v-if="e.id" class="shrink-0 text-faint">id: {{ e.id }}</span>
+                  <span v-if="e.retry != null" class="shrink-0 text-amber-500">retry: {{ e.retry }}</span>
                 </div>
-                <div class="pl-2 mt-0.5">
+                <div v-if="e.data" class="pl-2 mt-0.5">
                   <span class="text-blue-key">data:</span>
                   <pre class="text-primary whitespace-pre-wrap break-all">{{ e.data }}</pre>
                 </div>

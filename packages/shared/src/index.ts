@@ -231,6 +231,8 @@ export interface SseEvent {
   id?: string
   /** 事件数据（data: 字段的值，多行合并，不截断） */
   data: string
+  /** 重连间隔 ms（retry: 字段的值，服务端建议的重连等待时间） */
+  retry?: number
 }
 
 /** network 请求条目（HAR 风格，借鉴 PageSpy） */

@@ -212,9 +212,9 @@ function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string 
     let data: string[] = []
     let eventType = 'message'
     let id: string | undefined
+    let retry: number | undefined
     for (const line of block.split('\n')) {
-      /** 空行/注释行（:开头）忽略 */
-      if (!line || line.startsWith(':')) continue
+      if (!line) continue
       const colonIdx = line.indexOf(':')
       const field = colonIdx > 0 ? line.slice(0, colonIdx) : line
       /** 值去掉冒号后一个可选空格（SSE 规范：`: ` 或 `:`） */
@@ -225,16 +225,17 @@ function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string 
         eventType = value
       } else if (field === 'id') {
         id = value
+      } else if (field === 'retry') {
+        const n = Number(value)
+        if (!Number.isNaN(n)) retry = n
       }
-      /** retry 字段忽略（重连间隔，无诊断价值） */
     }
-    /** data 为空的块跳过（可能是心跳注释或 retry 行） */
-    if (data.length === 0) continue
     events.push({
       timestamp: new Date().toISOString(),
       event: eventType,
       id,
       data: data.join('\n'),
+      retry,
     })
   }
   return { events, remaining }
