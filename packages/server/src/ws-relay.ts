@@ -277,7 +277,6 @@ export function setupWebSocket(
               } else {
                 if (!sseEntry.events) sseEntry.events = []
                 sseEntry.events.push(msg.event)
-                broadcast(deviceId, { type: 'sse-event', deviceId, seq: msg.seq, event: msg.event })
               }
               broadcast(deviceId, { type: 'sse-event', deviceId, seq: msg.seq, event: msg.event })
             }

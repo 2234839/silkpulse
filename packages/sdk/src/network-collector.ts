@@ -719,9 +719,11 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
 
       /**
        * 默认注册 message 采集（覆盖 onmessage / 默认事件）。
-       * 用 this.addEventListener 而非 origAdd.call，这样拦截逻辑自动处理去重。
+       * 用 origAdd 直接注册并在 hookedTypes 标记，避免走拦截逻辑导致双重注册。
        */
-      this.addEventListener('message', (ev: MessageEvent) => {
+      const initTypes = new Set<string>(['message'])
+      hookedTypes.set(this, initTypes)
+      origAdd.call(this, 'message', (ev: MessageEvent) => {
         emitSseEvent(sseEntrySeq, {
           timestamp: new Date().toISOString(),
           event: 'message',
@@ -731,11 +733,22 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
       })
 
       /** error/close：readyState=CLOSED 时标记 SSE 流结束 */
-      origAdd.call(this, 'error', () => {
+      const checkClosed = () => {
         if (this.readyState === OriginalES.CLOSED) {
           emitSseEvent(sseEntrySeq, { timestamp: new Date().toISOString(), event: '__closed__', data: '' })
         }
-      })
+      }
+      origAdd.call(this, 'error', checkClosed)
+
+      /**
+       * hook close()：业务代码主动关闭时发 __closed__（close 不触发 error 事件）。
+       * close 后 readyState=CLOSED，之后不会有事件产生。
+       */
+      const origClose = this.close.bind(this)
+      this.close = () => {
+        emitSseEvent(sseEntrySeq, { timestamp: new Date().toISOString(), event: '__closed__', data: '' })
+        return origClose()
+      }
     }
   }
 
