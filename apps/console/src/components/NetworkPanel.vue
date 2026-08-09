@@ -224,10 +224,38 @@ function saveParserToHistory() {
   parserHistory.value = all[domain]
 }
 
-/** 切换请求时保存上一次的 parser 代码 */
+/**
+ * 已编译的 parser 函数（由 runParser 编译）
+ */
+let compiledParser: ((data: string) => unknown) | null = null
+
+/**
+ * 执行 parser：编译代码 + 保存到历史
+ *
+ * 用户点击 ▶ 执行 按钮时调用。编译成功则保存到当前域名历史，
+ * 编译失败则在编辑区显示错误（历史不保存）。
+ */
+function runParser() {
+  const code = streamParser.value.trim()
+  if (!code) {
+    compiledParser = null
+    streamParserError.value = ''
+    return
+  }
+  try {
+    compiledParser = new Function('data', code) as (data: string) => unknown
+    streamParserError.value = ''
+    /** 编译成功才保存历史 */
+    saveParserToHistory()
+  } catch (e) {
+    compiledParser = null
+    streamParserError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+/** 切换请求时清空状态 */
 watch(selectedSeq, () => {
   streamParserError.value = ''
-  saveParserToHistory()
 })
 
 /** 从历史中选择一条代码 */
@@ -245,29 +273,6 @@ function deleteParserHistory(code: string) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
   parserHistory.value = all[domain] ?? []
 }
-
-/**
- * 编译 parser 函数，失败时设置 streamParserError
- *
- * parser 代码作为函数体，通过 new Function 创建——比 eval 更安全（独立作用域）。
- * 函数签名：function(data) { ...用户代码... }，data 是事件/帧的原始字符串。
- */
-let compiledParser: ((data: string) => unknown) | null = null
-watch(streamParser, (code) => {
-  const trimmed = code.trim()
-  if (!trimmed) {
-    compiledParser = null
-    streamParserError.value = ''
-    return
-  }
-  try {
-    compiledParser = new Function('data', trimmed) as (data: string) => unknown
-    streamParserError.value = ''
-  } catch (e) {
-    compiledParser = null
-    streamParserError.value = e instanceof Error ? e.message : String(e)
-  }
-})
 
 /**
  * 对单条 data 执行 parser，返回展示文本
@@ -604,7 +609,6 @@ const filteredNetwork = computed(() => {
                   placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
-                  @blur="saveParserToHistory"
                 ></textarea>
                 <button
                   @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
@@ -616,6 +620,10 @@ const filteredNetwork = computed(() => {
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                   :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
                 >📚 历史</button>
+                <button
+                  @click="runParser"
+                  class="px-2 py-1 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white whitespace-nowrap"
+                >▶ 执行</button>
               </div>
               <!-- 历史下拉列表 -->
               <div v-if="parserHistoryOpen && parserHistory.length" class="mt-1 border border-base rounded divide-y divide-base">
@@ -623,7 +631,7 @@ const filteredNetwork = computed(() => {
                   v-for="(code, hi) in parserHistory"
                   :key="hi"
                   class="flex items-center gap-1 px-2 py-1 hover:bg-elevated cursor-pointer group"
-                  @click="selectParserHistory(code)"
+                  @click="selectParserHistory(code); runParser()"
                 >
                   <code class="flex-1 text-xs font-mono text-secondary truncate">{{ code }}</code>
                   <button
@@ -677,7 +685,6 @@ const filteredNetwork = computed(() => {
                   placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
-                  @blur="saveParserToHistory"
                 ></textarea>
                 <button
                   @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
@@ -689,6 +696,10 @@ const filteredNetwork = computed(() => {
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                   :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
                 >📚 历史</button>
+                <button
+                  @click="runParser"
+                  class="px-2 py-1 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white whitespace-nowrap"
+                >▶ 执行</button>
               </div>
               <!-- 历史下拉列表 -->
               <div v-if="parserHistoryOpen && parserHistory.length" class="mt-1 border border-base rounded divide-y divide-base">
@@ -696,7 +707,7 @@ const filteredNetwork = computed(() => {
                   v-for="(code, hi) in parserHistory"
                   :key="hi"
                   class="flex items-center gap-1 px-2 py-1 hover:bg-elevated cursor-pointer group"
-                  @click="selectParserHistory(code)"
+                  @click="selectParserHistory(code); runParser()"
                 >
                   <code class="flex-1 text-xs font-mono text-secondary truncate">{{ code }}</code>
                   <button
