@@ -230,7 +230,7 @@ function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string 
       timestamp: new Date().toISOString(),
       event: eventType,
       id,
-      data: truncate(data.join('\n'), MAX_WS_FRAME),
+      data: truncate(data.join('\n'), MAX_SSE_DATA),
     })
   }
   return { events, remaining }
@@ -451,6 +451,9 @@ function installXhrHook(sink: NetworkSink): void {
 /** WS 帧数据最大截断长度 */
 const MAX_WS_FRAME = 500
 
+/** SSE 事件 data 最大截断长度（SSE 通常承载 JSON/AI 流式回复，500 太短） */
+const MAX_SSE_DATA = 10000
+
 /** EventSource 连接的完整 URL 集合（供 resource observer 去重） */
 const sseUrls = new Set<string>()
 
@@ -632,7 +635,7 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
           timestamp: new Date().toISOString(),
           event: type,
           id: msgEv.lastEventId || undefined,
-          data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_WS_FRAME) : String(msgEv.data ?? ''),
+          data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_SSE_DATA) : String(msgEv.data ?? ''),
         })
       })
     }
@@ -669,7 +672,7 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
             timestamp: new Date().toISOString(),
             event: 'message',
             id: msgEv.lastEventId || undefined,
-            data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_WS_FRAME) : String(msgEv.data ?? ''),
+            data: typeof msgEv.data === 'string' ? truncate(msgEv.data, MAX_SSE_DATA) : String(msgEv.data ?? ''),
           })
         })
       }

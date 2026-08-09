@@ -311,14 +311,14 @@ watch(() => props.network, () => {
               </span>
               <span class="text-xs text-faint">({{ selectedNetwork.events?.length ?? 0 }} 事件)</span>
             </div>
-            <div class="bg-surface border border-base rounded p-2 space-y-0.5 max-h-80 overflow-y-auto">
-              <div v-for="(e, ei) in selectedNetwork.events" :key="ei" class="text-xs font-mono">
-                <div class="flex gap-2">
+            <div class="bg-surface border border-base rounded p-2 space-y-1">
+              <div v-for="(e, ei) in selectedNetwork.events" :key="ei" class="text-xs font-mono border-b border-base-last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
+                <div class="flex gap-2 items-baseline">
                   <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
                   <span class="shrink-0 text-purple-key">{{ e.event }}</span>
                   <span v-if="e.id" class="shrink-0 text-faint">id:{{ e.id }}</span>
                 </div>
-                <div class="text-primary break-all pl-4">{{ e.data }}</div>
+                <pre class="text-primary whitespace-pre-wrap break-all pl-2 mt-0.5">{{ e.data }}</pre>
               </div>
               <div v-if="!selectedNetwork.events?.length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
             </div>
