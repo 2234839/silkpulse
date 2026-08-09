@@ -654,8 +654,8 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
    * WeakMap 不阻止 GC，连接释放后自动清理
    */
   const esSeqMap = new WeakMap<EventSource, number>()
-  /** 已注册 message 采集代理的实例集合（避免重复注册） */
-  const messageHooked = new WeakSet<EventSource>()
+  /** 记录每个 EventSource 实例已注册采集代理的事件类型（避免重复注册） */
+  const hookedTypes = new WeakMap<EventSource, Set<string>>()
 
   /** 记录 EventSource 连接的完整 URL，供 resource observer 去重 */
   const trackUrl = (url: string) => {
@@ -673,17 +673,25 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   OriginalES.prototype.addEventListener = function (this: any, type: string, listener: any, options?: any) {
     const s = esSeqMap.get(this)
-    /** 跳过 open/error/message —— message 在 constructor 里已默认采集，open/error 无诊断价值 */
-    if (s !== undefined && type !== 'open' && type !== 'error' && type !== 'message') {
-      origAdd.call(this, type, (ev: Event) => {
-        const msgEv = ev as MessageEvent
-        emitSseEvent(s, {
-          timestamp: new Date().toISOString(),
-          event: type,
-          id: msgEv.lastEventId || undefined,
-          data: typeof msgEv.data === 'string' ? msgEv.data : String(msgEv.data ?? ''),
+    /** 对每种事件类型只注册一次采集代理（避免重复） */
+    if (s !== undefined && type !== 'open' && type !== 'error') {
+      let types = hookedTypes.get(this)
+      if (!types) {
+        types = new Set<string>()
+        hookedTypes.set(this, types)
+      }
+      if (!types.has(type)) {
+        types.add(type)
+        origAdd.call(this, type, (ev: Event) => {
+          const msgEv = ev as MessageEvent
+          emitSseEvent(s, {
+            timestamp: new Date().toISOString(),
+            event: type,
+            id: msgEv.lastEventId || undefined,
+            data: typeof msgEv.data === 'string' ? msgEv.data : String(msgEv.data ?? ''),
+          })
         })
-      })
+      }
     }
     return origAdd.call(this, type, listener, options)
   }
@@ -709,19 +717,18 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
       })
       trackUrl(urlStr)
 
-      /** 默认 message 事件采集（业务代码可能用 onmessage 而非 addEventListener） */
-      if (!messageHooked.has(this)) {
-        messageHooked.add(this)
-        origAdd.call(this, 'message', (ev: Event) => {
-          const msgEv = ev as MessageEvent
-          emitSseEvent(sseEntrySeq, {
-            timestamp: new Date().toISOString(),
-            event: 'message',
-            id: msgEv.lastEventId || undefined,
-            data: typeof msgEv.data === 'string' ? msgEv.data : String(msgEv.data ?? ''),
-          })
+      /**
+       * 默认注册 message 采集（覆盖 onmessage / 默认事件）。
+       * 用 this.addEventListener 而非 origAdd.call，这样拦截逻辑自动处理去重。
+       */
+      this.addEventListener('message', (ev: MessageEvent) => {
+        emitSseEvent(sseEntrySeq, {
+          timestamp: new Date().toISOString(),
+          event: 'message',
+          id: ev.lastEventId || undefined,
+          data: typeof ev.data === 'string' ? ev.data : String(ev.data ?? ''),
         })
-      }
+      })
 
       /** error/close：readyState=CLOSED 时标记 SSE 流结束 */
       origAdd.call(this, 'error', () => {

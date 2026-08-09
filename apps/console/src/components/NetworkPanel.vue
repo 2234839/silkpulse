@@ -8,10 +8,83 @@
  *
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { NetworkEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 import ObjectInspector from './ObjectInspector.vue'
+
+/**
+ * 每秒刷新的 tick，驱动 SSE open 状态下耗时/大小的动态计算
+ *
+ * SSE 连接持续时间 = 当前时间 - 建连时间，需要持续刷新。
+ * SSE 累积大小 = events 数据总和，随事件到达实时增长。
+ */
+const now = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  tickTimer = setInterval(() => { now.value = Date.now() }, 1000)
+})
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+
+/**
+ * 格式化字节数为人类可读（B/KB/MB）
+ *
+ * 响应大小从几字节到几 MB 不等，统一格式化。
+ */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * 计算单条网络请求的响应大小（字节）
+ *
+ * - SSE：累积所有 events 的 data + event/id 字段开销
+ * - 普通 HTTP：resBody 字节长度（base64 近似）
+ * - resource：size 字段
+ * - WS：无静态大小（显示 -）
+ */
+function calcResSize(n: NetworkEntry): number {
+  if (n.sseState && n.events) {
+    let total = 0
+    for (const ev of n.events) {
+      if (ev.event && ev.event !== '__closed__') total += ev.event.length + 7 /* "event: \n" */
+      if (ev.id) total += String(ev.id).length + 4 /* "id: \n" */
+      if (ev.retry != null) total += String(ev.retry).length + 8 /* "retry: \n" */
+      total += (ev.data?.length ?? 0) + 6 /* "data: \n\n" */
+    }
+    return total
+  }
+  if (n.protocol === 'ws') return 0
+  if (n.kind === 'resource' && n.size) return n.size
+  if (n.resBody) return n.resBody.length
+  return 0
+}
+
+/**
+ * 计算单条网络请求的动态耗时（ms）
+ *
+ * - SSE open：当前时间 - 建连时间（持续增长直到关闭）
+ * - SSE closed：最后一条事件时间 - 建连时间
+ * - 其他：直接用 n.duration
+ */
+function calcDuration(n: NetworkEntry): number {
+  if (n.sseState === 'open' || (n.sseState === 'closed' && n.events?.length)) {
+    const start = new Date(n.timestamp).getTime()
+    if (n.sseState === 'open') {
+      /** 依赖 now tick 驱动每秒刷新 */
+      void now.value
+      return Math.max(0, Date.now() - start)
+    }
+    /** closed：最后一条事件时间 - start */
+    const lastEv = n.events![n.events!.length - 1]
+    if (lastEv) return Math.max(0, new Date(lastEv.timestamp).getTime() - start)
+  }
+  return n.duration
+}
 
 const props = defineProps<{
   /** 远程设备网络请求列表 */
@@ -239,6 +312,7 @@ const filteredNetwork = computed(() => {
               <th class="text-left px-3 py-2">方法</th>
               <th class="text-left px-3 py-2">状态</th>
               <th class="text-left px-3 py-2">URL</th>
+              <th class="text-right px-3 py-2">大小</th>
               <th class="text-right px-3 py-2">
                 <button
                   @click="toggleDurationSort"
@@ -260,22 +334,21 @@ const filteredNetwork = computed(() => {
               <td class="px-3 py-2 text-faint text-xs font-mono whitespace-nowrap">{{ new Date(n.timestamp).toLocaleTimeString() }}</td>
               <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
               <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
-                <span v-if="n.status === 0 && !n.error" class="inline-flex items-center gap-1 text-blue-500">
-                  <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                  loading
-                </span>
-                <span v-else>{{ n.status || '—' }}</span>
+                {{ n.status || '…' }}
               </td>
               <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">
                 <span v-if="n.sseState" class="inline-block px-1 mr-1 text-[10px] rounded bg-purple-key/20 text-purple-key align-middle">SSE</span>
                 <span v-if="n.protocol === 'ws'" class="inline-block px-1 mr-1 text-[10px] rounded bg-blue-key/20 text-blue-key align-middle">WS</span>
                 {{ n.url.split('/').pop() || n.url }}
               </td>
+              <td class="px-3 py-2 text-right text-xs font-mono text-muted whitespace-nowrap">
+                {{ n.protocol === 'ws' ? '—' : formatSize(calcResSize(n)) }}
+              </td>
               <td
                 class="px-3 py-2 text-right text-xs font-mono"
-                :class="n.duration > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'"
-                :title="n.duration > SLOW_THRESHOLD ? `慢请求（> ${SLOW_THRESHOLD}ms）` : ''"
-              >{{ n.duration }}ms</td>
+                :class="calcDuration(n) > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'"
+                :title="calcDuration(n) > SLOW_THRESHOLD ? `慢请求（> ${SLOW_THRESHOLD}ms）` : ''"
+              >{{ calcDuration(n) }}ms</td>
             </tr>
           </tbody>
         </table>
@@ -306,7 +379,11 @@ const filteredNetwork = computed(() => {
               <span class="text-faint">状态：</span>
               <span class="font-mono" :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'">{{ selectedNetwork.status || '—' }}</span>
             </div>
-            <div><span class="text-faint">耗时：</span><span class="font-mono text-primary">{{ selectedNetwork.duration }}ms</span></div>
+            <div>
+              <span class="text-faint">大小：</span>
+              <span class="font-mono text-primary">{{ selectedNetwork.protocol === 'ws' ? '—' : formatSize(calcResSize(selectedNetwork)) }}</span>
+            </div>
+            <div><span class="text-faint">耗时：</span><span class="font-mono text-primary">{{ calcDuration(selectedNetwork) }}ms</span></div>
           </div>
 
           <!-- 错误 -->
@@ -347,7 +424,7 @@ const filteredNetwork = computed(() => {
                 </div>
                 <div v-if="e.data" class="pl-2 mt-0.5">
                   <span class="text-blue-key">data:</span>
-                  <pre class="text-primary whitespace-pre-wrap break-all">{{ e.data }}</pre>
+                  <span class="text-primary whitespace-pre-wrap break-all">{{ e.data }}</span>
                 </div>
               </div>
               <div v-if="!selectedNetwork.events?.length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
