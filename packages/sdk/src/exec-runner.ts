@@ -446,16 +446,16 @@ export function installHelpers(): void {
 
     /** 根据格式选择 SnapDOM 导出方法（不用 reconcile，太慢且可能与视觉不一致） */
     if (format === 'png') {
-      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: true })
+      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: false })
       /** SnapDOM 返回 HTMLImageElement，从 src 取 dataURL */
       return img.src
     }
     if (format === 'webp') {
-      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: true })
+      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: false })
       return img.src
     }
     /** 默认 jpg */
-    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: true })
+    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: false })
     return img.src
   }
 }

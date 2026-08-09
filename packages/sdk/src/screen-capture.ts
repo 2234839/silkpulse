@@ -245,6 +245,9 @@ async function captureFrame(): Promise<void> {
  * 而非整个 body（包括滚动区域外的内容）。
  */
 async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
+  /** 确保字体加载完成，避免 snapdom 渲染时字体 fallback 导致文字宽度不一致 */
+  try { await document.fonts.ready } catch { /* 老浏览器无 fonts API */ }
+
   const vw = document.documentElement.clientWidth
   const vh = window.innerHeight
 
@@ -253,12 +256,15 @@ async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
    * viewport 的实际可见区域是相对 html 元素的，body 可能有 margin/transform 导致偏移。
    * clip:'viewport' 只截视口区域。
    * 不用 burst（并行渲染可能丢异步样式）和 reconcile（二次渲染对比太慢）。
+   *
+   * 不用 fast:true —— fast 模式跳过部分 computed style 精确复制，
+   * 导致 text-overflow / overflow 等属性丢失，文字在克隆 DOM 中溢出。
    */
   const canvas = await snapdom.toCanvas(document.documentElement, {
     width: vw,
     height: vh,
     backgroundColor: '#ffffff',
-    fast: true,
+    fast: false,
     clip: 'viewport',
   })
 
