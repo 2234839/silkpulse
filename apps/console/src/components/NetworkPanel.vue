@@ -580,7 +580,7 @@ const filteredNetwork = computed(() => {
               <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
             <div class="bg-surface border border-base rounded p-2 space-y-1">
-              <div v-for="(e, ei) in processedSseEvents" :key="ei" class="text-xs font-mono border-b border-base-last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
+              <div v-for="(e, ei) in processedSseEvents" :key="ei" class="text-xs font-mono">
                 <div class="flex gap-2 items-baseline flex-wrap">
                   <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
                   <span class="shrink-0 text-purple-key">event: {{ e.event }}</span>
