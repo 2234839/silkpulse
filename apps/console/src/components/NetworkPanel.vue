@@ -156,6 +156,118 @@ watch(selectedSeq, () => {
 })
 
 /**
+ * ─── SSE/WS 流 Filter + Parser ───
+ *
+ * Filter：对事件/帧的 data 做关键词过滤（大小写不敏感）。
+ * Parser：输入 JS 函数体代码，参数为 data 字符串，返回值替换原始 data 展示。
+ *   例如 parser = "return JSON.parse(data).msg" 会只展示 JSON 里的 msg 字段。
+ *   编译失败或运行时错误会展示在错误提示行，不影响 Filter 功能。
+ */
+const streamFilter = ref('')
+const streamParser = ref('')
+const streamParserError = ref('')
+/** parser 展示开关（默认折叠，点击展开） */
+const streamParserOpen = ref(false)
+
+/** 响应体展示模式重置 + 流状态重置：切换请求时清空 */
+watch(selectedSeq, () => {
+  streamParserError.value = ''
+})
+
+/**
+ * 编译 parser 函数，失败时设置 streamParserError
+ *
+ * parser 代码作为函数体，通过 new Function 创建——比 eval 更安全（独立作用域）。
+ * 函数签名：function(data) { ...用户代码... }，data 是事件/帧的原始字符串。
+ */
+let compiledParser: ((data: string) => unknown) | null = null
+watch(streamParser, (code) => {
+  const trimmed = code.trim()
+  if (!trimmed) {
+    compiledParser = null
+    streamParserError.value = ''
+    return
+  }
+  try {
+    compiledParser = new Function('data', trimmed) as (data: string) => unknown
+    streamParserError.value = ''
+  } catch (e) {
+    compiledParser = null
+    streamParserError.value = e instanceof Error ? e.message : String(e)
+  }
+})
+
+/**
+ * 对单条 data 执行 parser，返回展示文本
+ *
+ * 运行时错误不中断流展示，逐条捕获后在当前条目标注错误。
+ */
+function applyParser(data: string): { ok: true; result: string } | { ok: false; error: string } {
+  if (!compiledParser) return { ok: true, result: data }
+  try {
+    const result = compiledParser(data)
+    return { ok: true, result: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * 处理后的 SSE 事件列表（filter + parser）
+ *
+ * 过滤 __closed__ 事件，然后对 data 做 filter 关键词匹配 + parser 变换。
+ */
+const processedSseEvents = computed(() => {
+  void now.value
+  const events = selectedNetwork.value?.events ?? []
+  const q = streamFilter.value.trim().toLowerCase()
+  const result: Array<{ timestamp: string; event: string; id?: string; retry?: number; display: string; parseError?: string }> = []
+  for (const e of events) {
+    if (e.event === '__closed__') continue
+    if (q && !e.data.toLowerCase().includes(q) && !e.event.toLowerCase().includes(q)) continue
+    const parsed = applyParser(e.data)
+    result.push({
+      timestamp: e.timestamp,
+      event: e.event,
+      id: e.id,
+      retry: e.retry,
+      display: parsed.ok ? parsed.result : e.data,
+      parseError: parsed.ok ? undefined : parsed.error,
+    })
+  }
+  return result
+})
+
+/**
+ * 处理后的 WS 帧列表（filter + parser）
+ *
+ * 连接事件帧（dir=event）不受 filter/parser 影响，始终展示。
+ */
+const processedWsFrames = computed(() => {
+  void now.value
+  const frames = selectedNetwork.value?.frames ?? []
+  const q = streamFilter.value.trim().toLowerCase()
+  const result: Array<{ timestamp: string; dir: string; display: string; isEvent: boolean; parseError?: string }> = []
+  for (const f of frames) {
+    /** 连接事件帧（close/error）始终展示 */
+    if (f.dir === 'event') {
+      result.push({ timestamp: f.timestamp, dir: f.dir, display: f.data, isEvent: true })
+      continue
+    }
+    if (q && !f.data.toLowerCase().includes(q)) continue
+    const parsed = applyParser(f.data)
+    result.push({
+      timestamp: f.timestamp,
+      dir: f.dir,
+      display: parsed.ok ? parsed.result : f.data,
+      isEvent: false,
+      parseError: parsed.ok ? undefined : parsed.error,
+    })
+  }
+  return result
+})
+
+/**
  * 清空阈值：只展示此时间戳之后的网络请求。
  * 与 Console 面板清空语义一致——前端视图层隐藏，不影响 server 缓冲。
  */
@@ -394,14 +506,43 @@ const filteredNetwork = computed(() => {
 
           <!-- WebSocket 帧时间线（仅 WS 连接条目，对齐 DevTools 的 Messages 面板） -->
           <div v-if="selectedNetwork.protocol === 'ws'">
-            <div class="text-xs text-faint mb-1">帧时间线 <span class="ml-1">({{ selectedNetwork.frames?.length ?? 0 }} 帧)</span></div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs text-faint">帧时间线</span>
+              <span class="text-xs text-faint">({{ processedWsFrames.length }} / {{ selectedNetwork.frames?.length ?? 0 }} 帧)</span>
+            </div>
+            <!-- Filter + Parser 工具栏 -->
+            <div class="flex items-center gap-1 mb-2 flex-wrap">
+              <input
+                v-model="streamFilter"
+                placeholder="🔍 过滤帧内容..."
+                class="flex-1 min-w-[120px] text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+              />
+              <button
+                @click="streamParserOpen = !streamParserOpen"
+                class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                :class="streamParserOpen || streamParser ? 'text-blue-key border-blue-400' : ''"
+              >⚡ Parser</button>
+            </div>
+            <!-- Parser 代码编辑区 -->
+            <div v-if="streamParserOpen" class="mb-2">
+              <textarea
+                v-model="streamParser"
+                rows="2"
+                placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
+                class="w-full text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
+                spellcheck="false"
+              ></textarea>
+              <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
+            </div>
             <div class="bg-surface border border-base rounded p-2 space-y-0.5 max-h-80 overflow-y-auto">
-              <div v-for="(f, fi) in selectedNetwork.frames" :key="fi" class="text-xs font-mono flex gap-2">
+              <div v-for="(f, fi) in processedWsFrames" :key="fi" class="text-xs font-mono flex gap-2">
                 <span class="text-faint shrink-0">{{ new Date(f.timestamp).toLocaleTimeString() }}</span>
-                <span class="shrink-0" :class="f.dir === 'send' ? 'text-blue-key' : f.dir === 'recv' ? 'text-green-600' : 'text-red-500'">{{ f.dir === 'send' ? '↑ send' : f.dir === 'recv' ? '↓ recv' : '⚠ ' + f.data }}</span>
-                <span v-if="f.dir !== 'event'" class="text-primary break-all">{{ f.data }}</span>
+                <span class="shrink-0" :class="f.dir === 'send' ? 'text-blue-key' : f.dir === 'recv' ? 'text-green-600' : 'text-red-500'">{{ f.dir === 'send' ? '↑ send' : f.dir === 'recv' ? '↓ recv' : '⚠ ' + f.display }}</span>
+                <span v-if="!f.isEvent" class="text-primary break-all whitespace-pre-wrap">{{ f.display }}</span>
+                <span v-if="f.parseError" class="text-red-500 text-[10px]">⚠ {{ f.parseError }}</span>
               </div>
               <div v-if="!selectedNetwork.frames?.length" class="text-faint text-center py-4 text-xs">暂无帧（连接已建立，等待收发消息）</div>
+              <div v-else-if="!processedWsFrames.length" class="text-faint text-center py-4 text-xs">无匹配帧</div>
             </div>
           </div>
 
@@ -412,22 +553,48 @@ const filteredNetwork = computed(() => {
               <span class="text-xs" :class="selectedNetwork.sseState === 'open' ? 'text-green-600' : 'text-faint'">
                 {{ selectedNetwork.sseState === 'open' ? '● 连接中' : '○ 已关闭' }}
               </span>
-              <span class="text-xs text-faint">({{ selectedNetwork.events?.length ?? 0 }} 事件)</span>
+              <span class="text-xs text-faint">({{ processedSseEvents.length }} / {{ selectedNetwork.events?.filter(e => e.event !== '__closed__').length ?? 0 }} 事件)</span>
+            </div>
+            <!-- Filter + Parser 工具栏 -->
+            <div class="flex items-center gap-1 mb-2 flex-wrap">
+              <input
+                v-model="streamFilter"
+                placeholder="🔍 过滤事件内容/类型..."
+                class="flex-1 min-w-[120px] text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+              />
+              <button
+                @click="streamParserOpen = !streamParserOpen"
+                class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                :class="streamParserOpen || streamParser ? 'text-blue-key border-blue-400' : ''"
+              >⚡ Parser</button>
+            </div>
+            <!-- Parser 代码编辑区 -->
+            <div v-if="streamParserOpen" class="mb-2">
+              <textarea
+                v-model="streamParser"
+                rows="2"
+                placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
+                class="w-full text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
+                spellcheck="false"
+              ></textarea>
+              <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
             <div class="bg-surface border border-base rounded p-2 space-y-1">
-              <div v-for="(e, ei) in selectedNetwork.events" :key="ei" class="text-xs font-mono border-b border-base-last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
+              <div v-for="(e, ei) in processedSseEvents" :key="ei" class="text-xs font-mono border-b border-base-last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
                 <div class="flex gap-2 items-baseline flex-wrap">
                   <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
                   <span class="shrink-0 text-purple-key">event: {{ e.event }}</span>
                   <span v-if="e.id" class="shrink-0 text-faint">id: {{ e.id }}</span>
                   <span v-if="e.retry != null" class="shrink-0 text-amber-500">retry: {{ e.retry }}</span>
                 </div>
-                <div v-if="e.data" class="pl-2 mt-0.5">
+                <div class="pl-2 mt-0.5">
                   <span class="text-blue-key">data:</span>
-                  <span class="text-primary whitespace-pre-wrap break-all">{{ e.data }}</span>
+                  <span v-if="e.parseError" class="text-red-500 ml-1">⚠ {{ e.parseError }}</span>
+                  <span class="text-primary whitespace-pre-wrap break-all ml-1">{{ e.display }}</span>
                 </div>
               </div>
-              <div v-if="!selectedNetwork.events?.length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
+              <div v-if="!selectedNetwork.events?.filter(e => e.event !== '__closed__').length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
+              <div v-else-if="!processedSseEvents.length" class="text-faint text-center py-4 text-xs">无匹配事件</div>
             </div>
           </div>
 
