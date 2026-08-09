@@ -5,7 +5,7 @@
  * 展示四种接入方式（Script 标签 / IIFE / Bookmarklet / Userscript）的代码 + 复制按钮。
  * 既用于未选设备时的空状态卡片，也用于"接入新设备"弹窗。
  */
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { copyText } from '../utils/clipboard'
 
@@ -39,28 +39,39 @@ const scriptSnippet = computed(() => {
   return `${base}${gt}${lt}/script${gt}`
 })
 
-/** iife / bookmarklet / userscript 从 server 拉现成代码 */
-const iifeSnippet = ref('')
-const bookmarkletSnippet = ref('')
-const userscriptSnippet = ref('')
-
 /**
- * 拉取三种注入代码，项目密钥登录时自动带上 api_key + project_id 查询参数。
- * 用 watchEffect 让 userRole/apiKey/projectId 变化后自动重新拉取，
- * 保证四种方式始终统一：要么都带鉴权信息，要么都不带。
+ * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
+ * 防重复注入（同页面多次点 bookmarklet 只生效一次）
  */
-watchEffect(() => {
-  /** 项目密钥登录时只带 project_id（设备端不需要密钥，随便接入） */
-  const params = new URLSearchParams()
-  if (userRole.value === 'project' && projectId.value) {
-    params.set('project_id', projectId.value)
-  }
-  const qs = params.toString()
-  const suffix = qs ? `?${qs}` : ''
+const injectScriptCode = computed(() => {
+  const dataAttrs = [
+    `s.dataset.server='${serverOrigin}'`,
+    (userRole.value === 'project' && projectId.value) ? `s.dataset.projectId='${projectId.value}'` : '',
+    (!authStatus.value?.authEnabled) ? '' : '',
+  ].filter(Boolean).join(';')
+  return `(function(){var k='__silkpulse_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${serverOrigin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
+})
 
-  fetch(`/inject/iife${suffix}`).then((r) => r.text()).then((t) => { iifeSnippet.value = t })
-  fetch(`/inject/bookmarklet${suffix}`).then((r) => r.text()).then((t) => { bookmarkletSnippet.value = t })
-  fetch(`/inject/userscript${suffix}`).then((r) => r.text()).then((t) => { userscriptSnippet.value = t })
+/** IIFE 立即执行：F12 console 粘贴即注入 */
+const iifeSnippet = computed(() => injectScriptCode.value)
+
+/** Bookmarklet：拖到书签栏，在任意页面点击即注入 */
+const bookmarkletSnippet = computed(() => `javascript:${encodeURIComponent(injectScriptCode.value)}`)
+
+/** Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入 */
+const userscriptSnippet = computed(() => {
+  const code = injectScriptCode.value
+  return `// ==UserScript==
+// @name         silkpulse 远程调试注入
+// @namespace    silkpulse
+// @version      0.1.0
+// @description  自动注入 silkpulse SDK，将当前页面接入远程调试
+// @match        *://*/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+(function(){${code}})();
+`
 })
 
 type InjectTab = 'script' | 'iife' | 'bookmarklet' | 'userscript'

@@ -28,24 +28,24 @@
 import { snapdom } from '@zumer/snapdom'
 import type { ScreenFrame, ScreenShareStatus } from '@silkpulse/shared'
 
-/** 抓帧间隔 ms（2fps，截图比视频流重，用较低帧率） */
-const FRAME_INTERVAL = 500
+/** 抓帧间隔 ms（1fps，调试场景够用，SnapDOM 重开销需控制频率） */
+const FRAME_INTERVAL = 1000
 
-/** 关键帧间隔（每 60 帧 ≈ 30 秒强制全量刷新一次，防累积误差） */
-const KEYFRAME_INTERVAL = 60
+/** 关键帧间隔（每 30 帧 ≈ 30 秒强制全量刷新一次，防累积误差） */
+const KEYFRAME_INTERVAL = 30
 
 /** 像素变化判定阈值（RGB 差值之和 > 此值认为该像素变了） */
 const PIXEL_DIFF_THRESHOLD = 30
 
 /** 帧差对比用的降采样宽度（越小越快但越粗糙） */
-const DIFF_SAMPLE_WIDTH = 160
+const DIFF_SAMPLE_WIDTH = 100
 
-/** JPEG 编码质量（增量帧用较低质量省带宽） */
-const JPEG_QUALITY_KEY = 0.6
-const JPEG_QUALITY_DELTA = 0.4
+/** JPEG 编码质量（低质量省 CPU + 带宽） */
+const JPEG_QUALITY_KEY = 0.5
+const JPEG_QUALITY_DELTA = 0.3
 
-/** 最大输出宽度（防止大页面生成过大帧） */
-const MAX_OUTPUT_WIDTH = 1280
+/** 最大输出宽度（调试不需要高清，缩小截图加速） */
+const MAX_OUTPUT_WIDTH = 800
 
 /** 增量区域最小尺寸（太小的变化不值得裁剪） */
 const MIN_DIRTY_SIZE = 8
@@ -248,15 +248,18 @@ async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
   const vw = document.documentElement.clientWidth
   const vh = window.innerHeight
 
-  /** SnapDOM clip:'viewport' 只截视口区域 */
-  const canvas = await snapdom.toCanvas(document.body, {
+  /**
+   * SnapDOM 截取 document.documentElement（html 元素）而非 body：
+   * viewport 的实际可见区域是相对 html 元素的，body 可能有 margin/transform 导致偏移。
+   * clip:'viewport' 只截视口区域。
+   * 不用 burst（并行渲染可能丢异步样式）和 reconcile（二次渲染对比太慢）。
+   */
+  const canvas = await snapdom.toCanvas(document.documentElement, {
     width: vw,
     height: vh,
     backgroundColor: '#ffffff',
     fast: true,
-    burst: true,
     clip: 'viewport',
-    reconcile: true,
   })
 
   return canvas

@@ -12,8 +12,6 @@ import type { ScreenFrame } from '@silkpulse/shared'
 
 export class FrameCompositor {
   private ctx: CanvasRenderingContext2D | null = null
-  /** 缓存的图片对象（增量帧 dataURL → Image 对象） */
-  private imgCache = new Map<string, HTMLImageElement>()
   /** 最近关键帧的序号（用于检测丢帧后需要等待下一个 keyframe） */
   private lastKeyframeSeq = -1
   /** 上一帧序号（检测丢帧） */
@@ -68,27 +66,18 @@ export class FrameCompositor {
   /**
    * 加载 dataURL 为 Image 并绘制到 canvas 指定位置
    *
-   * dataURL 加载是异步的，但同一个 dataURL 只加载一次（imgCache）。
+   * 优化：每帧 dataURL 都是唯一的（JPEG 编码），imgCache 无法命中，
+   * 所以不缓存，直接创建 Image → 加载完 → 绘制。
    */
   private drawImage(dataUrl: string, dx: number, dy: number, dw: number, dh: number): void {
-    let img = this.imgCache.get(dataUrl)
-    if (!img) {
-      img = new Image()
-      img.src = dataUrl
-      this.imgCache.set(dataUrl, img)
-      /** 控制 imgCache 大小（最多 100 张） */
-      if (this.imgCache.size > 100) {
-        const firstKey = this.imgCache.keys().next().value
-        if (firstKey) this.imgCache.delete(firstKey)
-      }
-    }
+    const img = new Image()
+    img.src = dataUrl
 
     if (img.complete && img.naturalWidth > 0) {
       this.ctx!.drawImage(img, dx, dy, dw, dh)
     } else {
-      /** 图片还没加载完，加载完后重绘 */
       img.onload = () => {
-        this.ctx!.drawImage(img!, dx, dy, dw, dh)
+        this.ctx!.drawImage(img, dx, dy, dw, dh)
       }
     }
   }
@@ -98,7 +87,6 @@ export class FrameCompositor {
     if (this.ctx) {
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
     }
-    this.imgCache.clear()
     this.lastKeyframeSeq = -1
     this.lastSeq = -1
   }
