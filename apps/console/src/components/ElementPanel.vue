@@ -85,6 +85,7 @@ const { width: treePanelWidth, onDragStart: onTreePanelResize } = useResizable({
   min: 200,
   max: 600,
   direction: 'right',
+  storageKey: 'silkpulse.element-tree-width',
 })
 /** 布局预览的 sentinel（ResizeObserver 测量宽度用） */
 const sentinelRef = ref<HTMLElement | null>(null)

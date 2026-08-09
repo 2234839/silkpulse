@@ -12,7 +12,17 @@ import { ref, nextTick } from 'vue'
 import type { SerializedValue } from '@silkpulse/shared'
 import { useExecHistory } from '../composables/useExecHistory'
 import { apiFetch } from '../utils/api'
+import { useResizable } from '../composables/useResizable'
 import ObjectInspector from './ObjectInspector.vue'
+
+/** 历史侧栏宽度可拖拽 */
+const { width: historyWidth, onDragStart: onHistoryResize } = useResizable({
+  initial: 224,
+  min: 160,
+  max: 400,
+  direction: 'left',
+  storageKey: 'silkpulse.exec-history-width',
+})
 
 const props = defineProps<{
   /** 当前选中设备 id */
@@ -204,8 +214,14 @@ function handleMultilineIndent(
         <div v-else class="text-faint text-center py-8 text-sm">输入代码后点击执行</div>
       </div>
     </div>
+    <!-- 拖拽手柄 -->
+    <div
+      class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
+      @mousedown="onHistoryResize"
+    />
+
     <!-- 历史侧栏 -->
-    <div class="w-48 md:w-56 border-l border-base bg-surface flex flex-col overflow-hidden">
+    <div class="border-l border-base bg-surface flex flex-col overflow-hidden flex-shrink-0" :style="{ width: historyWidth + 'px' }">
       <div class="flex items-center justify-between px-3 py-2 border-b border-light">
         <span class="text-xs font-medium text-secondary">执行历史</span>
         <button

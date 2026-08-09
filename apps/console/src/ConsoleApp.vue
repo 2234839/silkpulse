@@ -39,6 +39,7 @@ const { width: sidebarWidth, onDragStart: onSidebarResize } = useResizable({
   min: 200,
   max: 500,
   direction: 'right',
+  storageKey: 'silkpulse.sidebar-width',
 })
 
 const {

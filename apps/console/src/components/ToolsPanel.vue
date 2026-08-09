@@ -15,7 +15,17 @@
  * 7. Diff 对比
  */
 import { ref, computed, watch } from 'vue'
+import { useResizable } from '../composables/useResizable'
 import ObjectInspector from './ObjectInspector.vue'
+
+/** 工具页左右分栏宽度可拖拽 */
+const { width: toolLeftWidth, onDragStart: onToolLeftResize } = useResizable({
+  initial: 480,
+  min: 280,
+  max: 800,
+  direction: 'right',
+  storageKey: 'silkpulse.tools-left-width',
+})
 
 /** 工具 tab 列表 */
 const tools = [
@@ -370,8 +380,8 @@ const diffResult = computed(() => {
     <div class="flex-1 overflow-y-auto p-4">
 
       <!-- ════════ JSON 可视化 ════════ -->
-      <div v-if="activeTool === 'json'" class="flex gap-4 h-full max-h-[calc(100vh-160px)]">
-        <div class="flex-1 flex flex-col gap-2 min-w-0">
+      <div v-if="activeTool === 'json'" class="flex h-full max-h-[calc(100vh-160px)]">
+        <div class="flex flex-col gap-2 min-w-0 flex-shrink-0" :style="{ width: toolLeftWidth + 'px' }">
           <label class="text-xs text-muted">输入 JSON</label>
           <textarea
             v-model="jsonInput"
@@ -391,6 +401,11 @@ const diffResult = computed(() => {
           </div>
           <p class="text-xs text-faint">语法：.key 取字段，.arr[] 遍历数组，.a.b 嵌套路径</p>
         </div>
+        <!-- 拖拽手柄 -->
+        <div
+          class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0 mx-1"
+          @mousedown="onToolLeftResize"
+        />
         <div class="flex-1 overflow-auto min-w-0">
           <label class="text-xs text-muted block mb-2">可视化结果</label>
           <div v-if="jsonParsed?.ok" class="bg-surface border border-base rounded p-3">
@@ -632,8 +647,8 @@ const diffResult = computed(() => {
       </div>
 
       <!-- ════════ Diff 对比 ════════ -->
-      <div v-else-if="activeTool === 'diff'" class="flex gap-4 h-full max-h-[calc(100vh-160px)]">
-        <div class="flex-1 flex flex-col gap-2 min-w-0">
+      <div v-else-if="activeTool === 'diff'" class="flex h-full max-h-[calc(100vh-160px)]">
+        <div class="flex flex-col gap-2 min-w-0 flex-shrink-0" :style="{ width: toolLeftWidth + 'px' }">
           <label class="text-xs text-muted">文本 A（期望）</label>
           <textarea
             v-model="diffA"
@@ -654,6 +669,11 @@ const diffResult = computed(() => {
             </label>
           </div>
         </div>
+        <!-- 拖拽手柄 -->
+        <div
+          class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0 mx-1"
+          @mousedown="onToolLeftResize"
+        />
         <div class="flex-1 overflow-auto min-w-0">
           <label class="text-xs text-muted block mb-2">
             差异

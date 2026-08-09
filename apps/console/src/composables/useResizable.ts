@@ -1,8 +1,8 @@
 /**
- * useResizable —— 可拖拽边框改变宽度的通用 hook
+ * useResizable —— 可拖拽边框改变宽度并持久化到 localStorage 的通用 hook
  *
  * 用法：
- *   const { width, onDragStart } = useResizable({ initial: 288, min: 200, max: 500, direction: 'right' })
+ *   const { width, onDragStart } = useResizable({ initial: 288, min: 200, max: 500, direction: 'right', storageKey: 'sidebar-width' })
  *
  *   <div :style="{ width: width + 'px' }">...</div>
  *   <div @mousedown="onDragStart" class="w-1 cursor-col-resize" />
@@ -10,6 +10,10 @@
  * direction 说明：
  * - 'right'：拖拽手柄在面板右侧，向右拖增大宽度（如左侧设备列表）
  * - 'left'：拖拽手柄在面板左侧，向左拖增大宽度（如右侧面板）
+ *
+ * storageKey 说明：
+ * - 传入则在拖拽结束时自动将宽度保存到 localStorage
+ * - 初始化时从 localStorage 恢复（clamped 到 min/max）
  */
 import { ref, onUnmounted } from 'vue'
 
@@ -26,10 +30,22 @@ interface Options {
    * - 'left'：手柄在左侧，鼠标左移 → 宽度增大
    */
   direction: 'right' | 'left'
+  /** localStorage 持久化 key，传入则启用持久化 */
+  storageKey?: string
 }
 
 export function useResizable(opts: Options) {
-  const width = ref(opts.initial)
+  /** 从 localStorage 恢复，clamped 到 min/max */
+  function restore(): number {
+    if (!opts.storageKey) return opts.initial
+    const saved = localStorage.getItem(opts.storageKey)
+    if (saved == null) return opts.initial
+    const n = Number(saved)
+    if (Number.isNaN(n)) return opts.initial
+    return Math.max(opts.min, Math.min(opts.max, n))
+  }
+
+  const width = ref(restore())
   let dragging = false
   /** 拖拽起始 X 坐标 */
   let startX = 0
@@ -52,6 +68,9 @@ export function useResizable(opts: Options) {
     document.body.style.userSelect = ''
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseup', onMouseUp)
+    if (opts.storageKey) {
+      localStorage.setItem(opts.storageKey, String(width.value))
+    }
   }
 
   /** 绑定到 mousedown 事件 */

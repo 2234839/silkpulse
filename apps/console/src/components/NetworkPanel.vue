@@ -12,7 +12,17 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { NetworkEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
 import { apiFetch } from '../utils/api'
+import { useResizable } from '../composables/useResizable'
 import ObjectInspector from './ObjectInspector.vue'
+
+/** 请求列表宽度可拖拽 */
+const { width: listWidth, onDragStart: onListResize } = useResizable({
+  initial: 400,
+  min: 240,
+  max: 700,
+  direction: 'right',
+  storageKey: 'silkpulse.network-list-width',
+})
 
 /**
  * 每秒刷新的 tick，驱动 SSE open 状态下耗时/大小的动态计算
@@ -671,7 +681,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
 <template>
   <div class="flex-1 flex overflow-hidden bg-base">
     <!-- 请求列表 -->
-    <div class="w-2/5 min-w-[180px] md:min-w-[240px] flex flex-col border-r border-base">
+    <div class="flex flex-col border-r border-base flex-shrink-0" :style="{ width: listWidth + 'px' }">
       <!-- 搜索 + 状态筛选栏 -->
       <div class="p-2 border-b border-light bg-surface space-y-2">
         <input
@@ -764,6 +774,12 @@ function formatRefetchHeaders(h: Record<string, string>): string {
         <div v-if="filteredNetwork.length === 0" class="text-faint text-center py-8 text-sm">{{ props.network.length === 0 ? '暂无网络请求' : '无匹配请求' }}</div>
       </div>
     </div>
+
+    <!-- 拖拽手柄 -->
+    <div
+      class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0"
+      @mousedown="onListResize"
+    />
 
     <!-- 详情面板 -->
     <div class="flex-1 overflow-y-auto p-4">
