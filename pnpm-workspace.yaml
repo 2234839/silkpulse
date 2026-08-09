@@ -20,6 +20,7 @@ catalog:
   modern-screenshot: ^4.7.0
   snapdom: ^0.1.2
   '@zumer/snapdom': ^2.23.2
+  vue-router: ^5.2.0
 overrides:
   vite: "catalog:"
 peerDependencyRules:

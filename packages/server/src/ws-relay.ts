@@ -325,6 +325,12 @@ export function setupWebSocket(
             }
             break
           }
+          case 'network-body': {
+            /** 设备返回完整 body（懒加载响应），转发给订阅该设备的控制台 */
+            if (!device) return
+            broadcast(deviceId, { type: 'network-body', deviceId, bodySeq: msg.bodySeq, body: msg.body })
+            break
+          }
           case 'storage-change': {
             /** 远程设备 storage 变化（SDK 劫持 setItem/removeItem 触发），转发给控制台实时刷新 */
             if (!device) return
@@ -445,6 +451,14 @@ export function setupWebSocket(
             const device = registry.get(msg.deviceId)
             if (device && device.ws.readyState === device.ws.OPEN) {
               device.ws.send(JSON.stringify({ type: 'stop-screen-share' }))
+            }
+            break
+          }
+          case 'get-network-body': {
+            /** 控制台请求完整 body（懒加载），转发给设备 */
+            const device = registry.get(msg.deviceId)
+            if (device && device.ws.readyState === device.ws.OPEN) {
+              device.ws.send(JSON.stringify({ type: 'get-network-body', bodySeq: msg.bodySeq }))
             }
             break
           }

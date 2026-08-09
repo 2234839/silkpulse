@@ -384,6 +384,32 @@ export function useConsoleSocket() {
           deviceMouse.value = msg.mouse
         }
         break
+      case 'network-body': {
+        /** 设备返回完整 body（懒加载）：合并到对应 entry */
+        if (msg.deviceId === selectedDeviceId.value) {
+          const arr = network.value.slice()
+          const idx = arr.findIndex((n) => n.seq === msg.bodySeq)
+          if (idx >= 0 && msg.body !== null) {
+            /** body 可能是 reqBody 或 resBody，看原始 entry 哪个被截断 */
+            const entry = arr[idx]
+            arr[idx] = {
+              ...entry,
+              /** 覆盖被截断的字段，清除 truncated 标记 */
+              resBody: entry.resBody ?? msg.body,
+              reqBody: entry.bodyTruncated ? msg.body : entry.reqBody,
+              bodyTruncated: false,
+            }
+            network.value = arr
+          }
+          /** 从 pending 中取出 callback */
+          const cb = pendingBodyRequests.get(msg.bodySeq)
+          if (cb) {
+            pendingBodyRequests.delete(msg.bodySeq)
+            cb(msg.body)
+          }
+        }
+        break
+      }
     }
   }
 
@@ -392,6 +418,37 @@ export function useConsoleSocket() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))
     }
+  }
+
+  /** 懒加载 body 请求的 pending callback 映射 */
+  const pendingBodyRequests = new Map<number, (body: string | null) => void>()
+
+  /**
+   * 请求完整 body（懒加载）
+   *
+   * bodyTruncated=true 的 entry 调用此方法，通过 WS 请求设备返回完整 body。
+   * 返回 Promise<string | null>，超时 5s 自动 resolve(null)。
+   */
+  function requestNetworkBody(deviceId: string, bodySeq: number): Promise<string | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingBodyRequests.delete(bodySeq)
+        resolve(null)
+      }, 5000)
+
+      pendingBodyRequests.set(bodySeq, (body) => {
+        clearTimeout(timer)
+        resolve(body)
+      })
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get-network-body', deviceId, bodySeq }))
+      } else {
+        clearTimeout(timer)
+        pendingBodyRequests.delete(bodySeq)
+        resolve(null)
+      }
+    })
   }
 
   onUnmounted(() => {
@@ -425,5 +482,6 @@ export function useConsoleSocket() {
     selectDevice,
     setWatchers,
     sendConsoleMessage,
+    requestNetworkBody,
   }
 }

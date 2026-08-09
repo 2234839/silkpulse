@@ -146,6 +146,8 @@ const props = defineProps<{
   network: NetworkEntry[]
   /** 当前选中设备 id（用于 exec 通道重新请求资源） */
   deviceId?: string
+  /** 懒加载完整 body（bodyTruncated=true 的 entry 按需拉取） */
+  requestBody?: (deviceId: string, bodySeq: number) => Promise<string | null>
 }>()
 
 /** 选中的请求 seq（点击展开详情，用 seq 追踪避免数组替换后引用丢失） */
@@ -210,6 +212,27 @@ const resBodyViewMode = ref<'preview' | 'raw'>('preview')
 /** 响应体展示模式重置：切换请求时回到默认 preview */
 watch(selectedSeq, () => {
   resBodyViewMode.value = 'preview'
+})
+
+/** 懒加载状态 */
+const bodyLoading = ref(false)
+const fullBodyCache = ref<string | null>(null)
+
+/** 懒加载完整 body（bodyTruncated=true 时使用） */
+async function loadFullBody() {
+  if (!props.deviceId || !selectedNetwork.value || !props.requestBody) return
+  bodyLoading.value = true
+  try {
+    fullBodyCache.value = await props.requestBody(props.deviceId, selectedNetwork.value.seq)
+  } finally {
+    bodyLoading.value = false
+  }
+}
+
+/** 切换请求时重置懒加载缓存 */
+watch(selectedSeq, () => {
+  fullBodyCache.value = null
+  bodyLoading.value = false
 })
 
 /**
@@ -1005,7 +1028,16 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           <div v-if="selectedNetwork.reqBody">
             <div class="text-xs text-faint mb-1">请求体</div>
             <div class="bg-surface p-3 rounded border border-base">
-              <ObjectInspector :json="selectedNetwork.reqBody" />
+              <ObjectInspector :json="fullBodyCache ?? selectedNetwork.reqBody" />
+            </div>
+            <!-- 懒加载提示：body 被截断时显示 -->
+            <div v-if="selectedNetwork.bodyTruncated && !fullBodyCache" class="mt-1 flex items-center gap-2">
+              <span class="text-xs text-amber-500">⚠ 请求体过大已截断（{{ formatSize(selectedNetwork.reqBody.length) }} / 完整内容需懒加载）</span>
+              <button
+                @click="loadFullBody"
+                :disabled="bodyLoading"
+                class="px-2 py-0.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+              >{{ bodyLoading ? '加载中...' : '📥 加载完整内容' }}</button>
             </div>
           </div>
 
@@ -1041,12 +1073,21 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               </template>
               <!-- 原始文本 / JSON 文本 -->
               <template v-else-if="!isBinaryInfo(selectedNetwork)">
-                <ObjectInspector :json="resBodyViewMode === 'raw' && isImagePreview(selectedNetwork) ? selectedNetwork.resBody!.substring(0, 200) + '...' : selectedNetwork.resBody" />
+                <ObjectInspector :json="resBodyViewMode === 'raw' && isImagePreview(selectedNetwork) ? selectedNetwork.resBody!.substring(0, 200) + '...' : (fullBodyCache ?? selectedNetwork.resBody)" />
               </template>
               <!-- info 模式的原始视图（无内容可显示） -->
               <template v-else>
                 <div class="text-xs text-faint">无原始内容（二进制未读取）</div>
               </template>
+            </div>
+            <!-- 懒加载提示：响应体被截断时显示 -->
+            <div v-if="selectedNetwork.bodyTruncated && !fullBodyCache" class="mt-1 flex items-center gap-2">
+              <span class="text-xs text-amber-500">⚠ 响应体过大已截断{{ selectedNetwork.resBodySize ? `（原始 ${(selectedNetwork.resBodySize / 1024).toFixed(0)}KB）` : '' }}，完整内容需懒加载</span>
+              <button
+                @click="loadFullBody"
+                :disabled="bodyLoading"
+                class="px-2 py-0.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+              >{{ bodyLoading ? '加载中...' : '📥 加载完整内容' }}</button>
             </div>
           </div>
 

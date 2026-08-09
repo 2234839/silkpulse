@@ -12,7 +12,7 @@
 import type { DeviceInfo, ServerToDeviceMessage, LogEntry, NetworkEntry, ErrorEntry } from '@silkpulse/shared'
 import { connect, send, onMessage, disconnect } from './ws-client.js'
 import { installLogCollector } from './log-collector.js'
-import { installNetworkCollector } from './network-collector.js'
+import { installNetworkCollector, getStoredBody } from './network-collector.js'
 import { installErrorCatcher, getErrorCount, setResourceErrorHandler } from './error-catcher.js'
 import { pushRecentError } from './snapshot.js'
 import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
@@ -216,6 +216,10 @@ export function init(options: InitOptions): void {
       )
     } else if (msg.type === 'stop-screen-share') {
       stopScreenShare()
+    } else if (msg.type === 'get-network-body') {
+      /** 控制台按需拉取完整 body（懒加载） */
+      const body = getStoredBody(msg.bodySeq)
+      send({ type: 'network-body', bodySeq: msg.bodySeq, body })
     }
   })
 

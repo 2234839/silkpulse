@@ -21,12 +21,52 @@ type SseEventSink = (seq: number, event: SseEvent) => void
 /** 内部序号计数器 */
 let seq = 0
 
-/** 响应体最大截断长度 */
-const MAX_RES_BODY = 1000
-/** 请求体最大截断长度 */
-const MAX_REQ_BODY = 500
+/**
+ * 完整 body 内存缓存（懒加载核心）
+ *
+ * key = network entry seq，value = 完整文本 body。
+ * 超过 BODY_INLINE_MAX 的 body 才存这里，推送只带摘要；
+ * 小于阈值的直接完整推送，无需懒加载。
+ *
+ * 上限 200 条，超出 FIFO 淘汰最旧的（避免内存泄漏）。
+ */
+const bodyStore = new Map<number, string>()
+const BODY_STORE_MAX = 200
+
+/** 内联推送阈值：小于此值直接完整推送，大于此值走懒加载 */
+const BODY_INLINE_MAX = 512 * 1024
+/** 懒加载摘要长度（大 body 推送时只带这么多字符预览） */
+const BODY_SUMMARY_LEN = 500
 /** 单个 header 值最大截断长度 */
 const MAX_HEADER_LEN = 200
+
+/**
+ * 处理 body：决定是完整推送还是懒加载摘要
+ *
+ * 返回推送用的 body 文本 + truncated 标记。
+ * - body.length <= BODY_INLINE_MAX：直接返回完整 body，truncated=false
+ * - body.length > BODY_INLINE_MAX：存入 bodyStore，返回摘要，truncated=true
+ */
+function processBody(seqNum: number, fullBody: string): { body: string; truncated: boolean } {
+  if (fullBody.length <= BODY_INLINE_MAX) {
+    return { body: fullBody, truncated: false }
+  }
+  /** 大 body：存完整，推摘要 */
+  bodyStore.set(seqNum, fullBody)
+  if (bodyStore.size > BODY_STORE_MAX) {
+    const oldest = bodyStore.keys().next().value
+    if (oldest !== undefined) bodyStore.delete(oldest)
+  }
+  return {
+    body: fullBody.slice(0, BODY_SUMMARY_LEN) + '…',
+    truncated: true,
+  }
+}
+
+/** 读取缓存的完整 body（供 get-network-body 消息调用） */
+export function getStoredBody(seqNum: number): string | null {
+  return bodyStore.get(seqNum) ?? null
+}
 
 /**
  * 诊断关键请求头白名单（小写匹配）
@@ -193,57 +233,6 @@ function isSseContentType(contentType: string): boolean {
 }
 
 /**
- * 解析 SSE 协议文本块，提取事件对象
- *
- * SSE 协议（RFC 8895 简化版）：
- * - 事件之间用空行（\n\n）分隔
- * - 每行格式 `field: value`，标准字段：data / event / id / retry
- * - `data:` 行可多行，最终用 \n 拼接
- * - `event:` 缺省为 'message'
- * - `:` 开头的行是注释，忽略
- */
-function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string } {
-  const events: SseEvent[] = []
-  /** 按双换行切分，最后不完整的块留在 remaining */
-  const blocks = buffer.split('\n\n')
-  /** 最后一块可能不完整（无尾随 \n\n），留到下次拼接 */
-  const remaining = blocks.pop() ?? ''
-
-  for (const block of blocks) {
-    if (!block.trim()) continue
-    let data: string[] = []
-    let eventType = 'message'
-    let id: string | undefined
-    let retry: number | undefined
-    for (const line of block.split('\n')) {
-      if (!line) continue
-      const colonIdx = line.indexOf(':')
-      const field = colonIdx > 0 ? line.slice(0, colonIdx) : line
-      /** 值去掉冒号后一个可选空格（SSE 规范：`: ` 或 `:`） */
-      const value = colonIdx > 0 ? line.slice(colonIdx + 1).replace(/^ /, '') : ''
-      if (field === 'data') {
-        data.push(value)
-      } else if (field === 'event') {
-        eventType = value
-      } else if (field === 'id') {
-        id = value
-      } else if (field === 'retry') {
-        const n = Number(value)
-        if (!Number.isNaN(n)) retry = n
-      }
-    }
-    events.push({
-      timestamp: new Date().toISOString(),
-      event: eventType,
-      id,
-      data: data.join('\n'),
-      retry,
-    })
-  }
-  return { events, remaining }
-}
-
-/**
  * 劫持全局 fetch
  *
  * @param sink HTTP 请求条目 sink
@@ -261,13 +250,26 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
      * 从 Request 上读（clone 副本读取，不消费原始 body）。
      * fetch(new Request(url, {body})) 场景若不处理，body 会丢失。
      */
+    /** 预分配 seq（需在 bodyStore 存储时使用同一个 seq） */
+    const loadingSeq = seq++
     let reqBody: string | undefined
+    let reqBodyTruncated = false
     if (init?.body) {
-      reqBody = stringifyBody(init.body, MAX_REQ_BODY)
+      const full = stringifyBody(init.body)
+      if (full !== undefined) {
+        const { body, truncated } = processBody(loadingSeq, full)
+        reqBody = body
+        reqBodyTruncated = truncated
+      }
     } else if (typeof input !== 'string' && !(input instanceof URL) && input.method !== 'GET' && input.method !== 'HEAD') {
       /** Request 对象带 body（非 GET/HEAD）：clone 后读文本，不消费原始 stream */
       try {
-        reqBody = await readRequestBodyClone(input, MAX_REQ_BODY)
+        const full = await readRequestBodyClone(input)
+        if (full !== undefined) {
+          const { body, truncated } = processBody(loadingSeq, full)
+          reqBody = body
+          reqBodyTruncated = truncated
+        }
       } catch {
         /** clone 或读取失败（stream 已消费/locked）忽略，不影响请求 */
       }
@@ -277,7 +279,6 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
     const start = Date.now()
 
     /** 立即上报 loading entry（status=0），让控制台即时看到请求发出 */
-    const loadingSeq = seq++
     sink({
       seq: loadingSeq,
       timestamp: new Date().toISOString(),
@@ -286,6 +287,7 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
       status: 0,
       reqHeaders,
       reqBody,
+      bodyTruncated: reqBodyTruncated || undefined,
       duration: 0,
       kind: 'fetch',
     })
@@ -376,14 +378,24 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
       }
 
       /** 非 SSE：异步读 body（不阻塞响应链路），二进制响应智能处理 */
-      cloneAndRead(res, (resBody, encoding, mime) => {
+      cloneAndRead(res, (fullBody, encoding, mime) => {
+        /** 完整 body 存内存，推送只带摘要（懒加载） */
+        let summary: string | undefined = fullBody
+        let truncated = false
+        if (fullBody !== undefined) {
+          const processed = processBody(loadingSeq, fullBody)
+          summary = processed.body
+          truncated = processed.truncated
+        }
         updateSink?.(loadingSeq, {
           status: res.status,
           duration: Date.now() - start,
           resHeaders,
-          resBody,
+          resBody: summary,
           resBodyEncoding: encoding,
           resBodyMime: mime,
+          resBodySize: fullBody?.length,
+          bodyTruncated: truncated || undefined,
         })
       })
       return res
@@ -456,14 +468,25 @@ function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void
       originalSend.call(this, body)
       return
     }
-    ctx.reqBody = body != null ? stringifyBody(body, MAX_REQ_BODY) : undefined
+    /** 预分配 seq */
+    ctx.loadingSeq = seq++
+    /** 请求体完整存储 + 摘要推送 */
+    let reqBodySummary: string | undefined
+    let reqBodyTruncated = false
+    if (body != null) {
+      const full = stringifyBody(body)
+      if (full !== undefined) {
+        const { body: processedBody, truncated } = processBody(ctx.loadingSeq, full)
+        reqBodySummary = processedBody
+        reqBodyTruncated = truncated
+      }
+    }
     ctx.start = Date.now()
 
     /** 请求头：过白名单（统一走 pickKeyHeaders 做脱敏） */
     const reqHeaders = pickKeyHeaders(new Headers(ctx.reqHeaders), KEY_REQ_HEADERS, { isRequest: true })
 
     /** 立即上报 loading entry */
-    ctx.loadingSeq = seq++
     sink({
       seq: ctx.loadingSeq,
       timestamp: new Date().toISOString(),
@@ -471,7 +494,8 @@ function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void
       method: ctx.method,
       status: 0,
       reqHeaders,
-      reqBody: ctx.reqBody,
+      reqBody: reqBodySummary,
+      bodyTruncated: reqBodyTruncated || undefined,
       duration: 0,
       kind: 'xhr',
     })
@@ -486,11 +510,19 @@ function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void
        * - arraybuffer/blob：标记类型+大小
        * - document：标记 XML/HTML
        */
-      let resBody: string | undefined
+      let fullResBody: string | undefined
       try {
-        resBody = stringifyXhrResponse(this, MAX_RES_BODY)
+        fullResBody = stringifyXhrResponse(this)
       } catch {
-        resBody = undefined
+        fullResBody = undefined
+      }
+      /** 完整响应体存内存，推送摘要 */
+      let resBodySummary: string | undefined = fullResBody
+      let resTruncated = false
+      if (fullResBody !== undefined) {
+        const processed = processBody(ctx.loadingSeq, fullResBody)
+        resBodySummary = processed.body
+        resTruncated = processed.truncated
       }
       /** 响应头：getAllResponseHeaders 返回 "k: v\r\n" 多行文本 */
       let resHeaders: Record<string, string> | undefined
@@ -505,7 +537,9 @@ function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void
         status: this.status,
         duration: Date.now() - ctx.start,
         resHeaders,
-        resBody,
+        resBody: resBodySummary,
+        resBodySize: fullResBody?.length,
+        bodyTruncated: resTruncated || undefined,
         error: err,
       })
     })
@@ -797,17 +831,17 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
  * 不处理 responseType 时 responseText 在非 text 模式下抛 InvalidStateError，
  * 导致 AI 丢失响应体——诊断最关键的信息之一。
  */
-function stringifyXhrResponse(xhr: XMLHttpRequest, maxLen: number): string | undefined {
+function stringifyXhrResponse(xhr: XMLHttpRequest): string | undefined {
   const rt = xhr.responseType
   /** text/默认模式：responseText 直接读（最常见路径，零额外开销） */
   if (rt === '' || rt === 'text') {
-    return truncate(String(xhr.responseText ?? ''), maxLen)
+    return String(xhr.responseText ?? '')
   }
   /** json：response 已是解析后的对象/数组/null */
   if (rt === 'json') {
     const body = xhr.response
     if (body == null) return undefined
-    return truncate(typeof body === 'string' ? body : JSON.stringify(body), maxLen)
+    return typeof body === 'string' ? body : JSON.stringify(body)
   }
   /** arraybuffer：标记字节数（二进制体无文本诊断价值，但有大小线索） */
   if (rt === 'arraybuffer') {
@@ -888,18 +922,18 @@ function redactUrlSearchParams(qs: string): string {
   }
 }
 
-/** 安全 stringify 请求体 */
-function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | Document, maxLen: number): string {
+/** 安全 stringify 请求体（不截断，完整存储） */
+function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | Document): string {
   try {
     if (typeof body === 'string') {
       /** 对 JSON body 中的敏感字段做脱敏（密码、token 等） */
-      return truncate(redactSensitiveJson(body), maxLen)
+      return redactSensitiveJson(body)
     }
-    if (body instanceof URLSearchParams) return truncate(redactUrlSearchParams(body.toString()), maxLen)
-    if (body instanceof FormData) return stringifyFormData(body, maxLen)
+    if (body instanceof URLSearchParams) return redactUrlSearchParams(body.toString())
+    if (body instanceof FormData) return stringifyFormData(body)
     if (body instanceof Blob) return `[Blob ${body.type}]`
     if (body instanceof ArrayBuffer) return `[ArrayBuffer ${(body as ArrayBuffer).byteLength}b]`
-    return String(body).slice(0, maxLen)
+    return String(body)
   } catch {
     return '[body 不可读]'
   }
@@ -913,7 +947,7 @@ function stringifyBody(body: XMLHttpRequestBodyInit | ReadableStream<unknown> | 
  * （能定位"漏传字段""文件名编码错误"等问题）。
  * 格式：[FormData: username, avatar=<photo.jpg>, token]
  */
-function stringifyFormData(form: FormData, maxLen: number): string {
+function stringifyFormData(form: FormData): string {
   const parts: string[] = []
   for (const [key, value] of form.entries()) {
     if (value instanceof File) {
@@ -922,10 +956,8 @@ function stringifyFormData(form: FormData, maxLen: number): string {
     } else {
       parts.push(key)
     }
-    /** 提前截断防超长表单拼出巨大字符串 */
-    if (parts.join(', ').length > maxLen) break
   }
-  return truncate(`[FormData: ${parts.join(', ')}]`, maxLen)
+  return `[FormData: ${parts.join(', ')}]`
 }
 
 /**
@@ -934,10 +966,9 @@ function stringifyFormData(form: FormData, maxLen: number): string {
  * Request 的 body 是 ReadableStream，直接读会消费它，导致后续 fetch 拿不到 body。
  * clone() 创建副本，读副本不影响原始请求。
  */
-async function readRequestBodyClone(req: Request, maxLen: number): Promise<string | undefined> {
+async function readRequestBodyClone(req: Request): Promise<string | undefined> {
   const cloned = req.clone()
-  const text = await cloned.text()
-  return truncate(text, maxLen)
+  return await cloned.text()
 }
 
 /**
@@ -984,7 +1015,7 @@ function cloneAndRead(
             return
           }
           const reader = new FileReader()
-          reader.onload = () => cb(truncate(reader.result as string, MAX_BINARY_BODY), 'base64', mime)
+          reader.onload = () => cb(reader.result as string, 'base64', mime)
           reader.onerror = () => cb(`[图片 ${mime} ${blob.size}b]`, 'info', mime)
           reader.readAsDataURL(blob)
         })
@@ -1003,18 +1034,18 @@ function cloneAndRead(
       return
     }
 
-    /** 文本类：正常 .text() 读取 */
+    /** 文本类：正常 .text() 读取（不截断，完整存储） */
     res
       .clone()
       .text()
-      .then((text) => cb(truncate(text, MAX_RES_BODY)))
+      .then((text) => cb(text))
       .catch(() => cb(undefined))
   } catch {
     cb(undefined)
   }
 }
 
-/** 截断 */
+/** 截断（仅用于 header 值，body 不截断走懒加载） */
 function truncate(s: string, maxLen: number): string {
   return s.length <= maxLen ? s : s.slice(0, maxLen) + '…'
 }

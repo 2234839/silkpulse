@@ -18,7 +18,8 @@
     "vue": "catalog:"
   },
   "dependencies": {
+    "@silkpulse/renderer": "workspace:*",
     "@silkpulse/shared": "workspace:*",
-    "@silkpulse/renderer": "workspace:*"
+    "vue-router": "catalog:"
   }
 }

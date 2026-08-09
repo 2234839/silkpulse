@@ -23,6 +23,8 @@ export type DeviceMessage =
   | { type: 'screen-frame'; frame: ScreenFrame }
   | { type: 'screen-share-status'; status: ScreenShareStatus }
   | { type: 'exec-result'; execId: string; result: ExecResult }
+  /** network entry 完整 body 回传（懒加载响应） */
+  | { type: 'network-body'; bodySeq: number; body: string | null }
   | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; changes: DomChangeData }
   | { type: 'device-mouse'; mouse: MouseEventData }
@@ -70,6 +72,8 @@ export type ServerToDeviceMessage =
   | { type: 'start-screen-share' }
   /** 请求设备停止屏幕共享 */
   | { type: 'stop-screen-share' }
+  /** 请求设备返回某个 network entry 的完整 body（懒加载） */
+  | { type: 'get-network-body'; bodySeq: number }
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
@@ -89,6 +93,8 @@ export type ServerToConsoleMessage =
   | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
   | { type: 'device-mouse'; deviceId: string; mouse: MouseEventData }
+  /** 设备返回完整 body（懒加载响应） */
+  | { type: 'network-body'; deviceId: string; bodySeq: number; body: string | null }
   /** server → 控制台的心跳响应 */
   | { type: 'pong' }
 
@@ -102,6 +108,8 @@ export type ConsoleMessage =
   | { type: 'start-screen-share'; deviceId: string }
   /** 控制台请求设备停止屏幕共享 */
   | { type: 'stop-screen-share'; deviceId: string }
+  /** 控制台请求某个 network entry 的完整 body（懒加载） */
+  | { type: 'get-network-body'; deviceId: string; bodySeq: number }
   /** 控制台 → server 的应用层心跳（检测半开连接） */
   | { type: 'ping' }
 
@@ -249,11 +257,11 @@ export interface NetworkEntry {
   status: number
   /** 请求头（截断） */
   reqHeaders?: Record<string, string>
-  /** 请求体（截断到 500 字符） */
+  /** 请求体摘要（前 500 字符，完整内容懒加载） */
   reqBody?: string
   /** 响应头（截断） */
   resHeaders?: Record<string, string>
-  /** 响应体（截断到 1000 字符） */
+  /** 响应体摘要（前 500 字符，完整内容懒加载） */
   resBody?: string
   /**
    * 响应体编码方式
@@ -264,6 +272,10 @@ export interface NetworkEntry {
   resBodyEncoding?: 'base64' | 'info'
   /** 响应体 MIME 类型（resBodyEncoding='base64' 时有值，如 image/png） */
   resBodyMime?: string
+  /** 响应体完整长度（字节数），用于控制台判断是否值得懒加载 */
+  resBodySize?: number
+  /** 标记 body 已截断（控制台据此显示"加载完整内容"按钮） */
+  bodyTruncated?: boolean
   /** 耗时（ms） */
   duration: number
   /** 是否出错 */

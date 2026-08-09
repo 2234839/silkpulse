@@ -253,6 +253,20 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
       return
     }
 
+    /**
+     * 6. SPA 路由回退
+     *
+     * Vue Router 的 history 模式下，/tools 等前端路由需要返回 index.html，
+     * 由前端 JS 解析路径并渲染对应组件。排除 /api/、/ws/ 等已知后端前缀。
+     */
+    if (!pathname.startsWith('/api/') && !pathname.startsWith('/ws/') && !pathname.startsWith('/inject')) {
+      const indexPath = path.resolve(staticRoot, 'index.html')
+      if (fs.existsSync(indexPath)) {
+        serveFile(res, indexPath, 'text/html; charset=utf-8')
+        return
+      }
+    }
+
     res.writeHead(404)
     res.end('Not found')
   })
