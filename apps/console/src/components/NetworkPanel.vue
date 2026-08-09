@@ -525,13 +525,19 @@ const filteredNetwork = computed(() => {
             </div>
             <!-- Parser 代码编辑区 -->
             <div v-if="streamParserOpen" class="mb-2">
-              <textarea
-                v-model="streamParser"
-                rows="2"
-                placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
-                class="w-full text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
-                spellcheck="false"
-              ></textarea>
+              <div class="flex gap-1">
+                <textarea
+                  v-model="streamParser"
+                  rows="2"
+                  placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
+                  class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
+                  spellcheck="false"
+                ></textarea>
+                <button
+                  @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
+                  class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                >📋 模板</button>
+              </div>
               <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
             <div class="bg-surface border border-base rounded p-2 space-y-0.5 max-h-80 overflow-y-auto">
@@ -570,13 +576,19 @@ const filteredNetwork = computed(() => {
             </div>
             <!-- Parser 代码编辑区 -->
             <div v-if="streamParserOpen" class="mb-2">
-              <textarea
-                v-model="streamParser"
-                rows="2"
-                placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
-                class="w-full text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
-                spellcheck="false"
-              ></textarea>
+              <div class="flex gap-1">
+                <textarea
+                  v-model="streamParser"
+                  rows="2"
+                  placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
+                  class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
+                  spellcheck="false"
+                ></textarea>
+                <button
+                  @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
+                  class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                >📋 模板</button>
+              </div>
               <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
             <div class="bg-surface border border-base rounded p-2 space-y-1">
