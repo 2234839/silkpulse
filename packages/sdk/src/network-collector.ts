@@ -332,9 +332,24 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
               const { done, value } = await reader.read()
               if (done) break
               const text = new TextDecoder().decode(value, { stream: true })
-              /** chunk 按 \n 拆分，去掉空行，每行一条事件 */
+              /** chunk 按 \n 拆分，去掉空行，解析 SSE 字段前缀 */
               for (const line of text.split('\n')) {
-                if (line.trim()) {
+                if (!line.trim()) continue
+                /** 去掉 SSE 协议字段前缀（data: / event: / id: 等） */
+                const colonIdx = line.indexOf(':')
+                const field = colonIdx > 0 ? line.slice(0, colonIdx) : ''
+                const value = colonIdx > 0 ? line.slice(colonIdx + 1).replace(/^ /, '') : line
+                if (field === 'data' || field === 'event' || field === 'id' || field === 'retry') {
+                  /** 只上报 data 行的内容，其他字段跳过 */
+                  if (field === 'data' && value.trim()) {
+                    sseEventSink(sseEntrySeq, {
+                      timestamp: new Date().toISOString(),
+                      event: 'message',
+                      data: value,
+                    })
+                  }
+                } else {
+                  /** 无 SSE 前缀的裸数据，整行上报 */
                   sseEventSink(sseEntrySeq, {
                     timestamp: new Date().toISOString(),
                     event: 'message',
