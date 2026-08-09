@@ -164,9 +164,11 @@ function installResourceObserver(sink: NetworkSink): void {
       timestamp: new Date(e.startTime + performance.timeOrigin).toISOString(),
       url: e.name,
       method: 'GET',
-      status: 200,
+      /** PerformanceResourceTiming 提供真实 HTTP 状态码（0 = 不可用/缓存命中） */
+      status: (e as PerformanceResourceTiming & { responseStatus?: number }).responseStatus || 0,
       duration: Math.round(e.duration),
       kind: 'resource',
+      /** 用 initiatorType 作为 mimeType 前缀（前端据此分类显示资源图标） */
       mimeType: initType,
       size: e.transferSize || e.encodedBodySize || undefined,
     })

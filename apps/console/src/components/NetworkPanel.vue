@@ -11,6 +11,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { NetworkEntry } from '@silkpulse/shared'
 import { copyText } from '../utils/clipboard'
+import { apiFetch } from '../utils/api'
 import ObjectInspector from './ObjectInspector.vue'
 
 /**
@@ -37,6 +38,60 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * 资源类型分类：根据 initiatorType (mimeType) 和 URL 后缀推断资源大类
+ *
+ * PerformanceObserver 的 initiatorType 值如 'link'/'script'/'img'/'css'，
+ * 映射到用户可理解的分类标签和图标。
+ */
+type ResourceCategory = 'css' | 'js' | 'img' | 'font' | 'media' | 'other'
+
+/**
+ * 根据 initiatorType + URL 扩展名推断资源大类
+ */
+function getResourceCategory(n: NetworkEntry): ResourceCategory {
+  const initType = n.mimeType ?? ''
+  const url = n.url.toLowerCase()
+  const ext = url.split('?')[0].split('.').pop() ?? ''
+
+  if (initType === 'css' || ext === 'css') return 'css'
+  if (initType === 'script' || ext === 'js' || ext === 'mjs') return 'js'
+  if (initType === 'img' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'avif'].includes(ext)) return 'img'
+  if (['woff', 'woff2', 'ttf', 'otf', 'eot'].includes(ext)) return 'font'
+  if (['mp4', 'webm', 'mp3', 'wav', 'ogg'].includes(ext)) return 'media'
+  return 'other'
+}
+
+/** 资源分类 → 图标映射 */
+const RESOURCE_ICONS: Record<ResourceCategory, string> = {
+  css: '🎨',
+  js: '📜',
+  img: '🖼️',
+  font: '🔤',
+  media: '🎬',
+  other: '📦',
+}
+
+/** 资源分类 → 中文标签 */
+const RESOURCE_LABELS: Record<ResourceCategory, string> = {
+  css: 'CSS',
+  js: 'JS',
+  img: 'Img',
+  font: 'Font',
+  media: 'Media',
+  other: 'Other',
+}
+
+/**
+ * 获取网络条目的显示图标
+ *
+ * 资源类型用分类图标，SSE/WS 用协议标签，其余不显示。
+ */
+function getEntryIcon(n: NetworkEntry): string | null {
+  if (n.kind === 'resource') return RESOURCE_ICONS[getResourceCategory(n)]
+  return null
 }
 
 /**
@@ -89,6 +144,8 @@ function calcDuration(n: NetworkEntry): number {
 const props = defineProps<{
   /** 远程设备网络请求列表 */
   network: NetworkEntry[]
+  /** 当前选中设备 id（用于 exec 通道重新请求资源） */
+  deviceId?: string
 }>()
 
 /** 选中的请求 seq（点击展开详情，用 seq 追踪避免数组替换后引用丢失） */
@@ -449,6 +506,143 @@ const filteredNetwork = computed(() => {
   }
   return result
 })
+
+/**
+ * ─── 重新请求（仅 resource 类型）───
+ *
+ * PerformanceObserver 只能拿到资源加载的时序和大小，拿不到请求/响应头和响应体。
+ * 但 SDK 运行在页面上下文，可以用 fetch(url) 重新请求该资源，
+ * 通过 exec 通道在设备上执行，拿到完整的头和体。
+ */
+
+/** 重新请求的完整结果 */
+interface RefetchResult {
+  /** HTTP 状态码 */
+  status: number
+  /** 响应头 */
+  headers: Record<string, string>
+  /** 响应体（文本或 base64） */
+  body: string
+  /** 响应体 MIME 类型 */
+  mime: string
+  /** 响应体编码：text | base64 */
+  encoding: 'text' | 'base64'
+}
+
+/** 重新请求状态 */
+const refetchLoading = ref(false)
+/** 重新请求结果（点击后填充，切换请求时清空） */
+const refetchResult = ref<RefetchResult | null>(null)
+/** 重新请求错误 */
+const refetchError = ref('')
+
+/** 切换请求时清空重新请求结果 */
+watch(selectedSeq, () => {
+  refetchResult.value = null
+  refetchError.value = ''
+})
+
+/**
+ * 通过 exec 通道在远程设备上重新 fetch 资源 URL
+ *
+ * 生成一段 JS 代码：fetch(url) → 读状态/头 → 按 content-type 决定 text/base64 → return JSON。
+ * 图片/字体等二进制走 base64，JSON/text 走文本读取。
+ */
+async function refetchResource() {
+  const n = selectedNetwork.value
+  if (!n || !props.deviceId || refetchLoading.value) return
+
+  refetchLoading.value = true
+  refetchError.value = ''
+  refetchResult.value = null
+
+  try {
+    /** 用 JSON.stringify(url) 安全转义 URL，防注入 */
+    const code = `const url = ${JSON.stringify(n.url)}
+    try {
+      const res = await fetch(url, { credentials: 'include' })
+      const headers = {}
+      res.headers.forEach((v, k) => { headers[k] = v })
+      const ct = (headers['content-type'] || '').toLowerCase()
+      let body = ''
+      let encoding = 'text'
+      /** 图片/字体/音频等二进制 → base64 */
+      if (ct.startsWith('image/') || ct.startsWith('font/') || ct.startsWith('audio/') || ct.startsWith('video/') || ct.startsWith('application/octet-stream')) {
+        const blob = await res.blob()
+        if (blob.size < 512 * 1024) {
+          body = await new Promise(resolve => {
+            const r = new FileReader()
+            r.onloadend = () => resolve(r.result)
+            r.readAsDataURL(blob)
+          })
+          encoding = 'base64'
+        } else {
+          body = '[Binary ' + (blob.type || 'unknown') + ' ' + blob.size + ' bytes — 超过 512KB 限制]'
+        }
+      } else {
+        /** 文本类（含 JSON/HTML/CSS/JS）→ 纯文本，截断到 50KB */
+        body = (await res.text()).slice(0, 50000)
+      }
+      return JSON.stringify({ status: res.status, headers, body, mime: ct, encoding })
+    } catch (e) {
+      return JSON.stringify({ error: e instanceof Error ? e.message : String(e) })
+    }`
+
+    const res = await apiFetch(`/api/devices/${props.deviceId}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+    const data = await res.json()
+
+    if (!data.success) {
+      refetchError.value = data.error || 'exec 执行失败'
+    } else {
+      /**
+       * exec result 经过 serializeResult(JSON.stringify) 双重序列化：
+       * 内层 JSON.stringify({"status":200,...}) → '{"status":200,...}'
+       * 外层 serializeResult 把字符串再 stringify → '"{\\"status\\":200,...}"'
+       * 所以前端需要 parse 两次：第一次得到内层 JSON 字符串，第二次得到对象
+       */
+      const raw = data.result ?? ''
+      if (!raw || raw === 'undefined') {
+        refetchError.value = 'exec 返回空结果'
+      } else {
+        try {
+          const innerJson = JSON.parse(raw)
+          const parsed = JSON.parse(innerJson)
+          if (parsed.error) {
+            refetchError.value = parsed.error
+          } else {
+            refetchResult.value = {
+              status: parsed.status,
+              headers: parsed.headers,
+              body: parsed.body,
+              mime: parsed.mime,
+              encoding: parsed.encoding,
+            }
+          }
+        } catch {
+          refetchError.value = `结果解析失败: ${raw.slice(0, 200)}`
+        }
+      }
+    }
+  } catch (e) {
+    refetchError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    refetchLoading.value = false
+  }
+}
+
+/** 重新请求结果是否为可预览图片 */
+function isRefetchImage(r: RefetchResult): boolean {
+  return r.encoding === 'base64' && r.mime.startsWith('image/')
+}
+
+/** 格式化重新请求的响应头 */
+function formatRefetchHeaders(h: Record<string, string>): string {
+  return Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('\n')
+}
 </script>
 
 <template>
@@ -523,11 +717,14 @@ const filteredNetwork = computed(() => {
               <td class="px-3 py-2 text-faint text-xs font-mono whitespace-nowrap">{{ new Date(n.timestamp).toLocaleTimeString() }}</td>
               <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
               <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
-                {{ n.status || '…' }}
+                <template v-if="n.kind === 'resource' && n.status === 0">—</template>
+                <template v-else>{{ n.status || '…' }}</template>
               </td>
               <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">
                 <span v-if="n.sseState" class="inline-block px-1 mr-1 text-[10px] rounded bg-purple-key/20 text-purple-key align-middle">SSE</span>
                 <span v-if="n.protocol === 'ws'" class="inline-block px-1 mr-1 text-[10px] rounded bg-blue-key/20 text-blue-key align-middle">WS</span>
+                <span v-if="n.kind === 'resource'" class="inline-block px-1 mr-1 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 align-middle">{{ RESOURCE_LABELS[getResourceCategory(n)] }}</span>
+                <span v-if="getEntryIcon(n)" class="mr-0.5">{{ getEntryIcon(n) }}</span>
                 {{ n.url.split('/').pop() || n.url }}
               </td>
               <td class="px-3 py-2 text-right text-xs font-mono text-muted whitespace-nowrap">
@@ -561,18 +758,73 @@ const filteredNetwork = computed(() => {
             <div class="text-xs text-faint mb-1">URL</div>
             <div class="text-sm font-mono text-primary break-all bg-surface p-2 rounded border border-base">{{ selectedNetwork.url }}</div>
           </div>
-          <div class="flex gap-6 text-sm">
+          <div class="flex gap-6 text-sm flex-wrap">
             <div><span class="text-faint">时间：</span><span class="font-mono text-primary">{{ new Date(selectedNetwork.timestamp).toLocaleString() }}</span></div>
             <div><span class="text-faint">方法：</span><span class="font-mono text-primary">{{ selectedNetwork.method }}</span></div>
             <div>
               <span class="text-faint">状态：</span>
-              <span class="font-mono" :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'">{{ selectedNetwork.status || '—' }}</span>
+              <span v-if="selectedNetwork.kind === 'resource' && selectedNetwork.status === 0" class="font-mono text-faint">未知</span>
+              <span v-else class="font-mono" :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'">{{ selectedNetwork.status || '—' }}</span>
             </div>
             <div>
               <span class="text-faint">大小：</span>
               <span class="font-mono text-primary">{{ selectedNetwork.protocol === 'ws' ? '—' : formatSize(calcResSize(selectedNetwork)) }}</span>
             </div>
             <div><span class="text-faint">耗时：</span><span class="font-mono text-primary">{{ calcDuration(selectedNetwork) }}ms</span></div>
+            <div v-if="selectedNetwork.kind === 'resource'">
+              <span class="text-faint">类型：</span>
+              <span class="font-mono text-primary">{{ getEntryIcon(selectedNetwork) }} {{ RESOURCE_LABELS[getResourceCategory(selectedNetwork)] }}</span>
+            </div>
+          </div>
+
+          <!-- 资源类型说明 + 重新请求（仅 resource 类型） -->
+          <div v-if="selectedNetwork.kind === 'resource'" class="space-y-3">
+            <div class="bg-amber-50 border border-amber-200 dark:bg-amber-900/10 dark:border-amber-800 rounded p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="text-xs text-amber-700 dark:text-amber-400 flex-1">
+                  <span class="font-semibold">📦 静态资源加载</span>
+                  <p class="mt-1 text-amber-600 dark:text-amber-500">SilkPulse 无法直接采集静态资源请求的请求头和响应体。点击右侧按钮可让设备重新 fetch 该 URL，获取完整的响应头和响应体。</p>
+                </div>
+                <button
+                  v-if="deviceId"
+                  @click="refetchResource"
+                  :disabled="refetchLoading"
+                  class="shrink-0 px-3 py-1.5 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >{{ refetchLoading ? '请求中...' : '🔄 重新请求' }}</button>
+              </div>
+            </div>
+
+            <!-- 重新请求错误 -->
+            <div v-if="refetchError" class="bg-red-soft border border-red-soft rounded p-3">
+              <div class="text-xs text-red-400 mb-1">重新请求失败</div>
+              <div class="text-sm text-red-key font-mono break-all">{{ refetchError }}</div>
+            </div>
+
+            <!-- 重新请求结果 -->
+            <template v-if="refetchResult">
+              <!-- 响应头 -->
+              <div>
+                <div class="text-xs text-faint mb-1">响应头（重新请求）</div>
+                <pre class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all">{{ formatRefetchHeaders(refetchResult.headers) }}</pre>
+              </div>
+              <!-- 响应体 -->
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <div class="text-xs text-faint">响应体（重新请求）</div>
+                  <span class="text-xs text-faint font-mono">{{ refetchResult.status }} · {{ refetchResult.mime }}</span>
+                </div>
+                <div class="bg-surface p-3 rounded border border-base">
+                  <!-- 图片预览 -->
+                  <template v-if="isRefetchImage(refetchResult)">
+                    <img :src="refetchResult.body" alt="资源预览" class="max-w-full rounded border border-light" style="max-height: 300px;" />
+                  </template>
+                  <!-- 文本/JSON -->
+                  <template v-else>
+                    <ObjectInspector :json="refetchResult.body" />
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- 错误 -->

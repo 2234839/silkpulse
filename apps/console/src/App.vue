@@ -353,7 +353,7 @@ onMounted(async () => {
           </nav>
 
           <ConsolePanel v-if="activeTab === 'console'" :logs="logs" :device-id="selectedDeviceId" />
-          <NetworkPanel v-else-if="activeTab === 'network'" :network="network" />
+          <NetworkPanel v-else-if="activeTab === 'network'" :network="network" :device-id="selectedDeviceId" />
           <ErrorsPanel v-else-if="activeTab === 'errors'" :errors="errors" />
           <FeaturePanel v-else-if="activeTab === 'feature'" :device-id="selectedDeviceId" />
           <SnapshotPanel v-else-if="activeTab === 'snapshot'" :device-id="selectedDeviceId" />
