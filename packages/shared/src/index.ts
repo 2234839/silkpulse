@@ -14,6 +14,7 @@ export type DeviceMessage =
   | { type: 'log'; log: LogEntry }
   | { type: 'log-repeat' }
   | { type: 'network'; entry: NetworkEntry }
+  | { type: 'network-update'; seq: number; patch: Partial<NetworkEntry> }
   | { type: 'ws-frame'; seq: number; frame: WsFrame }
   | { type: 'ws-state'; seq: number; wsState: number }
   | { type: 'sse-event'; seq: number; event: SseEvent }
@@ -78,6 +79,7 @@ export type ServerToConsoleMessage =
   | { type: 'log'; deviceId: string; log: LogEntry }
   | { type: 'log-repeat'; deviceId: string }
   | { type: 'network'; deviceId: string; entry: NetworkEntry }
+  | { type: 'network-update'; deviceId: string; seq: number; patch: Partial<NetworkEntry> }
   | { type: 'ws-frame'; deviceId: string; seq: number; frame: WsFrame }
   | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
   | { type: 'sse-event'; deviceId: string; seq: number; event: SseEvent }
@@ -227,7 +229,7 @@ export interface SseEvent {
   event: string
   /** 事件 ID（id: 字段的值，断线重连用） */
   id?: string
-  /** 事件数据（data: 字段的值，多行合并，截断到 500 字符） */
+  /** 事件数据（data: 字段的值，多行合并，不截断） */
   data: string
 }
 

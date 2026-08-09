@@ -217,6 +217,24 @@ export function setupWebSocket(
             })
             break
           }
+          case 'network-update': {
+            /**
+             * 已有 entry 的增量更新（loading→done、流式 body 追加）
+             * 按 seq 找到 entry 合并 patch 字段，广播让 console 同步更新
+             */
+            if (!device) return
+            const existing = device.network.findBySeq(msg.seq)
+            if (existing) {
+              Object.assign(existing, msg.patch)
+              broadcast(deviceId, {
+                type: 'network-update',
+                deviceId,
+                seq: msg.seq,
+                patch: msg.patch,
+              })
+            }
+            break
+          }
           case 'ws-frame': {
             /**
              * WebSocket 帧追加（send/recv/event）：按 seq 找到 WS 连接条目，
@@ -228,8 +246,6 @@ export function setupWebSocket(
             if (wsEntry && wsEntry.protocol === 'ws') {
               if (!wsEntry.frames) wsEntry.frames = []
               wsEntry.frames.push(msg.frame)
-              /** 上限 50 帧 FIFO，超出移除最早（防长连接刷爆体积） */
-              if (wsEntry.frames.length > 50) wsEntry.frames.shift()
               broadcast(deviceId, { type: 'ws-frame', deviceId, seq: msg.seq, frame: msg.frame })
             }
             break
@@ -261,7 +277,7 @@ export function setupWebSocket(
               } else {
                 if (!sseEntry.events) sseEntry.events = []
                 sseEntry.events.push(msg.event)
-                if (sseEntry.events.length > 50) sseEntry.events.shift()
+                broadcast(deviceId, { type: 'sse-event', deviceId, seq: msg.seq, event: msg.event })
               }
               broadcast(deviceId, { type: 'sse-event', deviceId, seq: msg.seq, event: msg.event })
             }

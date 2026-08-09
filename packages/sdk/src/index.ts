@@ -171,6 +171,7 @@ export function init(options: InitOptions): void {
     (seq, frame) => send({ type: 'ws-frame', seq, frame }),
     (seq, wsState) => send({ type: 'ws-state', seq, wsState }),
     (seq, event) => send({ type: 'sse-event', seq, event }),
+    (seq, patch) => send({ type: 'network-update', seq, patch }),
   )
   installErrorCatcher((entry: ErrorEntry) => {
     pushRecentError(entry.message)

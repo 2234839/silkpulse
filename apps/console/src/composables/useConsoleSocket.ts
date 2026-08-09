@@ -263,7 +263,7 @@ export function useConsoleSocket() {
         break
       case 'log':
         if (msg.deviceId === selectedDeviceId.value) {
-          logs.value = [...logs.value, msg.log].slice(-200)
+          logs.value = [...logs.value, msg.log]
         }
         break
       case 'log-repeat': {
@@ -279,16 +279,28 @@ export function useConsoleSocket() {
       }
       case 'network':
         if (msg.deviceId === selectedDeviceId.value) {
-          network.value = [...network.value, msg.entry].slice(-50)
+          network.value = [...network.value, msg.entry]
         }
         break
+      case 'network-update': {
+        /** 已有 entry 的增量更新（loading→done）：按 seq 找到并合并 patch */
+        if (msg.deviceId === selectedDeviceId.value) {
+          const arr = network.value.slice()
+          const idx = arr.findIndex((n) => n.seq === msg.seq)
+          if (idx >= 0) {
+            arr[idx] = { ...arr[idx], ...msg.patch }
+            network.value = arr
+          }
+        }
+        break
+      }
       case 'ws-frame': {
         /** WebSocket 帧追加：按 seq 找到 WS 连接条目，追加帧（浅拷贝触发响应式） */
         if (msg.deviceId === selectedDeviceId.value) {
           const arr = network.value.slice()
           const entry = arr.find((n) => n.seq === msg.seq)
           if (entry && entry.protocol === 'ws') {
-            const frames = [...(entry.frames ?? []), msg.frame].slice(-50)
+            const frames = [...(entry.frames ?? []), msg.frame]
             const idx = arr.indexOf(entry)
             arr[idx] = { ...entry, frames }
             network.value = arr
@@ -319,7 +331,7 @@ export function useConsoleSocket() {
             if (msg.event.event === '__closed__') {
               arr[idx] = { ...entry, sseState: 'closed' as const }
             } else {
-              const events = [...(entry.events ?? []), msg.event].slice(-50)
+              const events = [...(entry.events ?? []), msg.event]
               arr[idx] = { ...entry, events }
             }
             network.value = arr
@@ -329,7 +341,7 @@ export function useConsoleSocket() {
       }
       case 'error':
         if (msg.deviceId === selectedDeviceId.value) {
-          errors.value = [...errors.value, msg.error].slice(-50)
+          errors.value = [...errors.value, msg.error]
         }
         break
       case 'storage-change':

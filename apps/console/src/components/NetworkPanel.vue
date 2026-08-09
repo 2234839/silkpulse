@@ -18,8 +18,14 @@ const props = defineProps<{
   network: NetworkEntry[]
 }>()
 
-/** 选中的请求条目（点击展开详情） */
-const selectedNetwork = ref<NetworkEntry | null>(null)
+/** 选中的请求 seq（点击展开详情，用 seq 追踪避免数组替换后引用丢失） */
+const selectedSeq = ref<number | null>(null)
+
+/** 从列表中按 seq 查找当前选中的条目 */
+const selectedNetwork = computed(() => {
+  if (selectedSeq.value === null) return null
+  return props.network.find((n) => n.seq === selectedSeq.value) ?? null
+})
 
 /** cURL 复制状态（用于按钮反馈） */
 const curlCopyState = ref<'idle' | 'copied'>('idle')
@@ -72,9 +78,21 @@ function isBinaryInfo(n: NetworkEntry): boolean {
 const resBodyViewMode = ref<'preview' | 'raw'>('preview')
 
 /** 响应体展示模式重置：切换请求时回到默认 preview */
-watch(selectedNetwork, () => {
+watch(selectedSeq, () => {
   resBodyViewMode.value = 'preview'
 })
+
+/**
+ * 清空阈值：只展示此时间戳之后的网络请求。
+ * 与 Console 面板清空语义一致——前端视图层隐藏，不影响 server 缓冲。
+ */
+const clearedBeforeTs = ref(0)
+
+/** 清空当前网络面板视图 */
+function clearNetwork() {
+  clearedBeforeTs.value = Date.now()
+  selectedSeq.value = null
+}
 
 /**
  * 把 NetworkEntry 转成 cURL 命令
@@ -139,6 +157,10 @@ function toggleDurationSort() {
 }
 const filteredNetwork = computed(() => {
   let result = props.network
+  /** 清空阈值：隐藏"清空"之前的请求 */
+  if (clearedBeforeTs.value > 0) {
+    result = result.filter((n) => new Date(n.timestamp).getTime() >= clearedBeforeTs.value)
+  }
   /** 类型筛选 */
   if (networkKindFilter.value !== 'all') {
     result = result.filter((n) => n.kind === networkKindFilter.value)
@@ -164,11 +186,6 @@ const filteredNetwork = computed(() => {
     result = [...result].sort((a, b) => a.duration - b.duration)
   }
   return result
-})
-
-/** 设备切换时清空选中（避免显示旧设备的请求详情） */
-watch(() => props.network, () => {
-  selectedNetwork.value = null
 })
 </script>
 
@@ -206,7 +223,12 @@ watch(() => props.network, () => {
               ? sf === 'error' ? 'bg-red-600 text-white' : 'bg-gray-800 text-white'
               : 'bg-elevated text-secondary bg-elevated-hover'"
           >{{ sf === 'all' ? '全部' : sf === 'success' ? '成功' : '失败' }}</button>
-          <span class="ml-auto text-xs text-faint">{{ filteredNetwork.length }}/{{ props.network.length }}</span>
+          <button
+            @click="clearNetwork"
+            class="ml-auto px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
+            title="清空当前视图（不影响服务端缓冲）"
+          >🚫 清空</button>
+          <span class="text-xs text-faint">{{ filteredNetwork.length }}/{{ props.network.length }}</span>
         </div>
       </div>
       <div class="flex-1 overflow-y-auto">
@@ -231,14 +253,18 @@ watch(() => props.network, () => {
             <tr
               v-for="(n, i) in filteredNetwork"
               :key="i"
-              @click="selectedNetwork = n"
+              @click="selectedSeq = n.seq"
               class="border-b border-light cursor-pointer hover:bg-blue-soft"
-              :class="selectedNetwork === n ? 'bg-blue-soft' : ''"
+              :class="selectedSeq === n.seq ? 'bg-blue-soft' : ''"
             >
               <td class="px-3 py-2 text-faint text-xs font-mono whitespace-nowrap">{{ new Date(n.timestamp).toLocaleTimeString() }}</td>
               <td class="px-3 py-2 text-secondary font-mono text-xs">{{ n.method }}</td>
               <td class="px-3 py-2 font-mono text-xs" :class="n.status >= 400 ? 'text-red-500' : n.status >= 200 ? 'text-green-600' : 'text-faint'">
-                {{ n.status || '—' }}
+                <span v-if="n.status === 0 && !n.error" class="inline-flex items-center gap-1 text-blue-500">
+                  <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  loading
+                </span>
+                <span v-else>{{ n.status || '—' }}</span>
               </td>
               <td class="px-3 py-2 text-primary truncate max-w-[160px] text-xs">
                 <span v-if="n.sseState" class="inline-block px-1 mr-1 text-[10px] rounded bg-purple-key/20 text-purple-key align-middle">SSE</span>
@@ -313,12 +339,15 @@ watch(() => props.network, () => {
             </div>
             <div class="bg-surface border border-base rounded p-2 space-y-1">
               <div v-for="(e, ei) in selectedNetwork.events" :key="ei" class="text-xs font-mono border-b border-base-last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
-                <div class="flex gap-2 items-baseline">
+                <div class="flex gap-2 items-baseline flex-wrap">
                   <span class="text-faint shrink-0">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
-                  <span class="shrink-0 text-purple-key">{{ e.event }}</span>
-                  <span v-if="e.id" class="shrink-0 text-faint">id:{{ e.id }}</span>
+                  <span class="shrink-0 text-purple-key">event: {{ e.event }}</span>
+                  <span v-if="e.id" class="shrink-0 text-faint">id: {{ e.id }}</span>
                 </div>
-                <pre class="text-primary whitespace-pre-wrap break-all pl-2 mt-0.5">{{ e.data }}</pre>
+                <div class="pl-2 mt-0.5">
+                  <span class="text-blue-key">data:</span>
+                  <pre class="text-primary whitespace-pre-wrap break-all">{{ e.data }}</pre>
+                </div>
               </div>
               <div v-if="!selectedNetwork.events?.length" class="text-faint text-center py-4 text-xs">暂无事件（连接已建立，等待服务端推送）</div>
             </div>

@@ -9,6 +9,8 @@
 import type { NetworkEntry, WsFrame, SseEvent } from '@silkpulse/shared'
 
 type NetworkSink = (entry: NetworkEntry) => void
+/** 已有 entry 的增量更新回调（按 seq 找到并合并 patch 字段） */
+type NetworkUpdateSink = (seq: number, patch: Partial<NetworkEntry>) => void
 /** WebSocket 帧追加回调（seq 关联连接条目，frame 新帧） */
 type WsFrameSink = (seq: number, frame: WsFrame) => void
 /** WebSocket 状态变更回调（readyState 变化） */
@@ -110,15 +112,17 @@ function parseRawHeaders(raw: string): Headers {
  * @param wsFrameSink WS 帧追加（send/recv/event，seq 关联连接）
  * @param wsStateSink WS readyState 变化（OPEN/CLOSING/CLOSED）
  * @param sseEventSink SSE 事件追加（text/event-stream 流式响应的逐事件）
+ * @param updateSink 已有条目的增量更新（loading→done 状态切换、流式 body 追加）
  */
 export function installNetworkCollector(
   sink: NetworkSink,
   wsFrameSink: WsFrameSink,
   wsStateSink: WsStateSink,
   sseEventSink?: SseEventSink,
+  updateSink?: NetworkUpdateSink,
 ): void {
-  installFetchHook(sink, sseEventSink)
-  installXhrHook(sink)
+  installFetchHook(sink, sseEventSink, updateSink)
+  installXhrHook(sink, updateSink)
   installWsHook(sink, wsFrameSink, wsStateSink)
   installEventSourceHook(sink, sseEventSink)
   installResourceObserver(sink)
@@ -242,7 +246,7 @@ function parseSseChunk(buffer: string): { events: SseEvent[]; remaining: string 
  * @param sink HTTP 请求条目 sink
  * @param sseEventSink SSE 事件增量 sink（可选，不传则 SSE 响应不采集事件）
  */
-function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink): void {
+function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, updateSink?: NetworkUpdateSink): void {
   const originalFetch = globalThis.fetch
   if (!originalFetch) return
 
@@ -269,6 +273,20 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink): void 
     const reqHeaders = pickKeyHeaders(mergeReqHeaders(input, init), KEY_REQ_HEADERS, { isRequest: true })
     const start = Date.now()
 
+    /** 立即上报 loading entry（status=0），让控制台即时看到请求发出 */
+    const loadingSeq = seq++
+    sink({
+      seq: loadingSeq,
+      timestamp: new Date().toISOString(),
+      url,
+      method,
+      status: 0,
+      reqHeaders,
+      reqBody,
+      duration: 0,
+      kind: 'fetch',
+    })
+
     try {
       const res = await originalFetch(input as RequestInfo, init)
       /** 响应头 */
@@ -286,21 +304,16 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink): void 
        */
       const contentType = res.headers.get('content-type') ?? ''
       if (sseEventSink && res.body && isSseContentType(contentType)) {
-        /** 创建 SSE 连接条目（类似 WS 连接条目，带 sseState 标识） */
-        const sseEntrySeq = seq++
-        sink({
-          seq: sseEntrySeq,
-          timestamp: new Date().toISOString(),
-          url,
-          method,
+        /** 更新 loading entry 为 SSE 连接条目 */
+        updateSink?.(loadingSeq, {
           status: res.status,
           duration: Date.now() - start,
-          reqHeaders,
           resHeaders,
-          kind: 'fetch',
           sseState: 'open',
           events: [],
         })
+
+        const sseEntrySeq = loadingSeq
 
         /** tee 拆流：[0] 给业务代码，[1] 给采集器解析 */
         const [bodyForCaller, bodyForCollect] = res.body.tee()
@@ -346,11 +359,22 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink): void 
 
       /** 非 SSE：异步读 body（不阻塞响应链路），二进制响应智能处理 */
       cloneAndRead(res, (resBody, encoding, mime) => {
-        sink(makeEntry(url, method, res.status, reqBody, resBody, Date.now() - start, reqHeaders, resHeaders, undefined, 'fetch', encoding, mime))
+        updateSink?.(loadingSeq, {
+          status: res.status,
+          duration: Date.now() - start,
+          resHeaders,
+          resBody,
+          resBodyEncoding: encoding,
+          resBodyMime: mime,
+        })
       })
       return res
     } catch (err) {
-      sink(makeEntry(url, method, 0, reqBody, undefined, Date.now() - start, reqHeaders, undefined, err instanceof Error ? err.message : String(err), 'fetch'))
+      updateSink?.(loadingSeq, {
+        status: 0,
+        duration: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err),
+      })
       throw err
     }
   }
@@ -369,7 +393,7 @@ function mergeReqHeaders(input: RequestInfo | URL, init?: RequestInit): Headers 
 }
 
 /** 劫持 XMLHttpRequest */
-function installXhrHook(sink: NetworkSink): void {
+function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void {
   const Xhr = globalThis.XMLHttpRequest
   if (!Xhr) return
   const originalOpen = Xhr.prototype.open
@@ -386,6 +410,8 @@ function installXhrHook(sink: NetworkSink): void {
     start: number
     /** 收集 setRequestHeader 设置的请求头 */
     reqHeaders: Record<string, string>
+    /** loading entry 的 seq，用于 loadend 时更新 */
+    loadingSeq: number
   }
 
   Xhr.prototype.open = function (this: XMLHttpRequest, method: string, url: string, async?: boolean, user?: string | null, password?: string | null): void {
@@ -394,6 +420,7 @@ function installXhrHook(sink: NetworkSink): void {
       url,
       start: 0,
       reqHeaders: {},
+      loadingSeq: -1,
     }
     originalOpen.call(this, method, url, async ?? true, user, password)
   }
@@ -414,6 +441,23 @@ function installXhrHook(sink: NetworkSink): void {
     ctx.reqBody = body != null ? stringifyBody(body, MAX_REQ_BODY) : undefined
     ctx.start = Date.now()
 
+    /** 请求头：过白名单（统一走 pickKeyHeaders 做脱敏） */
+    const reqHeaders = pickKeyHeaders(new Headers(ctx.reqHeaders), KEY_REQ_HEADERS, { isRequest: true })
+
+    /** 立即上报 loading entry */
+    ctx.loadingSeq = seq++
+    sink({
+      seq: ctx.loadingSeq,
+      timestamp: new Date().toISOString(),
+      url: ctx.url,
+      method: ctx.method,
+      status: 0,
+      reqHeaders,
+      reqBody: ctx.reqBody,
+      duration: 0,
+      kind: 'xhr',
+    })
+
     this.addEventListener('loadend', () => {
       /**
        * 读响应体：responseText 仅在 responseType=''/'text' 时可用，设了
@@ -430,8 +474,6 @@ function installXhrHook(sink: NetworkSink): void {
       } catch {
         resBody = undefined
       }
-      /** 请求头：过白名单（统一走 pickKeyHeaders 做脱敏） */
-      const reqHeaders = pickKeyHeaders(new Headers(ctx.reqHeaders), KEY_REQ_HEADERS, { isRequest: true })
       /** 响应头：getAllResponseHeaders 返回 "k: v\r\n" 多行文本 */
       let resHeaders: Record<string, string> | undefined
       try {
@@ -441,7 +483,13 @@ function installXhrHook(sink: NetworkSink): void {
         /** 读响应头失败忽略 */
       }
       const err = this.status === 0 ? '请求未完成' : undefined
-      sink(makeEntry(ctx.url, ctx.method, this.status, ctx.reqBody, resBody, Date.now() - ctx.start, reqHeaders, resHeaders, err, 'xhr'))
+      updateSink?.(ctx.loadingSeq, {
+        status: this.status,
+        duration: Date.now() - ctx.start,
+        resHeaders,
+        resBody,
+        error: err,
+      })
     })
 
     originalSend.call(this, body)
@@ -698,37 +746,6 @@ function installEventSourceHook(sink: NetworkSink, sseEventSink?: SseEventSink):
 }
 
 /** 构造 NetworkEntry */
-function makeEntry(
-  url: string,
-  method: string,
-  status: number,
-  reqBody?: string,
-  resBody?: string,
-  duration?: number,
-  reqHeaders?: Record<string, string>,
-  resHeaders?: Record<string, string>,
-  error?: string,
-  kind?: 'fetch' | 'xhr' | 'resource',
-  resBodyEncoding?: 'base64' | 'info',
-  resBodyMime?: string,
-): NetworkEntry {
-  return {
-    seq: seq++,
-    timestamp: new Date().toISOString(),
-    url,
-    method,
-    status,
-    reqHeaders,
-    reqBody,
-    resHeaders,
-    resBody,
-    resBodyEncoding,
-    resBodyMime,
-    duration: duration ?? 0,
-    error,
-    kind,
-  }
-}
 
 /**
  * 读取 XHR 响应体（统一处理所有 responseType）
