@@ -319,28 +319,28 @@ function installFetchHook(sink: NetworkSink, sseEventSink?: SseEventSink, update
         /** tee 拆流：[0] 给业务代码，[1] 给采集器解析 */
         const [bodyForCaller, bodyForCollect] = res.body.tee()
 
-        /** 后台逐块解析 SSE 事件（不阻塞业务代码消费流） */
+        /**
+         * 后台逐块采集 SSE 事件
+         *
+         * 每个 reader.read() 拿到的 chunk 按 \n 拆分为多条独立事件，
+         * 去掉空行后逐条上报。不做 SSE 协议解析（最简单、最可靠）。
+         */
         ;(async () => {
           const reader = bodyForCollect.getReader()
-          let buffer = ''
           try {
             for (;;) {
               const { done, value } = await reader.read()
               if (done) break
-              /** Uint8Array → UTF-8 文本，追加到缓冲区 */
-              buffer += new TextDecoder().decode(value, { stream: true })
-              /** 尝试解析完整事件（按 \n\n 分隔） */
-              const { events, remaining } = parseSseChunk(buffer)
-              buffer = remaining
-              for (const event of events) {
-                sseEventSink(sseEntrySeq, event)
-              }
-            }
-            /** flush 缓冲区剩余数据 */
-            if (buffer.trim()) {
-              const { events } = parseSseChunk(buffer + '\n\n')
-              for (const event of events) {
-                sseEventSink(sseEntrySeq, event)
+              const text = new TextDecoder().decode(value, { stream: true })
+              /** chunk 按 \n 拆分，去掉空行，每行一条事件 */
+              for (const line of text.split('\n')) {
+                if (line.trim()) {
+                  sseEventSink(sseEntrySeq, {
+                    timestamp: new Date().toISOString(),
+                    event: 'message',
+                    data: line,
+                  })
+                }
               }
             }
           } catch {
