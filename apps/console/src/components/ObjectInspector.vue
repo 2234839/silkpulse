@@ -339,14 +339,14 @@ function typeBadge(type: string): string {
           @click.stop
           class="oi-edit-input"
         />
-        <!-- 只读/查看模式 -->
+        <!-- 只读/查看模式：字符串显示完整 value（不截断），其他类型用 preview -->
         <span
           v-else
           class="oi-value"
           :class="{ 'oi-clickable': isEditableLeaf }"
           :style="{ color: typeColor(node.type) }"
           @click.stop="startEdit"
-        >{{ node.preview }}</span>
+        >{{ node.type === 'string' ? node.value ?? node.preview : node.preview }}</span>
       </span>
 
       <!-- 容器节点摘要 -->
@@ -426,10 +426,12 @@ function typeBadge(type: string): string {
 .oi-leaf {
   word-break: break-all;
   white-space: pre-wrap;
+  min-width: 0;
 }
 
 .oi-value {
   word-break: break-all;
+  white-space: pre-wrap;
 }
 
 .oi-clickable {

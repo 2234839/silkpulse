@@ -580,8 +580,8 @@ async function refetchResource() {
           body = '[Binary ' + (blob.type || 'unknown') + ' ' + blob.size + ' bytes — 超过 512KB 限制]'
         }
       } else {
-        /** 文本类（含 JSON/HTML/CSS/JS）→ 纯文本，截断到 50KB */
-        body = (await res.text()).slice(0, 50000)
+        /** 文本类（含 JSON/HTML/CSS/JS）→ 纯文本完整读取（exec 通道支持 500KB） */
+        body = await res.text()
       }
       return JSON.stringify({ status: res.status, headers, body, mime: ct, encoding })
     } catch (e) {
@@ -818,9 +818,9 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   <template v-if="isRefetchImage(refetchResult)">
                     <img :src="refetchResult.body" alt="资源预览" class="max-w-full rounded border border-light" style="max-height: 300px;" />
                   </template>
-                  <!-- 文本/JSON -->
+                  <!-- 文本/JSON/CSS/JS：pre + 滚动，完整不截断 -->
                   <template v-else>
-                    <ObjectInspector :json="refetchResult.body" />
+                    <pre class="text-xs font-mono text-primary whitespace-pre-wrap break-all max-h-96 overflow-y-auto">{{ refetchResult.body }}</pre>
                   </template>
                 </div>
               </div>
