@@ -169,10 +169,82 @@ const streamParserError = ref('')
 /** parser 展示开关（默认折叠，点击展开） */
 const streamParserOpen = ref(false)
 
-/** 响应体展示模式重置 + 流状态重置：切换请求时清空 */
+/**
+ * Parser 历史记录：按域名存储，localStorage 持久化
+ *
+ * 用户编辑 parser 代码后（失焦或切换请求时），自动保存到当前请求域名的历史列表。
+ * 下次同域名打开 parser 时，从历史下拉中可快速选择之前的代码。
+ */
+const STORAGE_KEY = 'silkpulse:parser-history'
+/** 当前域名的历史 parser 列表 */
+const parserHistory = ref<string[]>([])
+/** 历史下拉是否展开 */
+const parserHistoryOpen = ref(false)
+
+/** 从 localStorage 读取所有域名的 parser 历史 */
+function loadParserHistory(): Record<string, string[]> {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+/** 根据当前选中请求的 URL 提取域名 */
+const currentDomain = computed(() => {
+  const url = selectedNetwork.value?.url ?? ''
+  try {
+    return new URL(url, location.href).hostname
+  } catch {
+    return ''
+  }
+})
+
+/** 切换域名时加载对应历史 */
+watch(currentDomain, (domain) => {
+  if (!domain) { parserHistory.value = []; return }
+  const all = loadParserHistory()
+  parserHistory.value = all[domain] ?? []
+}, { immediate: true })
+
+/** 保存当前 parser 代码到域名历史（去重，最新放最前，上限 10 条） */
+function saveParserToHistory() {
+  const code = streamParser.value.trim()
+  if (!code) return
+  const domain = currentDomain.value
+  if (!domain) return
+  const all = loadParserHistory()
+  const list = all[domain] ?? []
+  /** 去重：移除已有的相同代码 */
+  const filtered = list.filter((c) => c !== code)
+  filtered.unshift(code)
+  /** 上限 10 条 */
+  all[domain] = filtered.slice(0, 10)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+  parserHistory.value = all[domain]
+}
+
+/** 切换请求时保存上一次的 parser 代码 */
 watch(selectedSeq, () => {
   streamParserError.value = ''
+  saveParserToHistory()
 })
+
+/** 从历史中选择一条代码 */
+function selectParserHistory(code: string) {
+  streamParser.value = code
+  parserHistoryOpen.value = false
+}
+
+/** 删除一条历史 */
+function deleteParserHistory(code: string) {
+  const domain = currentDomain.value
+  if (!domain) return
+  const all = loadParserHistory()
+  all[domain] = (all[domain] ?? []).filter((c) => c !== code)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+  parserHistory.value = all[domain] ?? []
+}
 
 /**
  * 编译 parser 函数，失败时设置 streamParserError
@@ -532,11 +604,33 @@ const filteredNetwork = computed(() => {
                   placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
+                  @blur="saveParserToHistory"
                 ></textarea>
                 <button
                   @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                 >📋 模板</button>
+                <button
+                  v-if="parserHistory.length"
+                  @click="parserHistoryOpen = !parserHistoryOpen"
+                  class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                  :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
+                >📚 历史</button>
+              </div>
+              <!-- 历史下拉列表 -->
+              <div v-if="parserHistoryOpen && parserHistory.length" class="mt-1 border border-base rounded divide-y divide-base">
+                <div
+                  v-for="(code, hi) in parserHistory"
+                  :key="hi"
+                  class="flex items-center gap-1 px-2 py-1 hover:bg-elevated cursor-pointer group"
+                  @click="selectParserHistory(code)"
+                >
+                  <code class="flex-1 text-xs font-mono text-secondary truncate">{{ code }}</code>
+                  <button
+                    class="text-xs text-red-400 opacity-0 group-hover:opacity-100 shrink-0"
+                    @click.stop="deleteParserHistory(code)"
+                  >✕</button>
+                </div>
               </div>
               <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
@@ -583,11 +677,33 @@ const filteredNetwork = computed(() => {
                   placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
+                  @blur="saveParserToHistory"
                 ></textarea>
                 <button
                   @click="streamParser = 'try { return JSON.parse(data).msg } catch { return data }'"
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                 >📋 模板</button>
+                <button
+                  v-if="parserHistory.length"
+                  @click="parserHistoryOpen = !parserHistoryOpen"
+                  class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
+                  :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
+                >📚 历史</button>
+              </div>
+              <!-- 历史下拉列表 -->
+              <div v-if="parserHistoryOpen && parserHistory.length" class="mt-1 border border-base rounded divide-y divide-base">
+                <div
+                  v-for="(code, hi) in parserHistory"
+                  :key="hi"
+                  class="flex items-center gap-1 px-2 py-1 hover:bg-elevated cursor-pointer group"
+                  @click="selectParserHistory(code)"
+                >
+                  <code class="flex-1 text-xs font-mono text-secondary truncate">{{ code }}</code>
+                  <button
+                    class="text-xs text-red-400 opacity-0 group-hover:opacity-100 shrink-0"
+                    @click.stop="deleteParserHistory(code)"
+                  >✕</button>
+                </div>
               </div>
               <div v-if="streamParserError" class="text-xs text-red-500 mt-0.5">⚠ {{ streamParserError }}</div>
             </div>
