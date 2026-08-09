@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp run -r build && pnpm run copy:assets",
+    "build": "vp run --filter '!silkpulse' build && pnpm run copy:assets",
     "copy:assets": "mkdir -p packages/server/public && cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js && cp -r apps/console/dist/* packages/server/public/",
     "dev:server": "vp run @silkpulse/server#dev",
     "dev:sdk": "vp run @silkpulse/sdk#dev",
