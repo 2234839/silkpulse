@@ -10,6 +10,7 @@
  * 控制台渲染层拿到 diff 后只操作受影响的节点，避免全量重渲染。
  */
 import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
+import { diffText, type TextDiffSegment } from './text-diff.js'
 
 /** 单个元素的变更补丁 */
 export interface ElementPatch {
@@ -17,6 +18,13 @@ export interface ElementPatch {
   idx: number
   /** 新的元素数据（added/updated 时有值，removed 时无值） */
   el?: SnapshotElement
+  /**
+   * 文本内容的字符级 diff（仅当 text 字段发生变化时有值）
+   *
+   * 消费方可据此高亮显示"改了哪些字符"，而非只展示新全文。
+   * 基于 grapheme cluster 分割，正确处理 emoji / 组合字符 / 国旗等。
+   */
+  textDiff?: TextDiffSegment[]
 }
 
 /** diff 结果 */
@@ -99,7 +107,16 @@ export function diffSnapshots(old_: SnapshotData | null, new_: SnapshotData): Sn
     if (!oldEl) {
       added.push({ idx, el: newEl })
     } else if (isVisualChanged(oldEl, newEl)) {
-      updated.push({ idx, el: newEl })
+      /**
+       * 文本变化时附带字符级 diff。
+       * 只在 text 字段确实不同时生成（空 vs 空 不生成），
+       * 避免非 text 变化（如 rect/style）时浪费计算。
+       */
+      const patch: ElementPatch = { idx, el: newEl }
+      if (oldEl.text !== newEl.text && (oldEl.text || newEl.text)) {
+        patch.textDiff = diffText(oldEl.text ?? '', newEl.text ?? '')
+      }
+      updated.push(patch)
     }
     /** 没变化的不进任何列表（增量渲染的核心收益） */
   }

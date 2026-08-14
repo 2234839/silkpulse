@@ -12,6 +12,7 @@
  * - AiContextModal：AI 诊断上下文
  */
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useConsoleSocket } from './composables/useConsoleSocket'
 import { useAuth } from './composables/useAuth'
 import { useTheme } from './composables/useTheme'
@@ -123,8 +124,32 @@ watch(selectedDeviceId, () => {
   sidebarOpen.value = false
 })
 
-/** 当前激活的面板 */
-const activeTab = ref<'console' | 'element' | 'network' | 'storage' | 'errors' | 'feature' | 'snapshot' | 'exec'>('console')
+const route = useRoute()
+const router = useRouter()
+
+/** 所有合法的 tab id，用于校验 URL query */
+const validTabs = ['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec'] as const
+
+/** 当前激活的面板 —— 初始值从 URL ?tab= 读取，支持复制链接直达 */
+const activeTab = ref<typeof validTabs[number]>(
+  (validTabs as readonly string[]).includes(route.query.tab as string) ? (route.query.tab as typeof validTabs[number]) : 'console',
+)
+
+/** URL → activeTab：外部导航（前进/后退/粘贴链接）时同步 */
+watch(() => route.query.tab, (val) => {
+  if (typeof val === 'string' && (validTabs as readonly string[]).includes(val)) {
+    activeTab.value = val as typeof validTabs[number]
+  } else if (!val) {
+    activeTab.value = 'console'
+  }
+})
+
+/** activeTab → URL：点击切换时用 replace 不污染历史栈 */
+watch(activeTab, (val) => {
+  if (route.query.tab !== val) {
+    router.replace({ query: { ...route.query, tab: val } })
+  }
+})
 
 /** 面板切换时按需启停远程采集器 */
 watch([activeTab, selectedDeviceId], () => {

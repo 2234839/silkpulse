@@ -47,6 +47,15 @@
   --cs-oi-children-border: rgba(0, 0, 0, 0.1); /** 子节点竖线 */
   --cs-oi-edit-border: #098a6e;  /** 编辑框边框 */
   --cs-oi-edit-bg: #f9fafb;     /** 编辑框背景 */
+
+  /** Diff 配色（VS Code 风格：双层高亮） */
+  --cs-diff-inserted-line: rgba(155, 185, 85, 0.15);  /** 新增整行背景（淡绿） */
+  --cs-diff-removed-line: rgba(255, 0, 0, 0.10);      /** 删除整行背景（淡红） */
+  --cs-diff-inserted-char: rgba(155, 185, 85, 0.45);  /** 新增字符背景（浓绿） */
+  --cs-diff-removed-char: rgba(255, 0, 0, 0.35);      /** 删除字符背景（浓红） */
+  --cs-diff-gutter-inserted: rgba(155, 185, 85, 0.3); /** 新增行号区背景 */
+  --cs-diff-gutter-removed: rgba(255, 0, 0, 0.2);     /** 删除行号区背景 */
+  --cs-diff-empty-bg: rgba(128, 128, 128, 0.06);      /** split 模式空白占位行背景 */
 }
 
 /** 暗色主题 */
@@ -88,6 +97,15 @@
   --cs-oi-children-border: rgba(127, 127, 127, 0.12);
   --cs-oi-edit-border: #4ec9b0;
   --cs-oi-edit-bg: rgba(0, 0, 0, 0.3);
+
+  /** Diff 配色（VS Code 风格：双层高亮） */
+  --cs-diff-inserted-line: rgba(155, 185, 85, 0.12);
+  --cs-diff-removed-line: rgba(255, 80, 80, 0.10);
+  --cs-diff-inserted-char: rgba(155, 185, 85, 0.40);
+  --cs-diff-removed-char: rgba(255, 80, 80, 0.35);
+  --cs-diff-gutter-inserted: rgba(155, 185, 85, 0.25);
+  --cs-diff-gutter-removed: rgba(255, 80, 80, 0.20);
+  --cs-diff-empty-bg: rgba(128, 128, 128, 0.04);
 }
 
 /** 语义 utility class —— 映射到 CSS 变量，双主题自动切换 */
@@ -113,6 +131,15 @@
   .border-red-soft { border-color: var(--cs-red-border); }
 
   .focus-border-blue:focus { border-color: #3b82f6; }
+
+  /** Diff 语义 class（VS Code 风格双层高亮） */
+  .diff-line-add { background-color: var(--cs-diff-inserted-line); }
+  .diff-line-del { background-color: var(--cs-diff-removed-line); }
+  .diff-char-add { background-color: var(--cs-diff-inserted-char); }
+  .diff-char-del { background-color: var(--cs-diff-removed-char); }
+  .diff-gutter-add { background-color: var(--cs-diff-gutter-inserted); }
+  .diff-gutter-del { background-color: var(--cs-diff-gutter-removed); }
+  .diff-empty { background-color: var(--cs-diff-empty-bg); }
 }
 
 /* ─── 响应式适配 ─── */

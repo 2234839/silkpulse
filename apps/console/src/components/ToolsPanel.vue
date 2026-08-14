@@ -623,37 +623,88 @@ const diffStats = computed(() => {
 })
 
 /**
- * 折叠后的 diff 行（带折叠标记）
+ * 折叠后的 diff 行列表（inline 模式）
  *
- * 连续超过 4 行的 equal 段只保留首尾各 2 行，中间替换为一个折叠指示器。
+ * 连续超过 4 行的 equal 段只保留首尾各 2 行。
+ * 连续的 del+add 块按位置交叉排列（del[0],add[0],del[1],add[1]...），
+ * 让用户能直观对比「同一行的旧→新」。
  */
-const diffCollapsed = computed(() => {
+const diffCollapsedInline = computed(() => {
   const lines = diffResult.value
-  if (!diffCollapseSame.value) {
-    return { lines: lines.map((l) => ({ kind: 'line' as const, line: l })), hiddenCount: 0 }
-  }
 
-  const CONTEXT = 2
-  const result: Array<
+  type CollapsedItem =
     | { kind: 'line'; line: DiffLine }
     | { kind: 'collapse'; count: number }
-  > = []
+
+  const CONTEXT = 2
+  const result: CollapsedItem[] = []
   let hiddenTotal = 0
 
   let i = 0
   while (i < lines.length) {
-    /** 检测连续 equal 段 */
     if (lines[i].type === 'equal') {
       let j = i
       while (j < lines.length && lines[j].type === 'equal') j++
       const equalLen = j - i
-      if (equalLen > CONTEXT * 2 + 1) {
-        /** 保留前 CONTEXT 行 */
+      if (diffCollapseSame.value && equalLen > CONTEXT * 2 + 1) {
         for (let k = i; k < i + CONTEXT; k++) result.push({ kind: 'line', line: lines[k] })
         const hiddenCount = equalLen - CONTEXT * 2
         result.push({ kind: 'collapse', count: hiddenCount })
         hiddenTotal += hiddenCount
-        /** 保留后 CONTEXT 行 */
+        for (let k = j - CONTEXT; k < j; k++) result.push({ kind: 'line', line: lines[k] })
+      } else {
+        for (let k = i; k < j; k++) result.push({ kind: 'line', line: lines[k] })
+      }
+      i = j
+    } else {
+      /** 收集连续非 equal 块 */
+      const blockStart = i
+      while (i < lines.length && lines[i].type !== 'equal') i++
+      const block = lines.slice(blockStart, i)
+      const dels = block.filter((l) => l.type === 'del')
+      const adds = block.filter((l) => l.type === 'add')
+
+      /** 交叉排列：del[0],add[0],del[1],add[1]... */
+      const pairs = Math.min(dels.length, adds.length)
+      for (let p = 0; p < pairs; p++) {
+        result.push({ kind: 'line', line: dels[p] })
+        result.push({ kind: 'line', line: adds[p] })
+      }
+      for (let p = pairs; p < dels.length; p++) result.push({ kind: 'line', line: dels[p] })
+      for (let p = pairs; p < adds.length; p++) result.push({ kind: 'line', line: adds[p] })
+    }
+  }
+
+  return { lines: result, hiddenCount: hiddenTotal }
+})
+
+/**
+ * 折叠后的 diff 行列表（split 模式）
+ *
+ * 与 inline 相同的折叠逻辑，但不交叉排列 del/add。
+ */
+const diffCollapsed = computed(() => {
+  const lines = diffResult.value
+
+  type CollapsedItem =
+    | { kind: 'line'; line: DiffLine }
+    | { kind: 'collapse'; count: number }
+
+  const CONTEXT = 2
+  const result: CollapsedItem[] = []
+  let hiddenTotal = 0
+
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].type === 'equal') {
+      let j = i
+      while (j < lines.length && lines[j].type === 'equal') j++
+      const equalLen = j - i
+      if (diffCollapseSame.value && equalLen > CONTEXT * 2 + 1) {
+        for (let k = i; k < i + CONTEXT; k++) result.push({ kind: 'line', line: lines[k] })
+        const hiddenCount = equalLen - CONTEXT * 2
+        result.push({ kind: 'collapse', count: hiddenCount })
+        hiddenTotal += hiddenCount
         for (let k = j - CONTEXT; k < j; k++) result.push({ kind: 'line', line: lines[k] })
       } else {
         for (let k = i; k < j; k++) result.push({ kind: 'line', line: lines[k] })
@@ -1049,14 +1100,14 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
           <div v-if="diffResult.length === 0 && diffA && diffB" class="text-green-500 text-center py-4">✅ 完全一致</div>
           <div v-else-if="diffResult.length === 0" class="text-faint text-center py-4">输入两段文本后自动对比...</div>
 
-          <!-- ════ Inline 视图（VS Code 风格：删除行带删除线，字符级双层高亮） ════ -->
+          <!-- ════ Inline 视图（配对行合并：同一行内展示旧→新，字符级高亮） ════ -->
           <div v-else-if="diffViewMode === 'inline'" class="font-mono text-xs">
-            <template v-for="(item, i) in diffCollapsed.lines" :key="i">
+            <template v-for="(item, i) in diffCollapsedInline.lines" :key="i">
               <!-- 折叠指示器 -->
               <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-y border-base cursor-pointer select-none">
                 ⋯ {{ item.count }} 行未变化 ⋯
               </div>
-              <!-- diff 行 -->
+              <!-- diff 行（逐行渲染，VS Code inline 风格） -->
               <div
                 v-else
                 class="flex items-stretch"
@@ -1065,14 +1116,14 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                   'diff-line-del': item.line.type === 'del',
                 }"
               >
-                <!-- 行号区（gutter 配色） -->
+                <!-- 行号（del 显示旧行号，add 显示新行号，交叉排列后同一位置） -->
                 <span
                   class="inline-block w-12 text-right pr-2 select-none flex-shrink-0 text-faint"
                   :class="{
                     'diff-gutter-add': item.line.type === 'add',
                     'diff-gutter-del': item.line.type === 'del',
                   }"
-                >{{ item.line.oldNum ?? item.line.newNum ?? '' }}</span>
+                >{{ item.line.type === 'del' ? item.line.oldNum : item.line.newNum }}</span>
                 <!-- 变更符号 -->
                 <span
                   class="inline-block w-5 text-center select-none flex-shrink-0 font-bold"
@@ -1083,7 +1134,7 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                 >{{ item.line.type === 'add' ? '+' : item.line.type === 'del' ? '−' : ' ' }}</span>
                 <!-- 内容区 -->
                 <span class="flex-1 whitespace-pre-wrap break-all py-px" :class="{ 'line-through opacity-70': item.line.type === 'del' }">
-                  <!-- 有 charDiff：字符级高亮（浓背景叠加在行背景上） -->
+                  <!-- 有 charDiff：字符级高亮 -->
                   <template v-if="item.line.charDiff">
                     <span
                       v-for="(part, j) in charDiffParts(item.line)"
@@ -1101,7 +1152,7 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
             </template>
           </div>
 
-          <!-- ════ Split 视图（VS Code 风格：左右独立渲染，字符级高亮，空白行对齐） ════ -->
+          <!-- ════ Split 视图（左右独立渲染，字符级高亮，空白行对齐） ════ -->
           <div v-else class="flex font-mono text-xs">
             <!-- 左侧（旧文本） -->
             <div class="flex-1 min-w-0 border-r border-base">
@@ -1109,7 +1160,6 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                 <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none">
                   ⋯ {{ item.count }} 行 ⋯
                 </div>
-                <!-- del 行或 equal 行 -->
                 <div
                   v-else-if="item.line.type !== 'add'"
                   class="flex items-stretch"
@@ -1130,7 +1180,6 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                     <template v-else>{{ item.line.text }}</template>
                   </span>
                 </div>
-                <!-- add 行在左侧渲染为空白占位 -->
                 <div v-else class="flex items-stretch diff-empty">
                   <span class="inline-block w-12 pr-2 select-none flex-shrink-0">&nbsp;</span>
                 </div>
@@ -1142,7 +1191,6 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                 <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none">
                   ⋯ {{ item.count }} 行 ⋯
                 </div>
-                <!-- add 行或 equal 行 -->
                 <div
                   v-else-if="item.line.type !== 'del'"
                   class="flex items-stretch"
@@ -1163,7 +1211,6 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                     <template v-else>{{ item.line.text }}</template>
                   </span>
                 </div>
-                <!-- del 行在右侧渲染为空白占位 -->
                 <div v-else class="flex items-stretch diff-empty">
                   <span class="inline-block w-12 pr-2 select-none flex-shrink-0">&nbsp;</span>
                 </div>
