@@ -363,6 +363,12 @@ export function setupWebSocket(
             })
             break
           }
+          case 'devtools-relay': {
+            /** devtools backend RPC 消息（vue/react）：透传给订阅该设备的控制台（不存缓冲，时效性强） */
+            if (!device) return
+            broadcast(deviceId, { type: 'devtools-relay', deviceId, plugin: msg.plugin, payload: msg.payload })
+            break
+          }
         }
       })
 
@@ -459,6 +465,14 @@ export function setupWebSocket(
             const device = registry.get(msg.deviceId)
             if (device && device.ws.readyState === device.ws.OPEN) {
               device.ws.send(JSON.stringify({ type: 'get-network-body', bodySeq: msg.bodySeq }))
+            }
+            break
+          }
+          case 'devtools-relay': {
+            /** 控制台 devtools client 的 RPC 消息，透传给对应设备 */
+            const device = registry.get(msg.deviceId)
+            if (device && device.ws.readyState === device.ws.OPEN) {
+              device.ws.send(JSON.stringify({ type: 'devtools-relay', plugin: msg.plugin, payload: msg.payload }))
             }
             break
           }

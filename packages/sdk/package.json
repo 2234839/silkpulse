@@ -13,7 +13,10 @@
   },
   "dependencies": {
     "@silkpulse/shared": "workspace:*",
-    "@zumer/snapdom": "catalog:"
+    "@vue/devtools-core": "^8.2.1",
+    "@vue/devtools-kit": "^8.2.1",
+    "@zumer/snapdom": "catalog:",
+    "superjson": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

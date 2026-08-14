@@ -21,6 +21,7 @@ catalog:
   snapdom: ^0.1.2
   '@zumer/snapdom': ^2.23.2
   vue-router: ^5.2.0
+  superjson: 2.2.2
 overrides:
   vite: "catalog:"
 peerDependencyRules:

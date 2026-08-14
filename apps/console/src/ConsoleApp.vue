@@ -30,6 +30,7 @@ import NetworkPanel from './components/NetworkPanel.vue'
 import ExecPanel from './components/ExecPanel.vue'
 import ElementPanel from './components/ElementPanel.vue'
 import StoragePanel from './components/StoragePanel.vue'
+import DevToolsPanel from './components/DevToolsPanel.vue'
 import { useResizable } from './composables/useResizable'
 
 const { theme, toggleTheme } = useTheme()
@@ -58,6 +59,8 @@ const {
   deviceMouse,
   sendConsoleMessage,
   requestNetworkBody,
+  onDevtoolsRelay,
+  sendDevtoolsRelay,
   selectedDeviceId,
   connected,
   connect,
@@ -128,7 +131,7 @@ const route = useRoute()
 const router = useRouter()
 
 /** 所有合法的 tab id，用于校验 URL query */
-const validTabs = ['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec'] as const
+const validTabs = ['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec', 'devtools'] as const
 
 /** 当前激活的面板 —— 初始值从 URL ?tab= 读取，支持复制链接直达 */
 const activeTab = ref<typeof validTabs[number]>(
@@ -359,7 +362,7 @@ onMounted(async () => {
         <template v-if="selectedDeviceId">
           <nav class="flex border-b border-base bg-surface overflow-x-auto">
             <button
-              v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec'] as const)"
+              v-for="tab in (['console', 'element', 'network', 'storage', 'errors', 'feature', 'snapshot', 'exec', 'devtools'] as const)"
               :key="tab"
               @click="activeTab = tab"
               class="px-4 py-2 text-sm font-medium border-b-2 flex items-center gap-1.5"
@@ -367,7 +370,7 @@ onMounted(async () => {
                 ? 'border-blue-500 text-blue-600'
                 : 'border-transparent text-muted hover:text-primary'"
             >
-              {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : tab === 'exec' ? 'Exec' : tab === 'element' ? 'Element' : tab === 'feature' ? 'Feature' : 'Storage' }}
+              {{ tab === 'console' ? 'Console' : tab === 'network' ? 'Network' : tab === 'errors' ? 'Errors' : tab === 'snapshot' ? 'Snapshot' : tab === 'exec' ? 'Exec' : tab === 'element' ? 'Element' : tab === 'feature' ? 'Feature' : tab === 'devtools' ? 'DevTools' : 'Storage' }}
               <span
                 v-if="tab === 'console' && logs.length > 0"
                 class="text-xs px-1.5 py-0.5 rounded bg-blue-soft text-secondary"
@@ -407,6 +410,12 @@ onMounted(async () => {
             :storage-key-times="storageKeyTimes"
           />
           <ExecPanel v-else-if="activeTab === 'exec'" :device-id="selectedDeviceId" />
+          <DevToolsPanel
+            v-else-if="activeTab === 'devtools'"
+            :device-id="selectedDeviceId"
+            :on-relay="onDevtoolsRelay"
+            :send="sendDevtoolsRelay"
+          />
         </template>
 
         <div v-else class="flex-1 flex items-center justify-center text-faint overflow-y-auto">

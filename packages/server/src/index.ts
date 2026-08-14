@@ -108,19 +108,21 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     }
 
     /** 4. /demo —— 同源测试页（供无头测试真实验证 network 采集，不跨域） */
-    if (pathname === '/demo' || pathname === '/demo.html') {
+    if (pathname === '/demo' || pathname === '/demo.html' || pathname === '/vue-demo') {
+      /** /vue-demo 加载 Vue 3 测试页（devtools 集成验证用），其他加载基础测试页 */
+      const demoFileName = pathname === '/vue-demo' ? 'vue-test-page.html' : 'test-page.html'
       /** bundle 后 __dirname 不可靠，从多个候选路径查找 demo 页面 */
       const demoPagePath = options.demoPagePath ?? [
         /** 本地 dev：packages/server/dist/bin/ → ../../../../examples/ */
-        path.resolve(__dirname, '../../../../examples/test-page.html'),
+        path.resolve(__dirname, '../../../../examples', demoFileName),
         /** 容器部署 dist/bin/ → ../../../examples/ */
-        path.resolve(__dirname, '../../../examples/test-page.html'),
+        path.resolve(__dirname, '../../../examples', demoFileName),
         /** 容器部署 dist/bin/ → ../../examples/ */
-        path.resolve(__dirname, '../../examples/test-page.html'),
+        path.resolve(__dirname, '../../examples', demoFileName),
         /** Docker /app/dist/bin/ → ../examples/ */
-        path.resolve(__dirname, '../examples/test-page.html'),
+        path.resolve(__dirname, '../examples', demoFileName),
         /** 1Panel 容器固定路径 */
-        '/app/examples/test-page.html',
+        `/app/examples/${demoFileName}`,
       ].find(p => fs.existsSync(p))
       if (demoPagePath && fs.existsSync(demoPagePath)) {
         /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */

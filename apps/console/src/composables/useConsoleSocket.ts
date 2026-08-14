@@ -107,6 +107,33 @@ export function useConsoleSocket() {
   /** 上次选中的设备 ID（切换设备时先 unsubscribe 旧设备） */
   let lastSubscribedDeviceId: string | null = null
 
+  /**
+   * devtools relay 消息监听器（DevToolsPanel 注册）
+   *
+   * 用监听器模式而非状态存储：devtools RPC 消息频率高、只面向当前面板，
+   * 不需要响应式开销，直接回调转发给 iframe postMessage。
+   */
+  const devtoolsRelayListeners = new Map<number, (msg: Extract<ServerToConsoleMessage, { type: 'devtools-relay' }>) => void>()
+  let devtoolsListenerSeq = 0
+
+  /**
+   * 注册 devtools relay 监听器（DevToolsPanel onMounted 调用）
+   *
+   * 返回取消函数，面板卸载时调用。
+   */
+  function onDevtoolsRelay(listener: (msg: Extract<ServerToConsoleMessage, { type: 'devtools-relay' }>) => void): () => void {
+    const id = ++devtoolsListenerSeq
+    devtoolsRelayListeners.set(id, listener)
+    return () => devtoolsRelayListeners.delete(id)
+  }
+
+  /** 发送 devtools relay 消息到设备（DevToolsPanel 的 iframe → WS → 设备 backend） */
+  function sendDevtoolsRelay(deviceId: string, plugin: 'vue' | 'react', payload: string): void {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'devtools-relay', deviceId, plugin, payload }))
+    }
+  }
+
   /** 切换选中的设备（订阅实时数据 + 拉取历史缓冲区） */
   async function selectDevice(id: string | null) {
     selectedDeviceId.value = id
@@ -384,6 +411,11 @@ export function useConsoleSocket() {
           deviceMouse.value = msg.mouse
         }
         break
+      case 'devtools-relay': {
+        /** devtools backend RPC 消息：直接回调给监听器（DevToolsPanel → iframe postMessage） */
+        for (const listener of devtoolsRelayListeners.values()) listener(msg)
+        break
+      }
       case 'network-body': {
         /** 设备返回完整 body（懒加载）：合并到对应 entry */
         if (msg.deviceId === selectedDeviceId.value) {
@@ -483,5 +515,7 @@ export function useConsoleSocket() {
     setWatchers,
     sendConsoleMessage,
     requestNetworkBody,
+    onDevtoolsRelay,
+    sendDevtoolsRelay,
   }
 }

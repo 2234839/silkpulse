@@ -36,3 +36,4 @@ packages/server/public/sdk.js
 
 # AI agent worktrees
 .claude/worktrees/
+packages/server/public/plugins/

@@ -223,6 +223,9 @@ catalogs:
     puppeteer-core:
       specifier: ^25.5.0
       version: 25.5.0
+    superjson:
+      specifier: 2.2.2
+      version: 2.2.2
     tailwindcss:
       specifier: ^4.0.0
       version: 4.3.3
@@ -317,9 +320,18 @@ importers:
       '@silkpulse/shared':
         specifier: workspace:*
         version: link:../shared
+      '@vue/devtools-core':
+        specifier: ^8.2.1
+        version: 8.2.1(vue@3.5.40(typescript@7.0.2))
+      '@vue/devtools-kit':
+        specifier: ^8.2.1
+        version: 8.2.1
       '@zumer/snapdom':
         specifier: 'catalog:'
         version: 2.23.2
+      superjson:
+        specifier: 'catalog:'
+        version: 2.2.2
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -1163,6 +1175,11 @@ packages:
   '@vue/devtools-api@8.2.1':
     resolution: {integrity: sha512-6u4vXBlIBAC1wMplIZgpyPn7uh/s4Bf6F5bMzvLv+EdJ0aHs/+4B7Ygv864EStQSjRbsRzTko/kUG1A1IejQ3A==}
 
+  '@vue/devtools-core@8.2.1':
+    resolution: {integrity: sha512-s/VfAY9oDTb/kFEWmy461jaFde2MIV1RO/gi1vwM+PAZBZ/Pc2Ndu3BNBdZUze8QDUuyYvElbEEGA83syjJfzA==}
+    peerDependencies:
+      vue: ^3.0.0
+
   '@vue/devtools-kit@8.2.1':
     resolution: {integrity: sha512-FIGIuq3AWReEpbAHY/cRGeHDfI0qOb8OCQ3YjbEAX04uaxIDbGc9rhkbVcG7rnfHPXE3RsU5KrWOu9V/okd8AQ==}
 
@@ -1378,6 +1395,10 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
+  copy-anything@3.0.5:
+    resolution: {integrity: sha512-yCEafptTtb4bk7GLEQoM8KVJpxAfdBJYaXyzQEgQQQgYrZiDp8SJmGKlYza6CYjEDNstAdNdKA3UuoULlEbS6w==}
+    engines: {node: '>=12.13'}
+
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
@@ -1453,6 +1474,10 @@ packages:
 
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
+
+  is-what@4.1.16:
+    resolution: {integrity: sha512-ZhMwEosbFJkA0YhFnNDgTM4ZxDRsS6HqTo7qsZM08fehyRYIYa0yHu5R6mgo1n/8MgaPBXiPimPD77baVFYg+A==}
+    engines: {node: '>=12.13'}
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
@@ -1769,6 +1794,10 @@ packages:
   strip-ansi@7.2.0:
     resolution: {integrity: sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==}
     engines: {node: '>=12'}
+
+  superjson@2.2.2:
+    resolution: {integrity: sha512-5JRxVqC8I8NuOUjzBbvVJAKNM8qoVuH0O77h4WInc/qC2q5IreqKxYwgkga3PfA22OayK2ikceb/B26dztPl+Q==}
+    engines: {node: '>=16'}
 
   tailwindcss@4.3.3:
     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
@@ -2581,6 +2610,12 @@ snapshots:
     dependencies:
       '@vue/devtools-kit': 8.2.1
 
+  '@vue/devtools-core@8.2.1(vue@3.5.40(typescript@7.0.2))':
+    dependencies:
+      '@vue/devtools-kit': 8.2.1
+      '@vue/devtools-shared': 8.2.1
+      vue: 3.5.40(typescript@7.0.2)
+
   '@vue/devtools-kit@8.2.1':
     dependencies:
       '@vue/devtools-shared': 8.2.1
@@ -2737,6 +2772,10 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
+  copy-anything@3.0.5:
+    dependencies:
+      is-what: 4.1.16
+
   csstype@3.2.3: {}
 
   dequal@2.0.3: {}
@@ -2784,6 +2823,8 @@ snapshots:
   graceful-fs@4.2.11: {}
 
   hookable@5.5.3: {}
+
+  is-what@4.1.16: {}
 
   jiti@2.7.0: {}
 
@@ -3119,6 +3160,10 @@ snapshots:
   strip-ansi@7.2.0:
     dependencies:
       ansi-regex: 6.2.2
+
+  superjson@2.2.2:
+    dependencies:
+      copy-anything: 3.0.5
 
   tailwindcss@4.3.3: {}
 

@@ -8,7 +8,7 @@ export default defineConfig({
     exports: false,
     /** SnapDOM 默认被当外部依赖，IIFE 模式下必须 inline */
     deps: {
-      alwaysBundle: ["@zumer/snapdom"],
+      alwaysBundle: ["@zumer/snapdom", "@vue/devtools-kit", "@vue/devtools-core", "superjson"],
     },
   },
   lint: {

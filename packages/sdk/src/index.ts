@@ -20,6 +20,8 @@ import { installStorageWatcher, setStorageWatcherActive } from './storage-watche
 import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './dom-watcher.js'
 import { startScreenShare, stopScreenShare } from './screen-capture.js'
 import { startMouseTracker } from './mouse-tracker.js'
+import { initVueDevToolsBridge } from './devtools-bridge.js'
+import { dispatchServerMessage } from './message-router.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
 const DEVICE_ID_KEY = '__silkpulse_device_id__'
@@ -221,6 +223,8 @@ export function init(options: InitOptions): void {
       const body = getStoredBody(msg.bodySeq)
       send({ type: 'network-body', bodySeq: msg.bodySeq, body })
     }
+    /** 分发给扩展监听器（devtools-bridge 等） */
+    dispatchServerMessage(msg)
   })
 
   /** 5. 连接 server */
@@ -340,3 +344,18 @@ function autoInit(): void {
 }
 
 autoInit()
+
+/**
+ * Vue DevTools backend 初始化（同步、尽早执行）
+ *
+ * 必须在 Vue app 创建前创建 __VUE_DEVTOOLS_GLOBAL_HOOK__：
+ * Vue global build 加载时同步初始化 renderer，检查全局 hook 是否存在：
+ *   - 已存在 → 直接注册 app，组件树实时同步
+ *   - 不存在 → push 到 3 秒超时 replay buffer，超时后放弃
+ *
+ * SDK 脚本通过 <script> 标签加载（同步 IIFE），本行在脚本解析时即执行，
+ * 天然早于后续 <script> 中的 Vue createApp()。
+ * channel.post 依赖 ws-client.send，send 有离线缓冲队列，
+ * WS 连上前消息暂存，连上后自动 flush。
+ */
+initVueDevToolsBridge()
