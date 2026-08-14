@@ -452,11 +452,6 @@ export class AuthManager {
     if (ctx.role === 'project') return ctx.projectId === deviceProjectId
     return false
   }
-
-  /** 停止清理定时器 */
-  destroy(): void {
-    clearInterval(this.cleanupTimer)
-  }
 }
 
 // ─── 项目管理 API 路由 ────────────────────────────────────

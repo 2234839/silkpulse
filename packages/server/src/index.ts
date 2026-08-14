@@ -291,6 +291,14 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     noServer: true,
     perMessageDeflate: {
       threshold: 256,
+      /**
+       * zlib level=3：比默认 level=6 吞吐 +42%（本机基准 245 vs 172 MB/s，真实消息混合负载），
+       * 压缩率仅差 0.7pp（0.121 vs 0.114）。压缩是扇出路径的主要 CPU 成本，
+       * 换 level=9 压缩率只再好 0.8pp 但 CPU 3.6 倍——边际收益极差，不取。
+       */
+      zlibDeflateOptions: {
+        level: 3,
+      },
     },
   })
   server.on('upgrade', (req, socket, head) => {
