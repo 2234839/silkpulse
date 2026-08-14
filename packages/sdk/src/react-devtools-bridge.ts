@@ -1,0 +1,350 @@
+/**
+ * React DevTools backend 桥接 —— 在目标页安装 react-devtools hook + 按需激活 Agent
+ *
+ * 架构：
+ *   目标页（本文件）                SilkPulse server           控制台 iframe
+ *   ┌────────────────────┐         ┌────────────┐         ┌──────────────────┐
+ *   │ hook stub（同步）   │         │            │         │ frontend.bundle  │
+ *   │ + backend bundle   │ devtools-relay        │ devtools-relay │ initialize() │
+ *   │   （按需 fetch）    │◄───────►│  透传      │◄───────►│ <DevTools />     │
+ *   │ Agent + Wall       │   (WS)  │            │   (WS)  │ custom Wall      │
+ *   └────────────────────┘         └────────────┘         └──────────────────┘
+ *
+ * React 时序约束（与 Vue 不同，React 没有 replay 机制）：
+ *   react-dom 模块执行时同步调 hook.inject(internals) 并缓存 hook 引用，
+ *   所以 __REACT_DEVTOOLS_GLOBAL_HOOK__ 必须在 react-dom 加载前同步存在。
+ *   而 backend bundle（700KB）异步 fetch 太慢，所以：
+ *
+ *   1. SDK 顶层同步装「委托式 hook stub」—— 收集 renderer（inject 调用）
+ *      + fiberRoots（onCommitFiberRoot 调用）+ 事件订阅
+ *   2. 控制台打开 React DevTools → WS 请求 activate
+ *   3. SDK fetch backend.bundle.js → 在 shadow target 上 installHook 装真 hook
+ *   4. replay 收集的 renderer 到真 hook（attachRenderer 重建 rendererInterface）
+ *   5. 激活 Agent（createBridge(wall) + activate）→ initBackend 读 hook 上已
+ *      注册的 rendererInterfaces → flushInitialOperations → 全量树推给前端
+ *   6. stub 的所有方法从激活起委托给真 hook（react-dom 持有的引用不变，
+ *      因为 stub 对象本身一直是 window.__REACT_DEVTOOLS_GLOBAL_HOOK__）
+ *
+ * 消息协议（Wall）：
+ *   { event: string, payload: unknown, fromBackend?: boolean }
+ *   fromBackend 标记方向，避免 SDK 把自己发出的消息又转发回 backend
+ */
+
+import { send } from './ws-client.js'
+import { registerServerMessageHandler } from './message-router.js'
+
+/** backend bundle 加载后的全局名（IIFE global-name） */
+const BACKEND_GLOBAL = 'ReactDevToolsBackend'
+
+/** backend bundle URL（server 静态服务，SDK 与目标页同源时直接用相对路径） */
+const BACKEND_URL = '/plugins/react-devtools/assets/backend.bundle.js'
+
+/** backend bundle 模块形状（react-devtools-inline/backend 的导出） */
+interface BackendModule {
+  initialize: (target: Window) => unknown
+  activate: (target: Window, opts?: { bridge?: unknown }) => void
+  createBridge: (target: Window, wall?: unknown) => unknown
+}
+
+/** hook 上的事件订阅回调 */
+type HookListener = (data: unknown) => void
+
+/** react-dom 通过 inject 传入的 renderer internals */
+interface RendererInternals {
+  version?: string
+  bundleType?: number
+  [key: string]: unknown
+}
+
+/** 真 hook 的形状（installHook 装上的完整对象） */
+interface RealHook {
+  rendererInterfaces: Map<number, unknown>
+  renderers: Map<number, RendererInternals>
+  hasUnsupportedRendererAttached: boolean
+  emit: (event: string, data?: unknown) => void
+  on: (event: string, fn: HookListener) => void
+  off: (event: string, fn: HookListener) => void
+  sub: (event: string, fn: HookListener) => () => void
+  inject: (renderer: RendererInternals) => number
+  getFiberRoots: (rendererID: number) => Set<unknown>
+  onCommitFiberRoot: (rendererID: number, root: unknown, priorityLevel?: unknown) => void
+  onCommitFiberUnmount: (rendererID: number, fiber: unknown) => void
+  onPostCommitFiberRoot?: (rendererID: number, root: unknown) => void
+  setStrictMode?: (isStrictMode: boolean) => void
+  checkDCE: (fn: unknown) => void
+  supportsFiber: boolean
+  supportsFlight: boolean
+  settings?: unknown
+  reactDevtoolsAgent?: unknown
+  [key: string]: unknown
+}
+
+/** 真 hook（backend bundle 加载后赋值，之前为 null） */
+let realHook: RealHook | null = null
+
+/** stub 阶段收集的 renderer（inject 被调用时存起来，激活时 replay） */
+const pendingRenderers: Array<{ id: number; renderer: RendererInternals }> = []
+
+/** stub 阶段的 uid 计数器（与官方 installHook 一致，从 0 自增） */
+let stubUid = 0
+
+/** stub 阶段收集的 fiberRoots（rendererID → Set<root>） */
+const stubFiberRoots: Record<number, Set<unknown>> = {}
+
+/** stub 阶段的事件监听器（激活后合并进真 hook） */
+const stubListeners: Record<string, HookListener[]> = {}
+
+/**
+ * 委托式 hook stub —— 同步装到 window，react-dom 加载时调 inject 注册
+ *
+ * 职责：
+ * - inject(renderer)：暂存 renderer（真 hook 就绪前 react-dom 就会调）
+ * - onCommitFiberRoot：暂存 root（commit 时 react-dom 持续调用，终身有效）
+ * - on/off/emit/sub：事件订阅暂存，激活后转发给真 hook
+ * - 其余属性（checkDCE 等）在激活后委托真 hook，激活前为安全 no-op
+ *
+ * 关键：这个对象终身是 window.__REACT_DEVTOOLS_GLOBAL_HOOK__（不可替换，
+ * 因为 react-dom 已缓存引用），所有方法在激活后内部转发到 realHook。
+ */
+function installDelegatingHookStub(): void {
+  const target = window as unknown as Record<string, unknown>
+
+  /** 已有 hook（别的 devtools 扩展或重复注入）就不动 */
+  if (target.__REACT_DEVTOOLS_GLOBAL_HOOK__ != null) return
+
+  const stub = {
+    _isSilkPulseStub: true,
+    rendererInterfaces: new Map<number, unknown>(),
+    renderers: new Map<number, RendererInternals>(),
+    backends: new Map<number, unknown>(),
+    listeners: stubListeners,
+    hasUnsupportedRendererAttached: false,
+    supportsFiber: true,
+    supportsFlight: true,
+    checkDCE: (_fn: unknown) => {},
+    settings: {
+      appendComponentStack: true,
+      breakOnConsoleErrors: false,
+      showInlineWarningsAndErrors: true,
+      hideConsoleLogsInStrictMode: false,
+    },
+
+    emit(event: string, data?: unknown) {
+      /** 激活后直接走真 hook 的 emit；激活前广播给 stub 订阅者 */
+      if (realHook) { realHook.emit(event, data); return }
+      for (const fn of stubListeners[event] ?? []) fn(data)
+    },
+
+    on(event: string, fn: HookListener) {
+      if (realHook) { realHook.on(event, fn); return }
+      ;(stubListeners[event] ??= []).push(fn)
+    },
+
+    off(event: string, fn: HookListener) {
+      if (realHook) { realHook.off(event, fn); return }
+      const arr = stubListeners[event]
+      if (!arr) return
+      const i = arr.indexOf(fn)
+      if (i >= 0) arr.splice(i, 1)
+    },
+
+    sub(event: string, fn: HookListener) {
+      stub.on(event, fn)
+      return () => stub.off(event, fn)
+    },
+
+    inject(renderer: RendererInternals): number {
+      if (realHook) return realHook.inject(renderer) as number
+      /** stub 阶段：暂存，等真 hook 就绪后 replay */
+      const id = ++stubUid
+      pendingRenderers.push({ id, renderer })
+      stub.renderers.set(id, renderer)
+      return id
+    },
+
+    getFiberRoots(rendererID: number): Set<unknown> {
+      if (realHook) return realHook.getFiberRoots(rendererID)
+      return (stubFiberRoots[rendererID] ??= new Set())
+    },
+
+    onCommitFiberRoot(rendererID: number, root: unknown, priorityLevel?: unknown) {
+      if (realHook) { realHook.onCommitFiberRoot(rendererID, root, priorityLevel); return }
+      /** stub 阶段把 root 记下来（react-dom 每次 commit 都会调，天然增量收集） */
+      stub.getFiberRoots(rendererID).add(root)
+    },
+
+    onCommitFiberUnmount(rendererID: number, fiber: unknown) {
+      if (realHook) realHook.onCommitFiberUnmount(rendererID, fiber)
+      /** stub 阶段无法处理 unmount 增量（没有 rendererInterface），激活后全量重建 */
+    },
+
+    onPostCommitFiberRoot(rendererID: number, root: unknown) {
+      if (realHook) realHook.onPostCommitFiberRoot?.(rendererID, root)
+    },
+
+    setStrictMode(isStrictMode: boolean) {
+      if (realHook) realHook.setStrictMode?.(isStrictMode)
+    },
+  }
+
+  Object.defineProperty(target, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
+    configurable: false,
+    enumerable: false,
+    get() {
+      return stub
+    },
+  })
+}
+
+/** backend bundle 加载 Promise（防重复 fetch） */
+let backendLoadPromise: Promise<BackendModule> | null = null
+
+/**
+ * 推导 server origin（backend bundle 的下载地址）
+ *
+ * 优先级：
+ * 1. window.__SILKPULSE_SERVER__（init 时写入，最可靠）
+ * 2. 当前 SDK script 标签的 src origin（data-server 未指定时）
+ * 3. 空字符串（同源部署，直接用相对路径 /plugins/...）
+ */
+function resolveServerOrigin(): string {
+  const target = window as unknown as Record<string, unknown>
+  const fromInit = target.__SILKPULSE_SERVER__
+  if (typeof fromInit === 'string' && fromInit) return fromInit
+  try {
+    const script = document.currentScript as HTMLScriptElement | null
+    if (script?.src) return new URL(script.src).origin
+  } catch { /** script.src 解析失败忽略 */ }
+  return ''
+}
+
+/**
+ * 动态加载 react-devtools-inline backend bundle
+ *
+ * fetch + new Function 执行 IIFE。注意：bundle 用 `var ReactDevToolsBackend = (...)()`
+ * 导出，var 在 Function 体内是局部作用域（.call(window) 也救不了 var），必须在
+ * 函数尾部 return 出来再手动挂 window。
+ * 失败静默（React devtools 是可选功能，不阻塞 SDK），但打 error 日志方便排查。
+ */
+function loadBackendBundle(): Promise<BackendModule> {
+  if (backendLoadPromise) return backendLoadPromise
+  backendLoadPromise = (async () => {
+    const target = window as unknown as Record<string, unknown>
+    const existing = target[BACKEND_GLOBAL]
+    if (existing) return existing as BackendModule
+
+    const url = resolveServerOrigin() + BACKEND_URL
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`React DevTools backend 加载失败: HTTP ${resp.status}`)
+    const code = await resp.text()
+
+    const mod = new Function(`${code}\n;return typeof ReactDevToolsBackend !== 'undefined' ? ReactDevToolsBackend : undefined`).call(window)
+    if (!mod) throw new Error('React DevTools backend bundle 未导出全局')
+    target[BACKEND_GLOBAL] = mod
+    return mod as BackendModule
+  })()
+  return backendLoadPromise
+}
+
+/** backend 是否已激活（Agent 只启动一次） */
+let backendActivated = false
+
+/** 激活后绑定的「控制台消息 → backend Wall」转发函数 */
+let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | null = null
+
+/**
+ * 激活 React DevTools backend
+ *
+ * 1. fetch backend bundle
+ * 2. 在 shadow 对象上 installHook（拿真 hook，不动 window 上的 stub）
+ * 3. replay stub 收集的 renderer → 真 hook.inject
+ * 4. 合并 stub 阶段的 fiberRoots 到真 hook
+ * 5. createBridge(自定义 Wall) + activate → initBackend → flushInitialOperations
+ */
+async function activateBackend(): Promise<void> {
+  if (backendActivated) return
+  backendActivated = true
+  try {
+    const backend = await loadBackendBundle()
+
+    /** shadow target：一个空对象，installHook 会把真 hook defineProperty 到它上面 */
+    const shadowTarget: Record<string, unknown> = {}
+    backend.initialize(shadowTarget as unknown as Window)
+    const hook = shadowTarget.__REACT_DEVTOOLS_GLOBAL_HOOK__ as RealHook | undefined
+    if (!hook) throw new Error('installHook 未在 shadow target 上创建 hook')
+
+    /** replay stub 阶段的 renderer 注册（react-dom 早已调过 stub.inject） */
+    for (const { renderer } of pendingRenderers) {
+      hook.inject(renderer)
+    }
+
+    /** 合并 stub 收集的 fiberRoots（真 hook 的 attachRenderer 会读它们重建树） */
+    for (const [rendererID, roots] of Object.entries(stubFiberRoots)) {
+      const realRoots = hook.getFiberRoots(Number(rendererID))
+      for (const root of roots) realRoots.add(root)
+    }
+
+    /** 合并 stub 阶段的事件订阅（若有） */
+    for (const [event, fns] of Object.entries(stubListeners)) {
+      for (const fn of fns) hook.on(event, fn)
+    }
+
+    /** 自定义 Wall：backend ↔ SilkPulse WS */
+    const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
+    const wall = {
+      listen(fn: (msg: { event: string; payload: unknown }) => void) {
+        wallListeners.push(fn)
+        return () => {
+          const i = wallListeners.indexOf(fn)
+          if (i >= 0) wallListeners.splice(i, 1)
+        }
+      },
+      send(event: string, payload: unknown) {
+        send({
+          type: 'devtools-relay',
+          plugin: 'react',
+          payload: { event, payload, fromBackend: true },
+        })
+      },
+    }
+
+    /** 控制台消息 → backend Wall listeners */
+    frontendToBackend = (msg) => {
+      for (const fn of wallListeners) fn(msg)
+    }
+
+    /** 激活：Agent 创建 + initBackend（读 hook.rendererInterfaces → flushInitialOperations） */
+    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
+    backend.activate(shadowTarget as unknown as Window, { bridge })
+
+    /** stub 从此委托给真 hook（window 上的 stub 对象引用不变） */
+    realHook = hook
+  } catch {
+    backendActivated = false
+  }
+}
+
+/**
+ * 初始化 React DevTools bridge（SDK 顶层同步调用）
+ *
+ * 同步装 hook stub（react-dom 加载前），异步注册 server 消息处理。
+ */
+export function initReactDevToolsBridge(): void {
+  installDelegatingHookStub()
+
+  registerServerMessageHandler((msg) => {
+    if (msg.type !== 'devtools-relay' || msg.plugin !== 'react') return
+    const data = msg.payload as { event?: string; payload?: unknown; activate?: boolean; fromBackend?: boolean }
+
+    /** 控制台打开面板时请求激活（幂等，backendActivated 守卫） */
+    if (data?.activate === true) {
+      void activateBackend()
+      return
+    }
+
+    /** 控制台 frontend 发来的消息 → 转给 backend 的 Wall listener */
+    if (frontendToBackend && data?.fromBackend !== true && typeof data?.event === 'string') {
+      frontendToBackend({ event: data.event, payload: data.payload })
+    }
+  })
+}

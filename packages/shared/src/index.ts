@@ -29,7 +29,7 @@ export type DeviceMessage =
   | { type: 'dom-change'; changes: DomChangeData }
   | { type: 'device-mouse'; mouse: MouseEventData }
   /** devtools backend → 控制台：RPC 消息透传（vue/react devtools 桥接） */
-  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string }
+  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
 
 /**
  * 远端设备鼠标/触摸事件数据（实时同步用户操作到控制台）
@@ -77,7 +77,7 @@ export type ServerToDeviceMessage =
   /** 请求设备返回某个 network entry 的完整 body（懒加载） */
   | { type: 'get-network-body'; bodySeq: number }
   /** 控制台 → 设备：devtools RPC 消息透传（vue/react devtools 桥接） */
-  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string }
+  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
@@ -102,7 +102,7 @@ export type ServerToConsoleMessage =
   /** server → 控制台的心跳响应 */
   | { type: 'pong' }
   /** 设备 → 控制台：devtools RPC 消息透传 */
-  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string }
+  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
 
 /** 控制台 → server 的消息类型 */
 export type ConsoleMessage =
@@ -119,7 +119,7 @@ export type ConsoleMessage =
   /** 控制台 → server 的应用层心跳（检测半开连接） */
   | { type: 'ping' }
   /** 控制台 → 设备：devtools RPC 消息透传（payload 是 devtools 协议原始字符串） */
-  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string }
+  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
 
 /**
  * 已集成的 devtools 插件 ID

@@ -1,0 +1,7 @@
+{
+  "plugin": "react",
+  "reactDevtoolsInline": "7.0.1",
+  "react": "19.1.0",
+  "builtAt": "2026-08-14T06:20:48.158Z",
+  "source": "react-devtools-inline dist + esbuild IIFE（scripts/build-react-devtools.mjs）"
+}

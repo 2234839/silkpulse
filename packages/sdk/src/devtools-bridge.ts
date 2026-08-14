@@ -70,6 +70,7 @@ export function initVueDevToolsBridge(): void {
   /** 监听 server 转发的控制台 RPC 消息，解信封后交给 RPC server */
   registerServerMessageHandler((msg) => {
     if (msg.type !== 'devtools-relay' || msg.plugin !== 'vue') return
+    if (typeof msg.payload !== 'string') return
     try {
       const parsed = SuperJSON.parse(msg.payload) as { event?: string; data?: unknown }
       if (parsed?.event !== IFRAME_MESSAGING_EVENT_KEY) return

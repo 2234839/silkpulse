@@ -21,6 +21,7 @@ import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './
 import { startScreenShare, stopScreenShare } from './screen-capture.js'
 import { startMouseTracker } from './mouse-tracker.js'
 import { initVueDevToolsBridge } from './devtools-bridge.js'
+import { initReactDevToolsBridge } from './react-devtools-bridge.js'
 import { dispatchServerMessage } from './message-router.js'
 
 /** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
@@ -151,6 +152,9 @@ let initialized = false
 export function init(options: InitOptions): void {
   if (initialized) return
   initialized = true
+
+  /** 记录 server origin（react-devtools-bridge 等模块按需推导资源 URL 用） */
+  ;(window as unknown as Record<string, unknown>).__SILKPULSE_SERVER__ = options.server.replace(/\/$/, '')
 
   const deviceId = getDeviceId()
   const info = collectDeviceInfo(deviceId, options.tags, options.note)
@@ -359,3 +363,13 @@ autoInit()
  * WS 连上前消息暂存，连上后自动 flush。
  */
 initVueDevToolsBridge()
+
+/**
+ * React DevTools backend 初始化（同步装 hook stub）
+ *
+ * react-dom 模块执行时同步调 hook.inject(internals)，没有 Vue 那样的 replay
+ * 机制，所以必须在 react-dom 加载前同步装 __REACT_DEVTOOLS_GLOBAL_HOOK__。
+ * stub 只做 renderer/fiberRoots 收集（几百字节），真正的 backend Agent
+ * （700KB bundle）在控制台打开 React DevTools 时才按需 fetch 激活。
+ */
+initReactDevToolsBridge()

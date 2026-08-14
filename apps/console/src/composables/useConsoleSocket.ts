@@ -128,7 +128,7 @@ export function useConsoleSocket() {
   }
 
   /** 发送 devtools relay 消息到设备（DevToolsPanel 的 iframe → WS → 设备 backend） */
-  function sendDevtoolsRelay(deviceId: string, plugin: 'vue' | 'react', payload: string): void {
+  function sendDevtoolsRelay(deviceId: string, plugin: 'vue' | 'react', payload: string | Record<string, unknown>): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'devtools-relay', deviceId, plugin, payload }))
     }
