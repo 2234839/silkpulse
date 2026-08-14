@@ -10,7 +10,7 @@
  */
 
 import type { DeviceInfo, ServerToDeviceMessage, LogEntry, NetworkEntry, ErrorEntry } from '@silkpulse/shared'
-import { connect, send, onMessage, disconnect } from './ws-client.js'
+import { connect, reconnectWithInfo, send, onMessage, disconnect } from './ws-client.js'
 import { installLogCollector } from './log-collector.js'
 import { installNetworkCollector, getStoredBody } from './network-collector.js'
 import { installErrorCatcher, getErrorCount, setResourceErrorHandler } from './error-catcher.js'
@@ -24,8 +24,117 @@ import { initVueDevToolsBridge } from './devtools-bridge.js'
 import { initReactDevToolsBridge } from './react-devtools-bridge.js'
 import { dispatchServerMessage } from './message-router.js'
 
-/** deviceId 在 sessionStorage 的 key（同 tab 刷新不变） */
+/**
+ * deviceId 的存储 key（sessionStorage 与 localStorage 同名复用，天然按 origin 隔离）：
+ * - sessionStorage：本 tab 的 id（reload 延续、tab 关闭即失）
+ * - localStorage：持久 id（跨会话延续——关 tab 重开仍是同一设备）
+ */
 const DEVICE_ID_KEY = '__silkpulse_device_id__'
+
+/**
+ * 会话 token：每次页面加载生成一次（内存级，不持久化）
+ *
+ * reload 后必变、WS 断线重连不变——server 靠这个区分两种同 id 重连场景：
+ * - 同 token：reload，应合并回原设备（保留历史缓冲）
+ * - 不同 token：复制标签页，应仲裁冲突下发 device-id-conflict
+ * 这是 Web Locks 不可用（非安全上下文）时的冲突克星，不依赖浏览器 API。
+ */
+const sessionToken = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
+/** 生成新设备 id（时间戳 + 随机后缀） */
+function generateDeviceId(): string {
+  return `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** navigator.locks 的最小形状（Web Locks API，TS dom lib 未含时兜底） */
+interface LockManagerLike {
+  request: (
+    name: string,
+    opts: { ifAvailable: boolean },
+    holder: (lock: unknown) => Promise<void>,
+  ) => Promise<void>
+}
+
+/**
+ * 尝试持有 tab 锁（页面存活期间不放，随页面关闭自动释放）
+ *
+ * 返回是否成功；false = 同 id 的锁已被另一个活着的 tab 持有。
+ * Web Locks 不可用（非安全上下文等）时返回 true（退化行为，server 连接池兼容）。
+ */
+function tryHoldTabLock(deviceId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const locks = (navigator as Navigator & { locks?: LockManagerLike }).locks
+    if (!locks?.request) {
+      resolve(true)
+      return
+    }
+    locks.request(
+      `silkpulse-tab-${deviceId}`,
+      { ifAvailable: true },
+      async (lock) => {
+        if (!lock) {
+          resolve(false)
+          return
+        }
+        resolve(true)
+        /** 持锁直到页面卸载（永不 settle，锁随页面自动释放） */
+        await new Promise<void>(() => {})
+      },
+    ).catch(() => resolve(true))
+  })
+}
+
+/**
+ * 解析稳定的 deviceId（防多标签页冲突）
+ *
+ * 三层策略（每层都先通过 Web Locks 确认 id 未被其他活 tab 占用）：
+ * 1. 本 tab 历史 id（sessionStorage）：reload 延续
+ * 2. 持久 id（localStorage）：当前没有相同网址的其他 tab 时使用——
+ *    关 tab 重开、换会话仍是同一设备，设备列表长期稳定
+ * 3. 随机 id：持久 id 被占用（已存在相同网址的 tab）→ 本 tab 用独立随机 id
+ *
+ * 复制标签页：Chromium 快照复制 sessionStorage → 同 id 的锁被原 tab 持有
+ * → 逐层下落到随机 id。Web Locks 不可用时锁恒可得，两个 tab 首开会同拿
+ * 持久 id → 由 server 的 sessionToken 仲裁下发 device-id-conflict 兜底。
+ */
+async function resolveDeviceId(): Promise<string> {
+  /** 1. 本 tab 的历史 id（reload 场景） */
+  let sid = ''
+  try {
+    sid = sessionStorage.getItem(DEVICE_ID_KEY) ?? ''
+  } catch {
+    sid = ''
+  }
+  if (sid && (await tryHoldTabLock(sid))) return sid
+
+  /** 2. 持久 id：锁可得 = 没有相同网址的其他 tab 在用它 */
+  let persisted = ''
+  try {
+    persisted = localStorage.getItem(DEVICE_ID_KEY) ?? ''
+  } catch {
+    persisted = ''
+  }
+  if (!persisted) persisted = generateDeviceId()
+  if (await tryHoldTabLock(persisted)) {
+    try {
+      localStorage.setItem(DEVICE_ID_KEY, persisted)
+      sessionStorage.setItem(DEVICE_ID_KEY, persisted)
+    } catch {
+      /** 存储不可用（隐私模式）就用内存 id */
+    }
+    return persisted
+  }
+
+  /** 3. 持久 id 被占 → 已有相同网址的 tab，本 tab 用随机 id */
+  const id = generateDeviceId()
+  try {
+    sessionStorage.setItem(DEVICE_ID_KEY, id)
+  } catch {
+    /** 忽略：内存 id 兜底 */
+  }
+  void tryHoldTabLock(id)
+  return id
+}
 
 /** 初始化选项 */
 export interface InitOptions {
@@ -41,22 +150,6 @@ export interface InitOptions {
   projectId?: string
 }
 
-/**
- * 生成或复用 deviceId（sessionStorage 持久化）
- */
-function getDeviceId(): string {
-  try {
-    let id = sessionStorage.getItem(DEVICE_ID_KEY)
-    if (!id) {
-      id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-      sessionStorage.setItem(DEVICE_ID_KEY, id)
-    }
-    return id
-  } catch {
-    /** sessionStorage 不可用时（隐私模式）用内存 id */
-    return `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  }
-}
 
 /** 采集页面图标 URL（优先 meta link，兜底 /favicon.ico） */
 function collectPageIconUrl(): string | undefined {
@@ -113,6 +206,25 @@ async function collectPageIconDataUrl(): Promise<string | undefined> {
   return linkIconUrl
 }
 
+/**
+ * 探测页面框架（DevTools 面板自动选插件用）
+ *
+ * 探测时机在 initWithDeviceId 里（Vue app 可能已挂载），特征：
+ * - vue：__VUE_DEVTOOLS_GLOBAL_HOOK__ 的 apps 有实例（SDK 先建 hook，Vue 加载后自动注册）
+ * - react：__REACT_DEVTOOLS_GLOBAL_HOOK__ 的 renderers 有值（react-devtools-bridge 挂载）
+ */
+function detectFrameworks(): string[] {
+  const fw: string[] = []
+  const vueHook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }).__VUE_DEVTOOLS_GLOBAL_HOOK__
+  if (vueHook?.apps?.length) fw.push('vue')
+  const reactHook = (window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: { renderers?: Map<string, unknown> | unknown[] } }).__REACT_DEVTOOLS_GLOBAL_HOOK__
+  if (reactHook?.renderers) {
+    const count = reactHook.renderers instanceof Map ? reactHook.renderers.size : (reactHook.renderers as unknown[]).length
+    if (count > 0) fw.push('react')
+  }
+  return fw
+}
+
 /** 收集当前设备元信息 */
 function collectDeviceInfo(id: string, tags: string[] = [], note?: string): DeviceInfo {
   return {
@@ -128,6 +240,7 @@ function collectDeviceInfo(id: string, tags: string[] = [], note?: string): Devi
     onlineAt: Date.now(),
     tags,
     note,
+    frameworks: detectFrameworks(),
   }
 }
 
@@ -148,6 +261,9 @@ let initialized = false
 
 /**
  * 初始化 SDK —— 装配采集器、连接 server、注册 exec 处理
+ *
+ * deviceId 的 Web Locks 确认是异步的：init 同步返回（采集器装配不阻塞），
+ * id 就绪后再建立 WS 连接（早期日志由 sendQueue 离线缓冲，连上即 flush）。
  */
 export function init(options: InitOptions): void {
   if (initialized) return
@@ -156,8 +272,13 @@ export function init(options: InitOptions): void {
   /** 记录 server origin（react-devtools-bridge 等模块按需推导资源 URL 用） */
   ;(window as unknown as Record<string, unknown>).__SILKPULSE_SERVER__ = options.server.replace(/\/$/, '')
 
-  const deviceId = getDeviceId()
-  const info = collectDeviceInfo(deviceId, options.tags, options.note)
+  void initWithDeviceId(options)
+}
+
+/** id 就绪后的实际装配流程 */
+async function initWithDeviceId(options: InitOptions): Promise<void> {
+  let deviceId = await resolveDeviceId()
+  let info = collectDeviceInfo(deviceId, options.tags, options.note)
 
   /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port
    *  设备端只携带 projectId 标记归属，不需要密钥（密钥不暴露到设备端） */
@@ -227,12 +348,32 @@ export function init(options: InitOptions): void {
       const body = getStoredBody(msg.bodySeq)
       send({ type: 'network-body', bodySeq: msg.bodySeq, body })
     }
-    /** 分发给扩展监听器（devtools-bridge 等） */
+    /** 分发给扩展监听器（devtools-bridge / react-devtools-bridge 等） */
     dispatchServerMessage(msg)
   })
 
-  /** 5. 连接 server */
-  connect({ url: wsUrl, info })
+  /** 5. 连接 server（携带 sessionToken；server 仲裁出复制标签页冲突时换 id 重连） */
+  connect({
+    url: wsUrl,
+    info,
+    sessionToken,
+    onIdConflict: () => {
+      /**
+       * server 判定本 tab 是复制出来的（同 id 不同 token 的活连接已存在）。
+       * 换新 id：写 sessionStorage + 持新锁 + 重采设备信息重连。
+       * deviceId/info 闭包变量重赋值后，路由监听等后续上报自动用新 id。
+       */
+      deviceId = generateDeviceId()
+      try {
+        sessionStorage.setItem(DEVICE_ID_KEY, deviceId)
+      } catch {
+        /** 写不进就纯内存 id */
+      }
+      void tryHoldTabLock(deviceId)
+      info = collectDeviceInfo(deviceId, options.tags, options.note)
+      reconnectWithInfo(info)
+    },
+  })
 
   /** 5.0 启动鼠标采集（始终开启，轻量数据，价值高） */
   startMouseTracker((mouse) => send({ type: 'device-mouse', mouse }))
@@ -243,7 +384,6 @@ export function init(options: InitOptions): void {
       send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
     }
   })
-
   /** 6. SPA 路由变化时上报新 url/title（让 server/AI 看到正确的页面位置） */
   /** 劫持 pushState/replaceState 捕获 SPA 路由跳转，popstate 捕获浏览器前进后退 */
   const reportUrlChange = () => {
@@ -258,12 +398,13 @@ export function init(options: InitOptions): void {
         deviceType: detectDeviceType(navigator.userAgent, window.innerWidth),
       },
     })
-    /** 路由变化后也异步采集 base64 icon */
+    /** 路由变化后也异步采集 base64 icon + 重探框架（SPA 懒加载组件可能后挂 React/Vue） */
     collectPageIconDataUrl().then((iconDataUrl) => {
       if (iconDataUrl) {
         send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
       }
     })
+    send({ type: 'update-info', device: { id: deviceId, frameworks: detectFrameworks() } })
   }
   for (const method of ['pushState', 'replaceState'] as const) {
     const original = history[method].bind(history) as (...args: unknown[]) => void
@@ -365,11 +506,11 @@ autoInit()
 initVueDevToolsBridge()
 
 /**
- * React DevTools backend 初始化（同步装 hook stub）
+ * React DevTools hook stub 初始化（同步、尽早执行）
  *
- * react-dom 模块执行时同步调 hook.inject(internals)，没有 Vue 那样的 replay
- * 机制，所以必须在 react-dom 加载前同步装 __REACT_DEVTOOLS_GLOBAL_HOOK__。
- * stub 只做 renderer/fiberRoots 收集（几百字节），真正的 backend Agent
- * （700KB bundle）在控制台打开 React DevTools 时才按需 fetch 激活。
+ * 在 window 上安装终身不可替换的 __REACT_DEVTOOLS_GLOBAL_HOOK__ 代理 stub：
+ * react-dom 加载时同步读取这个 hook，stub 提前在位才能接到 renderer inject 和
+ * fiber root commit；控制台激活时动态 fetch backend bundle，stub 把暂存的
+ * renderers/roots 转交给真 backend（天然支持后注入）。
  */
 initReactDevToolsBridge()

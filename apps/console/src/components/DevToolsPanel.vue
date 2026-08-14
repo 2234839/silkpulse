@@ -32,10 +32,14 @@ const props = defineProps<{
   deviceId: string
   /** devtools 插件类型（vue / react） */
   plugin?: 'vue' | 'react'
+  /** 设备上报的框架探测结果（自动选中用：只探测到一种时默认选它） */
+  frameworks?: string[]
   /** 注册 devtools relay 监听器（useConsoleSocket 的 onDevtoolsRelay） */
-  onRelay: (listener: (msg: { deviceId: string; plugin: string; payload: unknown }) => void) => () => void
+  onRelay: (listener: (msg: { deviceId: string; plugin: 'vue' | 'react'; payload: unknown }) => void) => () => void
+  /** 注册设备 reload 重连监听器（useConsoleSocket 的 onDeviceReconnect） */
+  onReconnect: (listener: (deviceId: string) => void) => () => void
   /** 发送 devtools relay 消息（useConsoleSocket 的 sendDevtoolsRelay） */
-  send: (deviceId: string, plugin: 'vue' | 'react', payload: unknown) => void
+  send: (deviceId: string, plugin: 'vue' | 'react', payload: string | Record<string, unknown>) => void
 }>()
 
 /** 插件静态资源路径（server public/plugins/ 下，构建时从 plugins/ 复制） */
@@ -56,8 +60,21 @@ const IFRAME_MESSAGING_EVENT_KEY = '__devtools-kit-iframe-messaging-event-key__'
 const iframeRef = ref<HTMLIFrameElement | null>(null)
 /** 连接状态：收到第一条 backend 消息即认为链路通 */
 const relayActive = ref(false)
-/** 当前插件（默认 vue，可切换） */
+/** 当前插件（探测到唯一框架时自动选中，否则默认 vue） */
 const activePlugin = ref<'vue' | 'react'>((props.plugin as 'vue' | 'react') ?? 'vue')
+/** 用户是否手动切换过插件（手动选择优先于自动探测） */
+const userPicked = ref(false)
+
+/** 设备框架探测结果到达 / 变化时：唯一框架自动选中 */
+watch(
+  () => props.frameworks,
+  (fws) => {
+    if (userPicked.value || !fws || fws.length !== 1) return
+    const only = fws[0] as 'vue' | 'react'
+    if (only === 'vue' || only === 'react') activePlugin.value = only
+  },
+  { immediate: true },
+)
 
 /** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
 function isVueEnvelope(data: unknown): data is string {
@@ -123,13 +140,26 @@ const unsubscribeRelay = props.onRelay((msg) => {
   iframe.contentWindow?.postMessage(msg.payload, '*')
 })
 
+/** 重载 devtools iframe（frontend 重新握手：react 重发 activate，vue 重建 RPC channel） */
+function reloadIframe() {
+  const iframe = iframeRef.value
+  if (!iframe) return
+  relayActive.value = false
+  iframe.src = PLUGIN_SRC[activePlugin.value]
+}
+
+/** 设备 reload 重连 → 重载 iframe（react 需重发 activate，vue 需重新握手 RPC channel） */
+const unsubscribeReconnect = props.onReconnect((deviceId) => {
+  if (deviceId !== props.deviceId) return
+  reloadIframe()
+})
+
 /** 设备/插件切换时重置连接状态（client 会重新握手） */
 watch([() => props.deviceId, activePlugin], () => {
   relayActive.value = false
   /** react：iframe 重载（frontend 需重新 initialize + 重发 activate） */
   if (activePlugin.value === 'react') {
-    const iframe = iframeRef.value
-    if (iframe) iframe.src = PLUGIN_SRC.react
+    reloadIframe()
     /** 新 iframe load 后会重发 frontend-ready → 触发 activate 流程 */
   }
 })
@@ -141,6 +171,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', onWindowMessage)
   unsubscribeRelay()
+  unsubscribeReconnect()
 })
 </script>
 
@@ -157,9 +188,14 @@ onBeforeUnmount(() => {
             ? 'bg-blue-600 text-white font-medium'
             : 'text-muted hover:bg-base',
         ]"
-        @click="activePlugin = p"
+        @click="userPicked = true; activePlugin = p"
       >
         {{ PLUGIN_LABEL[p] }}
+        <span
+          v-if="frameworks?.includes(p)"
+          class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle"
+          title="目标页检测到该框架"
+        />
       </button>
       <span v-if="relayActive" class="ml-auto text-green-600 dark:text-green-400 flex items-center gap-1">
         <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />

@@ -61,6 +61,7 @@ const {
   requestNetworkBody,
   onDevtoolsRelay,
   sendDevtoolsRelay,
+  onDeviceReconnect,
   selectedDeviceId,
   connected,
   connect,
@@ -413,7 +414,9 @@ onMounted(async () => {
           <DevToolsPanel
             v-else-if="activeTab === 'devtools'"
             :device-id="selectedDeviceId"
+            :frameworks="selectedDevice?.frameworks"
             :on-relay="onDevtoolsRelay"
+            :on-reconnect="onDeviceReconnect"
             :send="sendDevtoolsRelay"
           />
         </template>

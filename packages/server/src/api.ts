@@ -568,7 +568,8 @@ export async function execOnDevice(
   if (!device) {
     return { success: false, error: `设备 ${deviceId} 不在线` }
   }
-  if (device.ws.readyState !== device.ws.OPEN) {
+  const sock = device.latestSocket
+  if (sock.readyState !== sock.OPEN) {
     return { success: false, error: `设备 ${deviceId} 连接已关闭` }
   }
 
@@ -586,7 +587,7 @@ export async function execOnDevice(
 
     /** ws.send 可能因竞态（readyState 检查后断开）抛异常，保护之 */
     try {
-      device.ws.send(JSON.stringify({ type: 'exec', execId, code }))
+      sock.send(JSON.stringify({ type: 'exec', execId, code }))
     } catch {
       device.pendingExecs.delete(execId)
       clearTimeout(timer)

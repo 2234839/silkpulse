@@ -20,6 +20,10 @@ export interface WsClientOptions {
   url: string
   /** 设备元信息（register 时上报） */
   info: DeviceInfo
+  /** 每次页面加载的唯一 token：server 用它区分 reload（同 token）与复制标签页（不同 token） */
+  sessionToken?: string
+  /** server 下发 device-id-conflict 时的回调（设备端应换 id 后重连） */
+  onIdConflict?: () => void
 }
 
 /** 当前 WebSocket（重连时切换） */
@@ -39,6 +43,9 @@ let manualClose = false
  * disconnect() → manualClose=true + close ws → 5s 到期 → doConnect 建新 WS（绕过检查）。
  */
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 最近一次 connect 的选项（device-id-conflict 重连用） */
+let lastOptions: WsClientOptions | null = null
 
 /**
  * 离线消息缓冲队列
@@ -66,12 +73,37 @@ export function onMessage(handler: (msg: ServerToDeviceMessage) => void): void {
  */
 export function connect(options: WsClientOptions): void {
   manualClose = false
+  lastOptions = options
   /** 清除可能残留的重连定时器（重新初始化场景） */
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = undefined
   }
   doConnect(options)
+}
+
+/**
+ * 换设备 id 重连（server 仲裁复制标签页冲突后调用）
+ *
+ * 传入新 info（新 id），复用原 url/sessionToken。
+ * 先摘掉旧 socket 的事件处理器再 close：onclose 是异步派发的，
+ * 若只靠 manualClose 标志位，届时已复位，会调度一次携带旧 info 的幽灵重连。
+ */
+export function reconnectWithInfo(info: DeviceInfo): void {
+  if (!lastOptions) return
+  if (ws) {
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onclose = null
+    ws.onerror = null
+    ws.close()
+    ws = null
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+  doConnect({ ...lastOptions, info })
 }
 
 function doConnect(options: WsClientOptions): void {
@@ -86,7 +118,11 @@ function doConnect(options: WsClientOptions): void {
     reconnectAttempts = 0
     const sock = ws
     if (!sock) return
-    sock.send(JSON.stringify({ type: 'register', device: options.info }))
+    sock.send(JSON.stringify({
+      type: 'register',
+      device: options.info,
+      sessionToken: options.sessionToken,
+    }))
 
     /** flush 离线期间缓冲的消息（register 先发，确保 server 建好设备上下文） */
     if (sendQueue.length > 0) {
@@ -100,6 +136,11 @@ function doConnect(options: WsClientOptions): void {
   ws.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data) as ServerToDeviceMessage
+      /** server 仲裁的复制标签页冲突：交给回调换 id 重连（不进普通 handler 链） */
+      if (msg.type === 'device-id-conflict') {
+        options.onIdConflict?.()
+        return
+      }
       messageHandler?.(msg)
     } catch {
       /** 非 JSON 消息忽略 */

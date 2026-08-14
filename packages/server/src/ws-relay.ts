@@ -119,8 +119,9 @@ export function setupWebSocket(
     if (pref) {
       const merged = mergeDeviceWatchers(pref.deviceId)
       const device = registry.get(pref.deviceId)
-      if (device && device.ws.readyState === device.ws.OPEN) {
-        device.ws.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
+      const sock = device?.latestSocket
+      if (sock && sock.readyState === sock.OPEN) {
+        sock.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
       }
     }
   }
@@ -158,7 +159,14 @@ export function setupWebSocket(
               tags: msg.device.tags ?? [],
               note: msg.device.note,
             }
-            device = registry.register(info, ws)
+            const registered = registry.register(info, ws, msg.sessionToken ?? '')
+            if (!registered) {
+              /** deviceId 已被另一个活着的标签页占用（复制标签页，Web Locks 不可用时的
+               *  server 端仲裁）：告知设备换新 id 重连。此连接不再接受消息。 */
+              ws.send(JSON.stringify({ type: 'device-id-conflict' } satisfies import('@silkpulse/shared').ServerToDeviceMessage))
+              return
+            }
+            device = registered
             deviceSockets.set(ws, device)
             /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
             broadcast(deviceId, {
@@ -178,6 +186,8 @@ export function setupWebSocket(
               viewportWidth: msg.device.viewportWidth,
               viewportHeight: msg.device.viewportHeight,
               deviceType: msg.device.deviceType,
+              /** 框架探测结果（DevTools 面板自动选插件用，SPA 路由变化后可能更新） */
+              frameworks: msg.device.frameworks,
             })
             broadcast(deviceId, {
               type: 'device-online',
@@ -373,14 +383,12 @@ export function setupWebSocket(
       })
 
       ws.on('close', () => {
-        /** 只有当 registry 里这个 device 的 ws 仍是当前关闭的 ws 时才下线。
-         *  若设备已用新 ws 重连，registry 里是新的 ws，此时旧连接关闭不应下线 */
-        const current = registry.get(deviceId)
-        if (current && current.ws === ws) {
-          registry.unregister(deviceId)
+        /** 摘除连接：还有其他活连接（多标签页）则设备仍在线；
+         *  最后一条断开走宽限期（reload 窗口内重连无缝续接，不丢历史缓冲） */
+        if (deviceId) {
+          registry.detachSocket(deviceId, ws)
         }
         deviceSockets.delete(ws)
-        notifyDeviceListChanged()
       })
       return
     }
@@ -432,8 +440,9 @@ export function setupWebSocket(
             /** 重新计算该设备的 watcher 并集 */
             const merged = mergeDeviceWatchers(msg.deviceId)
             const device = registry.get(msg.deviceId)
-            if (device && device.ws.readyState === device.ws.OPEN) {
-              device.ws.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
+            const sock = device?.latestSocket
+            if (sock && sock.readyState === sock.OPEN) {
+              sock.send(JSON.stringify({ type: 'set-watchers', watchers: merged }))
             }
             break
           }
@@ -447,32 +456,36 @@ export function setupWebSocket(
           case 'start-screen-share': {
             /** 控制台请求设备开始屏幕共享（用户侧弹出授权弹窗） */
             const device = registry.get(msg.deviceId)
-            if (device && device.ws.readyState === device.ws.OPEN) {
-              device.ws.send(JSON.stringify({ type: 'start-screen-share' }))
+            const sock = device?.latestSocket
+            if (sock && sock.readyState === sock.OPEN) {
+              sock.send(JSON.stringify({ type: 'start-screen-share' }))
             }
             break
           }
           case 'stop-screen-share': {
             /** 控制台请求设备停止屏幕共享 */
             const device = registry.get(msg.deviceId)
-            if (device && device.ws.readyState === device.ws.OPEN) {
-              device.ws.send(JSON.stringify({ type: 'stop-screen-share' }))
+            const sock = device?.latestSocket
+            if (sock && sock.readyState === sock.OPEN) {
+              sock.send(JSON.stringify({ type: 'stop-screen-share' }))
             }
             break
           }
           case 'get-network-body': {
             /** 控制台请求完整 body（懒加载），转发给设备 */
             const device = registry.get(msg.deviceId)
-            if (device && device.ws.readyState === device.ws.OPEN) {
-              device.ws.send(JSON.stringify({ type: 'get-network-body', bodySeq: msg.bodySeq }))
+            const sock = device?.latestSocket
+            if (sock && sock.readyState === sock.OPEN) {
+              sock.send(JSON.stringify({ type: 'get-network-body', bodySeq: msg.bodySeq }))
             }
             break
           }
           case 'devtools-relay': {
-            /** 控制台 devtools client 的 RPC 消息，透传给对应设备 */
+            /** 控制台 devtools client 的 RPC 消息，透传给对应设备（发 latestSocket：指令类消息单点送达） */
             const device = registry.get(msg.deviceId)
-            if (device && device.ws.readyState === device.ws.OPEN) {
-              device.ws.send(JSON.stringify({ type: 'devtools-relay', plugin: msg.plugin, payload: msg.payload }))
+            const sock = device?.latestSocket
+            if (sock && sock.readyState === sock.OPEN) {
+              sock.send(JSON.stringify({ type: 'devtools-relay', plugin: msg.plugin, payload: msg.payload }))
             }
             break
           }
@@ -495,6 +508,26 @@ export function setupWebSocket(
       ws.send(JSON.stringify(msg), () => {})
     }
   }
+
+  /**
+   * registry 事件 → 控制台推送
+   *
+   * 主要补宽限期超时下线路径：detachSocket 的 setTimeout 里 unregister
+   * 不经过 ws-relay 的 close 回调，没有这里订阅的话设备列表会出现幽灵设备。
+   */
+  registry.onChange((event) => {
+    if (event.type === 'offline') {
+      notifyDeviceListChanged()
+      return
+    }
+    if (event.type === 'reconnect') {
+      /** 页面 reload 重连：通知所有订阅该设备的控制台重载 devtools 面板（重新握手 backend） */
+      broadcast(event.device.id, {
+        type: 'device-reconnect',
+        deviceId: event.device.id,
+      })
+    }
+  })
 
   /**
    * WS 心跳：每 30s ping 所有连接，检测脏断开（移动端弱网/TCP 未正常关闭）。

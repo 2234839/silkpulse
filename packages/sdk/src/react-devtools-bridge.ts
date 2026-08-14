@@ -252,6 +252,12 @@ let backendActivated = false
 /** 激活后绑定的「控制台消息 → backend Wall」转发函数 */
 let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | null = null
 
+/** 当前活跃的 Bridge（reactivate 时 shutdown 旧的，避免双 agent 重复发消息） */
+let activeBridge: { shutdown: () => void } | null = null
+
+/** reactivate 防抖（多次 activate 请求合并为一次重建） */
+let reactivatePromise: Promise<void> | null = null
+
 /**
  * 激活 React DevTools backend
  *
@@ -262,7 +268,15 @@ let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | nu
  * 5. createBridge(自定义 Wall) + activate → initBackend → flushInitialOperations
  */
 async function activateBackend(): Promise<void> {
-  if (backendActivated) return
+  if (backendActivated) {
+    /** 已激活：控制台重载了 frontend（切设备/插件页重开），需要重新握手——
+     * 旧 agent 的初始 operations 只发给旧 frontend，新 frontend 收不到，树会永远 Loading。
+     * 重建 bridge+agent → initBackend → flushInitialOperations 重发初始树。 */
+    if (!reactivatePromise) {
+      reactivatePromise = reactivateBackend().finally(() => { reactivatePromise = null })
+    }
+    return reactivatePromise
+  }
   backendActivated = true
   try {
     const backend = await loadBackendBundle()
@@ -316,11 +330,59 @@ async function activateBackend(): Promise<void> {
     /** 激活：Agent 创建 + initBackend（读 hook.rendererInterfaces → flushInitialOperations） */
     const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
     backend.activate(shadowTarget as unknown as Window, { bridge })
+    activeBridge = bridge as unknown as { shutdown: () => void }
 
     /** stub 从此委托给真 hook（window 上的 stub 对象引用不变） */
     realHook = hook
   } catch {
     backendActivated = false
+  }
+}
+
+/**
+ * 重新握手：为重载后的 frontend 重建 bridge + agent
+ *
+ * shutdown 旧 bridge（agent 会摘掉自己的 hook 监听）→ 重新 createBridge/activate。
+ * hook/renderer 注册都在 shadow hook 上未动，activate 内部 initBackend 会重新
+ * registerRendererInterface + flushInitialOperations，新 frontend 即收到初始树。
+ */
+async function reactivateBackend(): Promise<void> {
+  try {
+    if (!realHook) return
+    const backend = await loadBackendBundle()
+
+    /** 旧 agent 停摆（摘监听，防双发） */
+    try { activeBridge?.shutdown() } catch { /** 已关闭忽略 */ }
+    activeBridge = null
+
+    const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
+    const wall = {
+      listen(fn: (msg: { event: string; payload: unknown }) => void) {
+        wallListeners.push(fn)
+        return () => {
+          const i = wallListeners.indexOf(fn)
+          if (i >= 0) wallListeners.splice(i, 1)
+        }
+      },
+      send(event: string, payload: unknown) {
+        send({
+          type: 'devtools-relay',
+          plugin: 'react',
+          payload: { event, payload, fromBackend: true },
+        })
+      },
+    }
+
+    frontendToBackend = (msg) => {
+      for (const fn of wallListeners) fn(msg)
+    }
+
+    const shadowTarget = { __REACT_DEVTOOLS_GLOBAL_HOOK__: realHook } as Record<string, unknown>
+    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
+    backend.activate(shadowTarget as unknown as Window, { bridge })
+    activeBridge = bridge as unknown as { shutdown: () => void }
+  } catch {
+    /** 重建失败保留旧状态（下次 activate 再试） */
   }
 }
 
@@ -336,14 +398,16 @@ export function initReactDevToolsBridge(): void {
     if (msg.type !== 'devtools-relay' || msg.plugin !== 'react') return
     const data = msg.payload as { event?: string; payload?: unknown; activate?: boolean; fromBackend?: boolean }
 
-    /** 控制台打开面板时请求激活（幂等，backendActivated 守卫） */
-    if (data?.activate === true) {
+    /** 控制台打开面板时请求激活（幂等，backendActivated 守卫）
+     *
+     * payload 可能是 SuperJSON 信封字符串（vue 串扰）或普通对象，只认对象形态 */
+    if (typeof data === 'object' && data?.activate === true) {
       void activateBackend()
       return
     }
 
     /** 控制台 frontend 发来的消息 → 转给 backend 的 Wall listener */
-    if (frontendToBackend && data?.fromBackend !== true && typeof data?.event === 'string') {
+    if (frontendToBackend && typeof data === 'object' && data?.fromBackend !== true && typeof data?.event === 'string') {
       frontendToBackend({ event: data.event, payload: data.payload })
     }
   })

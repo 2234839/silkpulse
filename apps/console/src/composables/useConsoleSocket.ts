@@ -134,6 +134,22 @@ export function useConsoleSocket() {
     }
   }
 
+  /**
+   * 设备 reload 重连监听器（DevToolsPanel 注册）
+   *
+   * 设备页面 reload 后 backend（vue devtools-kit / react Agent）随页面销毁重建，
+   * 旧 iframe 里的 frontend 还持着死链路 → 需重载 iframe 重新握手。
+   */
+  const deviceReconnectListeners = new Map<number, (deviceId: string) => void>()
+  let deviceReconnectSeq = 0
+
+  /** 注册 reload 重连监听器，返回取消函数 */
+  function onDeviceReconnect(listener: (deviceId: string) => void): () => void {
+    const id = ++deviceReconnectSeq
+    deviceReconnectListeners.set(id, listener)
+    return () => deviceReconnectListeners.delete(id)
+  }
+
   /** 切换选中的设备（订阅实时数据 + 拉取历史缓冲区） */
   async function selectDevice(id: string | null) {
     selectedDeviceId.value = id
@@ -411,6 +427,11 @@ export function useConsoleSocket() {
           deviceMouse.value = msg.mouse
         }
         break
+      case 'device-reconnect': {
+        /** 设备页面 reload 重连：devtools backend 已重建 → 通知监听器（DevToolsPanel 重载 iframe 重新握手） */
+        for (const listener of deviceReconnectListeners.values()) listener(msg.deviceId)
+        break
+      }
       case 'devtools-relay': {
         /** devtools backend RPC 消息：直接回调给监听器（DevToolsPanel → iframe postMessage） */
         for (const listener of devtoolsRelayListeners.values()) listener(msg)
@@ -517,5 +538,6 @@ export function useConsoleSocket() {
     requestNetworkBody,
     onDevtoolsRelay,
     sendDevtoolsRelay,
+    onDeviceReconnect,
   }
 }

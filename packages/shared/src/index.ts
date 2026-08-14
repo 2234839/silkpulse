@@ -9,7 +9,7 @@
 
 /** 设备 → server 的消息类型 */
 export type DeviceMessage =
-  | { type: 'register'; device: DeviceInfo }
+  | { type: 'register'; device: DeviceInfo; /** 每次页面加载的唯一 token（server 区分 reload 与复制标签页） */ sessionToken?: string }
   | { type: 'update-info'; device: Partial<DeviceInfo> & Pick<DeviceInfo, 'id'> }
   | { type: 'log'; log: LogEntry }
   | { type: 'log-repeat' }
@@ -28,8 +28,8 @@ export type DeviceMessage =
   | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
   | { type: 'dom-change'; changes: DomChangeData }
   | { type: 'device-mouse'; mouse: MouseEventData }
-  /** devtools backend → 控制台：RPC 消息透传（vue/react devtools 桥接） */
-  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
+  /** devtools 插件消息上行（backend → 控制台 frontend） */
+  | { type: 'devtools-relay'; plugin: string; payload: string | Record<string, unknown> }
 
 /**
  * 远端设备鼠标/触摸事件数据（实时同步用户操作到控制台）
@@ -76,14 +76,18 @@ export type ServerToDeviceMessage =
   | { type: 'stop-screen-share' }
   /** 请求设备返回某个 network entry 的完整 body（懒加载） */
   | { type: 'get-network-body'; bodySeq: number }
-  /** 控制台 → 设备：devtools RPC 消息透传（vue/react devtools 桥接） */
-  | { type: 'devtools-relay'; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
+  /** deviceId 已被另一个活着的标签页占用（复制标签页场景），设备需换 id 重新注册 */
+  | { type: 'device-id-conflict' }
+  /** devtools 插件消息透传（vue: SuperJSON 信封字符串 / react: {event,payload} 对象） */
+  | { type: 'devtools-relay'; plugin: string; payload: string | Record<string, unknown> }
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
   | { type: 'device-online'; device: DeviceInfo }
   | { type: 'device-offline'; deviceId: string }
   | { type: 'device-list'; devices: DeviceInfo[] }
+  /** 设备页面 reload 重连（同 id 新 sessionToken）：devtools backend 已重建，控制台 devtools 面板需重新握手 */
+  | { type: 'device-reconnect'; deviceId: string }
   | { type: 'log'; deviceId: string; log: LogEntry }
   | { type: 'log-repeat'; deviceId: string }
   | { type: 'network'; deviceId: string; entry: NetworkEntry }
@@ -99,10 +103,10 @@ export type ServerToConsoleMessage =
   | { type: 'device-mouse'; deviceId: string; mouse: MouseEventData }
   /** 设备返回完整 body（懒加载响应） */
   | { type: 'network-body'; deviceId: string; bodySeq: number; body: string | null }
+  /** devtools backend RPC 消息透传（设备 → 控制台 frontend） */
+  | { type: 'devtools-relay'; deviceId: string; plugin: string; payload: string | Record<string, unknown> }
   /** server → 控制台的心跳响应 */
   | { type: 'pong' }
-  /** 设备 → 控制台：devtools RPC 消息透传 */
-  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
 
 /** 控制台 → server 的消息类型 */
 export type ConsoleMessage =
@@ -116,18 +120,10 @@ export type ConsoleMessage =
   | { type: 'stop-screen-share'; deviceId: string }
   /** 控制台请求某个 network entry 的完整 body（懒加载） */
   | { type: 'get-network-body'; deviceId: string; bodySeq: number }
+  /** 控制台 devtools client 的 RPC 消息，透传给对应设备 */
+  | { type: 'devtools-relay'; deviceId: string; plugin: string; payload: string | Record<string, unknown> }
   /** 控制台 → server 的应用层心跳（检测半开连接） */
   | { type: 'ping' }
-  /** 控制台 → 设备：devtools RPC 消息透传（payload 是 devtools 协议原始字符串） */
-  | { type: 'devtools-relay'; deviceId: string; plugin: DevToolsPluginId; payload: string | Record<string, unknown> }
-
-/**
- * 已集成的 devtools 插件 ID
- *
- * 每个插件对应 plugins/<id>/ 下的静态文件 + SDK 侧的 backend 桥接。
- * 新增 devtools 时在此扩展，并同步 DevToolsPanel 的插件注册表。
- */
-export type DevToolsPluginId = 'vue' | 'react'
 
 /**
  * 可按需启停的采集器类型
@@ -166,6 +162,8 @@ export interface DeviceInfo {
   tags: string[]
   /** 自定义备注（一句话描述这台设备的身份） */
   note?: string
+  /** 页面检测到的前端框架（devtools 面板自动选中用，如 ["vue"] / ["react"] / ["vue","react"]） */
+  frameworks?: string[]
 }
 
 /**
