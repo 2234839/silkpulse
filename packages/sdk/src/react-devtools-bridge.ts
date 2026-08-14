@@ -255,6 +255,74 @@ let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | nu
 /** 当前活跃的 Bridge（reactivate 时 shutdown 旧的，避免双 agent 重复发消息） */
 let activeBridge: { shutdown: () => void } | null = null
 
+/** 当前活跃 wall 的静音函数（reactivate 时先吞掉旧 bridge 的 shutdown 广播） */
+let muteActiveWall: (() => void) | null = null
+
+/**
+ * 自定义 Relay Wall：backend Bridge ↔ SilkPulse WS
+ *
+ * 可静音（mute）：reactivate 关闭旧 bridge 前必须先静音——
+ * bridge.shutdown() 会向 wall 广播 `shutdown` 事件，而此时控制台侧已换成新重载的
+ * frontend，其 Store 收到 `shutdown` 会摘掉 operations 等全部监听，之后即使重新
+ * 握手成功、初始树也永远无人处理（组件树卡 Loading）。静音后 shutdown 广播被
+ * 吞掉，旧 agent 的本地清理（摘 hook 监听防双发）不受影响。
+ */
+function createRelayWall() {
+  let muted = false
+  const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
+  const wall = {
+    listen(fn: (msg: { event: string; payload: unknown }) => void) {
+      wallListeners.push(fn)
+      return () => {
+        const i = wallListeners.indexOf(fn)
+        if (i >= 0) wallListeners.splice(i, 1)
+      }
+    },
+    send(event: string, payload: unknown) {
+      /** 静音后丢弃（旧 agent 的残余消息不再到达任何 frontend） */
+      if (muted) return
+      send({
+        type: 'devtools-relay',
+        plugin: 'react',
+        payload: { event, payload, fromBackend: true },
+      })
+    },
+  }
+  return {
+    wall,
+    /** 控制台 frontend → backend：把路由层消息分发给当前 wall 的 listeners */
+    dispatch(msg: { event: string; payload: unknown }) {
+      for (const fn of wallListeners) fn(msg)
+    },
+    /** 后续 send 全部丢弃（listen 不动，bridge.shutdown 会自己 removeAllListeners） */
+    mute() { muted = true },
+  }
+}
+
+/**
+ * 合成 savedPreferences 握手回包
+ *
+ * activate → startActivation 会发 getSavedPreferences 并等 frontend 回 savedPreferences
+ * 才 finishActivation（建 Agent + flush 初始树）。真实回包链路依赖：新 frontend 的
+ * 一次性监听还在 + WS 往返不丢 + iframe 未处于重载中途——任一环错位即死锁（树永久
+ * Loading）。这里在 activate 后同步补一帧合成回包，让握手确定性完成；frontend 稍后
+ * 到达的真实回包因监听已被消耗而被忽略，无副作用（过滤项后续可通过
+ * overrideComponentFilters 动态更新）。
+ */
+function completeActivationHandshake(dispatch: (msg: { event: string; payload: unknown }) => void): void {
+  dispatch({
+    event: 'savedPreferences',
+    payload: {
+      appendComponentStack: true,
+      breakOnConsoleErrors: false,
+      /** 空过滤器 = 不隐藏任何组件（默认最大可见性） */
+      componentFilters: [],
+      showInlineWarningsAndErrors: true,
+      hideConsoleLogsInStrictMode: false,
+    },
+  })
+}
+
 /** reactivate 防抖（多次 activate 请求合并为一次重建） */
 let reactivatePromise: Promise<void> | null = null
 
@@ -303,34 +371,16 @@ async function activateBackend(): Promise<void> {
       for (const fn of fns) hook.on(event, fn)
     }
 
-    /** 自定义 Wall：backend ↔ SilkPulse WS */
-    const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
-    const wall = {
-      listen(fn: (msg: { event: string; payload: unknown }) => void) {
-        wallListeners.push(fn)
-        return () => {
-          const i = wallListeners.indexOf(fn)
-          if (i >= 0) wallListeners.splice(i, 1)
-        }
-      },
-      send(event: string, payload: unknown) {
-        send({
-          type: 'devtools-relay',
-          plugin: 'react',
-          payload: { event, payload, fromBackend: true },
-        })
-      },
-    }
-
-    /** 控制台消息 → backend Wall listeners */
-    frontendToBackend = (msg) => {
-      for (const fn of wallListeners) fn(msg)
-    }
+    /** 自定义 Wall：backend ↔ SilkPulse WS（dispatch 即「控制台消息 → backend」路由） */
+    const { wall, dispatch, mute } = createRelayWall()
+    muteActiveWall = mute
+    frontendToBackend = dispatch
 
     /** 激活：Agent 创建 + initBackend（读 hook.rendererInterfaces → flushInitialOperations） */
     const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
     backend.activate(shadowTarget as unknown as Window, { bridge })
     activeBridge = bridge as unknown as { shutdown: () => void }
+    completeActivationHandshake(dispatch)
 
     /** stub 从此委托给真 hook（window 上的 stub 对象引用不变） */
     realHook = hook
@@ -351,36 +401,21 @@ async function reactivateBackend(): Promise<void> {
     if (!realHook) return
     const backend = await loadBackendBundle()
 
-    /** 旧 agent 停摆（摘监听，防双发） */
+    /** 旧 agent 停摆：先静音 wall（吞掉 shutdown 广播，防新 frontend 的 Store 摘监听），
+     * 再 shutdown（agent 本地清理：摘 hook 监听防双发） */
+    muteActiveWall?.()
     try { activeBridge?.shutdown() } catch { /** 已关闭忽略 */ }
     activeBridge = null
 
-    const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
-    const wall = {
-      listen(fn: (msg: { event: string; payload: unknown }) => void) {
-        wallListeners.push(fn)
-        return () => {
-          const i = wallListeners.indexOf(fn)
-          if (i >= 0) wallListeners.splice(i, 1)
-        }
-      },
-      send(event: string, payload: unknown) {
-        send({
-          type: 'devtools-relay',
-          plugin: 'react',
-          payload: { event, payload, fromBackend: true },
-        })
-      },
-    }
-
-    frontendToBackend = (msg) => {
-      for (const fn of wallListeners) fn(msg)
-    }
+    const { wall, dispatch, mute } = createRelayWall()
+    muteActiveWall = mute
+    frontendToBackend = dispatch
 
     const shadowTarget = { __REACT_DEVTOOLS_GLOBAL_HOOK__: realHook } as Record<string, unknown>
     const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
     backend.activate(shadowTarget as unknown as Window, { bridge })
     activeBridge = bridge as unknown as { shutdown: () => void }
+    completeActivationHandshake(dispatch)
   } catch {
     /** 重建失败保留旧状态（下次 activate 再试） */
   }
