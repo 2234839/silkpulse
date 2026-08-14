@@ -9,6 +9,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8081'
+/** 鉴权模式：所有 API fetch 带超管密钥（与压测脚本同款约定） */
+const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY ?? ''
+const AUTH_HEADERS = ADMIN_KEY ? { Authorization: `Bearer ${ADMIN_KEY}` } : {}
+
+/** 带鉴权的 API fetch */
+async function apiFetch(path, init = {}) {
+  return fetch(`${SERVER}${path}`, { ...init, headers: { ...AUTH_HEADERS, ...(init.headers ?? {}) } })
+}
 
 /**
  * 探测 chromium 可执行文件路径
@@ -38,13 +46,13 @@ function fail(msg, e) { console.error(`${FAIL} [${step++}] ${msg}`, e ?? ''); fa
 
 /** 拉取在线设备列表（/api/devices 返回 { devices, recentlyOffline }，测试只用 devices 数组） */
 async function fetchDevices() {
-  const data = await (await fetch(`${SERVER}/api/devices`)).json()
+  const data = await (await apiFetch('/api/devices')).json()
   return data.devices ?? data
 }
 
 /** 拉取完整设备响应（含 recentlyOffline） */
 async function fetchDevicesResponse() {
-  return (await fetch(`${SERVER}/api/devices`)).json()
+  return (await apiFetch('/api/devices')).json()
 }
 
 async function waitForDevice(timeoutMs = 10000) {
@@ -53,6 +61,20 @@ async function waitForDevice(timeoutMs = 10000) {
     try {
       const devices = await fetchDevices()
       if (devices.length > 0) return devices[0]
+    } catch {}
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return null
+}
+
+/** 等待本测试打开的 /demo 页设备上线（排除环境里挂着的其他真实设备会话） */
+async function waitForDemoDevice(timeoutMs = 10000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const devices = await fetchDevices()
+      const demo = devices.find((d) => d.url.includes('/demo'))
+      if (demo) return demo
     } catch {}
     await new Promise((r) => setTimeout(r, 300))
   }
@@ -69,9 +91,9 @@ async function main() {
 
   /** 准备测试页：通过 server /demo 路由加载（同源，避免跨域影响 network 采集） */
   try {
-    /** 1. 控制台 UI */
+    /** 1. 控制台 UI（鉴权模式带 ?key= 注入，useAuth 会读取并从地址栏清除） */
     const consolePage = await browser.newPage()
-    await consolePage.goto(SERVER, { waitUntil: 'networkidle0', timeout: 10000 })
+    await consolePage.goto(`${SERVER}/?key=${encodeURIComponent(ADMIN_KEY)}`, { waitUntil: 'networkidle0', timeout: 10000 })
     const title = await consolePage.title()
     if (title.includes('silkpulse')) ok(`控制台 UI 加载（title="${title}"）`)
     else fail(`控制台标题异常: "${title}"`)
@@ -118,9 +140,14 @@ async function main() {
     testPage.on('pageerror', (e) => console.log('  [pageerror]', e.message))
     await testPage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
 
-    const device = await waitForDevice()
+    /**
+     * 选「本测试自己打开的 /demo 页」对应的那台设备。
+     * 环境里可能同时挂着其他真实设备的会话（如开发者浏览器里开着的测试页），
+     * waitForDevice 取列表第一台会误连外部设备，导致后续 exec 找不到元素。
+     */
+    const device = await waitForDemoDevice()
     if (device) ok(`SDK 连接成功，设备上线: title="${device.title}", url=${device.url.slice(0, 40)}`)
-    else { fail('SDK 未连接，设备未出现'); throw new Error('abort') }
+    else { fail('SDK 未连接，/demo 设备未出现'); throw new Error('abort') }
 
     /** 2.1 设备类型识别（desktop/tablet/mobile） */
     if (device.deviceType === 'desktop') ok(`设备类型识别正确: ${device.deviceType}`)
@@ -137,7 +164,7 @@ async function main() {
     }
 
     /** 3. exec API —— 在真实 DOM 执行 */
-    const execRes = await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+    const execRes = await apiFetch(`/api/devices/${device.id}/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: 'document.getElementById("name-input").value = "无头测试"; return document.title' }),
@@ -154,7 +181,7 @@ async function main() {
     }
 
     /** 5. snapshot API（修复 return 后应成功）+ 取 button idx */
-    const snapRes = await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)
+    const snapRes = await apiFetch(`/api/devices/${device.id}/snapshot`)
     if (snapRes.ok) {
       const snapText = await snapRes.text()
       /** 同时验证 viewport 头部（诊断响应式/布局问题的关键线索） */
@@ -163,11 +190,11 @@ async function main() {
         ok(`snapshot API 返回 compact 文本（${snapText.length} 字符，含 viewport ${viewportMatch[1]}×${viewportMatch[2]}）`)
       } else fail(`snapshot 内容异常: ${snapText.slice(0, 200)}`)
     } else fail(`snapshot HTTP ${snapRes.status}`)
-    const snapText2 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+    const snapText2 = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
     const btnMatch = snapText2.match(/button #(\d+)/)
     if (btnMatch) {
       const idx = btnMatch[1]
-      const clickRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const clickRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_click(${idx}); return document.querySelector("#log").textContent` }),
@@ -186,7 +213,7 @@ async function main() {
      * 所以从 data-silkpulse-idx 属性取 idx（SDK 给每个采集元素打的标记）。
      */
     {
-      const customRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const customRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `const el = document.querySelector('#custom-btn'); const di = el?.getAttribute('data-silkpulse-idx'); if (di == null) return 'no-idx'; __silkpulse_click(Number(di)); return document.querySelector('#custom-result').textContent` }),
@@ -199,7 +226,7 @@ async function main() {
     }
 
     /** 5.1 __silkpulse_type —— 模拟键盘输入到搜索框，验证 keyup 触发 + value 正确写入 */
-    const snapText3 = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+    const snapText3 = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
     /** 找 search-input 的 idx（快照里 input 带 placeholder="输入关键词"） */
     const searchMatch = snapText3.match(/input #(\d+)[^\n]*关键词/)
     if (searchMatch) {
@@ -210,7 +237,7 @@ async function main() {
        * 必须用原生 setter（HTMLInputElement.prototype.value 的 setter）。
        * exec result 是 JSON.stringify 后的字符串，用 ||| 分隔两个字段方便解析。
        */
-      const typeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const typeRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_type(${searchIdx}, "苹"); return document.querySelector("#search-result").textContent + "|||" + document.querySelector("#search-input").value` }),
@@ -233,7 +260,7 @@ async function main() {
      * 验证 setValue 后 select.value 正确变更 + change 事件触发（console 有"选择城市"日志）。
      */
     {
-      const selectSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const selectSnap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       /**
        * select 是交互元素，id 不输出到 compact 文本。
        * options 用 value:text 格式（bj:北京|sh:上海|gz:广州），用此特征定位 idx。
@@ -245,17 +272,17 @@ async function main() {
       if (selectMatch) {
         const selectIdx = selectMatch[1]
         /** 记录 setValue 前的日志数，验证 change 事件触发新日志 */
-        const logsBefore = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+        const logsBefore = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
         const logsBeforeCount = logsBefore.length
         /** setValue 上海（"sh"），返回 select.value 确认写入 */
-        const setRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+        const setRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: `__silkpulse_setValue(${selectIdx}, "sh"); return document.querySelector("#city-select").value` }),
         })).json()
         await new Promise((r) => setTimeout(r, 500))
         /** setValue 后应有新的"选择城市: sh"日志（change 事件触发的 console.log） */
-        const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+        const logsAfter = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
         const hasCityLog = logsAfter.slice(logsAfter.length - logsBeforeCount > 0 ? logsAfter.length - 10 : 0).some((l) => l.message.includes('选择城市') && l.message.includes('sh'))
         const resultStr = setRes.result ?? ''
         if (selectMatch && hasValueFormat && setRes.success && resultStr.includes('sh') && hasCityLog) {
@@ -274,14 +301,14 @@ async function main() {
      * 验证 setValue 后 checked 状态正确 + change 事件触发
      */
     {
-      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const snap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       /** checkbox 同意条款（交互元素，用 label 文本匹配 idx） */
       const agreeMatch = snap.match(/input #(\d+)[^\n]*check[^\n]*同意条款/)
       /** radio 专业版 */
       const proMatch = snap.match(/input #(\d+)[^\n]*(?:type:radio|radio)[^\n]*专业版/)
 
       /** checkbox：先确保未勾选，setValue('true') 勾选，验证 checked=true */
-      const cbRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const cbRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `const cb = document.querySelector('#agree'); cb.checked = false; __silkpulse_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'true'); return cb.checked` }),
@@ -289,7 +316,7 @@ async function main() {
       const cbOk = cbRes.success && cbRes.result === 'true'
 
       /** checkbox：setValue('false') 取消，验证 checked=false */
-      const cbUncheckRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const cbUncheckRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_setValue(${agreeMatch ? agreeMatch[1] : -1}, 'false'); return document.querySelector('#agree').checked` }),
@@ -302,13 +329,13 @@ async function main() {
        */
       const freeMatch = snap.match(/input #(\d+)[^\n]*(?:type:radio|radio)[^\n]*免费版/)
       /** 先选 free（用 native setter 模拟初始选中，绕过 setValue 一次） */
-      await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `const f = document.querySelector('input[name="plan"][value="free"]'); const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked').set; s.call(f, true); f.dispatchEvent(new Event('change',{bubbles:true}))` }),
       })
       /** 再用 setValue 选 pro，验证互斥：pro=true，free 被取消=false */
-      const radioRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const radioRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_setValue(${proMatch ? proMatch[1] : -1}, 'pro'); const pro = document.querySelector('input[name="plan"][value="pro"]'); const free = document.querySelector('input[name="plan"][value="free"]'); return { pro: pro?.checked, free: free?.checked }` }),
@@ -316,7 +343,7 @@ async function main() {
       const radioOk = radioRes.success && radioRes.result?.includes('"pro":true') && radioRes.result?.includes('"free":false')
 
       /** change 事件触发的日志（"同意条款" / "选择套餐"） */
-      const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const logsAfter = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
       const hasAgreeLog = logsAfter.some((l) => l.message.includes('同意条款'))
       const hasPlanLog = logsAfter.some((l) => l.message.includes('选择套餐'))
 
@@ -334,7 +361,7 @@ async function main() {
      * 必须从快照看到这些状态，否则无法定位根因。
      */
     {
-      const formSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const formSnap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       const checks = [
         { re: /input #\d+ val=只读值 readonly/, label: 'readonly 输入框' },
         { re: /input #\d+ ph:必填字段 required/, label: 'required 输入框' },
@@ -366,7 +393,7 @@ async function main() {
       /** 聚焦 name-input */
       await testPage.evaluate(() => document.getElementById('name-input')?.focus())
       await new Promise((r) => setTimeout(r, 300))
-      const focusSnap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const focusSnap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       /** name-input 带 placeholder="输入你的名字"，应标 focus */
       const focusLine = focusSnap.split('\n').find((l) => l.includes('focus'))
       if (focusLine && /输入你的名字/.test(focusLine)) {
@@ -383,7 +410,7 @@ async function main() {
      */
     {
       /** 运行时错误：访问 null 的属性 */
-      const runtimeErr = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const runtimeErr = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `const x = null; return x.foo` }),
@@ -399,7 +426,7 @@ async function main() {
       }
 
       /** 语法错误：缺括号，应有 SyntaxError 但无需 stack */
-      const syntaxErr = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const syntaxErr = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `return {` }),
@@ -420,7 +447,7 @@ async function main() {
      * - 头部含早期日志（log-000），尾部含最新日志（log-499）
      */
     {
-      const floodRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const floodRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `for (let i = 0; i < 500; i++) { console.log("log-" + String(i).padStart(3, '0')) }; return "done"` }),
@@ -445,7 +472,7 @@ async function main() {
      */
     {
       const hangStart = Date.now()
-      const hangRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const hangRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `return new Promise(() => {})` }),
@@ -468,12 +495,12 @@ async function main() {
      */
     {
       /** 先取快照找到 scroll-box 和 hover-btn 的 idx */
-      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const snap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       const scrollMatch = snap.match(/div #(\d+)[^\n]*scroll-box/)
       const hoverMatch = snap.match(/button #(\d+)[^\n]*悬停看我/)
 
       /** 测试 scroll：滚动 scroll-box 到底部（0, 500） */
-      const scrollRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const scrollRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_scroll(${scrollMatch ? scrollMatch[1] : -1}, 0, 500); return document.querySelector("#scroll-box").scrollTop > 0` }),
@@ -481,7 +508,7 @@ async function main() {
       const scrollOk = scrollRes.success && scrollRes.result === 'true'
 
       /** 测试 hover：hover hover-btn，验证 hover-result 显示 */
-      const hoverRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const hoverRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_hover(${hoverMatch ? hoverMatch[1] : -1}); return getComputedStyle(document.querySelector("#hover-result")).display` }),
@@ -506,11 +533,11 @@ async function main() {
      */
     {
       /** 取快照找到 keyboard-input 的 idx（input 是交互元素，快照显示 idx 不显示 id，用 placeholder 匹配） */
-      const snap = await (await fetch(`${SERVER}/api/devices/${device.id}/snapshot`)).text()
+      const snap = await (await apiFetch(`/api/devices/${device.id}/snapshot`)).text()
       const kbMatch = snap.match(/input #(\d+)[^\n]*Enter 提交/)
 
       /** 先 setValue 输入文字，再 pressKey Enter */
-      const enterRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const enterRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_setValue(${kbMatch ? kbMatch[1] : -1}, '测试Enter'); __silkpulse_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Enter'); return document.querySelector('#keyboard-result')?.textContent` }),
@@ -518,7 +545,7 @@ async function main() {
       const enterOk = enterRes.success && enterRes.result?.includes('已提交') && enterRes.result?.includes('测试Enter')
 
       /** pressKey Escape → input 清空 + result "已清空" */
-      const escRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const escRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `__silkpulse_pressKey(${kbMatch ? kbMatch[1] : -1}, 'Escape'); return { result: document.querySelector('#keyboard-result')?.textContent, inputVal: document.querySelector('#keyboard-input')?.value }` }),
@@ -526,7 +553,7 @@ async function main() {
       const escOk = escRes.success && escRes.result?.includes('已清空') && escRes.result?.includes('"inputVal":""')
 
       /** idx<0 对 activeElement 按键：先 focus keyboard-input，pressKey(-1, 'Enter') 应等效 */
-      const activeRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const activeRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `document.querySelector('#keyboard-input').focus(); __silkpulse_pressKey(-1, 'Enter'); return document.activeElement?.id` }),
@@ -554,12 +581,16 @@ async function main() {
       const execOfflinePage = await browser.newPage()
       await execOfflinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
       await new Promise((r) => setTimeout(r, 1500))
+      /** 从页面拿 SDK 会话 id（避免误选其他在线设备，exec 挂错设备会等到超时） */
+      const execOfflineId = await execOfflinePage.evaluate(() => sessionStorage.getItem('__silkpulse_device_id__')).catch(() => null)
       const allDevs = await fetchDevices()
-      /** 最新接入的就是这台设备 */
-      const execOfflineDev = allDevs[allDevs.length - 1]
+      /** 优先按 id 精确匹配；回退最新接入（保底） */
+      const execOfflineDev = allDevs.find((d) => execOfflineId && d.id === execOfflineId) ?? allDevs[allDevs.length - 1]
+      if (!execOfflineDev) { fail('掉线 exec 测试前置失败：无设备') }
+      else {
 
       /** 发起挂起 exec（不 await），立即关闭设备 page 触发 WS 断开 */
-      const execPromise = fetch(`${SERVER}/api/devices/${execOfflineDev.id}/exec`, {
+      const execPromise = apiFetch(`/api/devices/${execOfflineDev.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: `return new Promise(() => {})` }),
@@ -582,17 +613,20 @@ async function main() {
       } else {
         fail(`设备掉线 exec 处理异常：success=${execRes.success} err=${execRes.error ?? '无'} elapsed=${elapsed}ms`)
       }
+      }
     }
 
     /** 6. console 采集 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))
-    const logs = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+    const logs = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
     if (logs.some((l) => l.message.includes('打招呼'))) ok(`console 采集成功（${logs.length} 条）`)
     else fail(`console 采集异常: ${logs.slice(-2).map((l) => l.message).join(' | ')}`)
 
     /** 6.5 日志限流 —— 防止远程页面 log 爆炸打爆 WS/server */
     {
+      /** 先等 1.2s 让上一测试（exec 500 条日志）的限流窗口滚动干净，汇总提示上报完 */
+      await new Promise((r) => setTimeout(r, 1200))
       const beforeTs = Date.now()
       /** 1 秒内狂刷 200 条 info + 5 条 error（error 不应被限流） */
       await testPage.evaluate(() => {
@@ -601,7 +635,7 @@ async function main() {
       })
       /** 等 2.5s：让限流窗口滚动 + 汇总上报（每秒检查一次） */
       await new Promise((r) => setTimeout(r, 2500))
-      const allLogs = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const allLogs = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
       /** 只看本次触发产生的日志（按时间戳过滤） */
       const recent = allLogs.filter((l) => new Date(l.timestamp).getTime() > beforeTs)
       const infoCount = recent.filter((l) => l.type === 'info' && l.message.includes('限流测试-')).length
@@ -630,7 +664,7 @@ async function main() {
     await testPage.evaluate(() => document.getElementById('xhr-btn')?.click())
     await testPage.evaluate(() => document.getElementById('post-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
-    const network = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    const network = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
     const hasFetch = network.some((n) => n.url.includes('/api/devices'))
     const has404 = network.some((n) => n.url.includes('/api/not-exist') && n.status === 404)
     const hasXhr = network.some((n) => n.method === 'GET' && n.url.includes('/api/devices'))
@@ -658,7 +692,7 @@ async function main() {
      */
     await testPage.evaluate(() => document.getElementById('xhr-json-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
-    const network2 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    const network2 = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
     /** 找最新一条 /api/devices 的 GET XHR（responseType=json 的那条） */
     const xhrJsonEntry = network2
       .filter((n) => n.method === 'GET' && n.url.includes('/api/devices'))
@@ -677,7 +711,7 @@ async function main() {
      */
     await testPage.evaluate(() => document.getElementById('request-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
-    const network3 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    const network3 = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
     /** 找 request-object 那条 POST（resBody 会回显，含 source: request-object） */
     const reqObjEntry = network3.find((n) => n.method === 'POST' && n.url.includes('/api/echo') && n.reqBody?.includes('request-object'))
     if (reqObjEntry && reqObjEntry.reqBody && reqObjEntry.reqBody.includes('request-object')) {
@@ -695,7 +729,7 @@ async function main() {
      */
     await testPage.evaluate(() => document.getElementById('formdata-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
-    const network4 = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+    const network4 = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
     /** 找 FormData 那条 POST（url 含 /api/echo，reqBody 应含 FormData 标记） */
     const formDataEntry = network4
       .filter((n) => n.method === 'POST' && n.url.includes('/api/echo'))
@@ -712,13 +746,13 @@ async function main() {
     {
       /** 3MB body，超过 2MB 上限 */
       const hugeCode = 'x'.repeat(3 * 1024 * 1024)
-      const hugeRes = await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const hugeRes = await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: hugeCode }),
       })
       /** 正常小 body 仍工作（exec 成功） */
-      const normalRes = await (await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      const normalRes = await (await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: 'return 1 + 1' }),
@@ -751,7 +785,7 @@ async function main() {
         })
       })
       await new Promise((r) => setTimeout(r, 800))
-      const netHeaders = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+      const netHeaders = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
       const fetchH = netHeaders.find((n) => n.method === 'POST' && n.reqHeaders && n.reqHeaders['x-silkpulse-test'])
       const xhrH = netHeaders.find((n) => n.method === 'GET' && n.reqHeaders && n.reqHeaders['x-xhr-custom'])
 
@@ -771,7 +805,7 @@ async function main() {
     await testPage.evaluate(() => document.getElementById('runtime-error-btn')?.click())
     await testPage.evaluate(() => document.getElementById('promise-error-btn')?.click())
     await new Promise((r) => setTimeout(r, 800))
-    const errors = await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()
+    const errors = await (await apiFetch(`/api/devices/${device.id}/errors`)).json()
     /** file:// 加载的页面，SDK 是跨域脚本，浏览器可能把 message 替换为 "Script error."。
      *  Promise rejection 通常能保留原始 message。关键是 error 事件被捕获。 */
     const hasPromiseError = errors.some((e) => e.message.includes('Promise') || e.message.includes('未处理'))
@@ -783,7 +817,7 @@ async function main() {
       /** 记录触发前的 errorCount */
       const beforeDeviceInfo = await fetchDevices()
       const errCountBefore = beforeDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
-      const errsBefore = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+      const errsBefore = (await (await apiFetch(`/api/devices/${device.id}/errors`)).json()).length
 
       /** 注入 3 个 404 资源（img / script / link） */
       await testPage.evaluate(() => {
@@ -803,7 +837,7 @@ async function main() {
       /** 验证 errorCount 和 errors 数量都没增长 */
       const afterDeviceInfo = await fetchDevices()
       const errCountAfter = afterDeviceInfo.find((d) => d.id === device.id)?.errorCount ?? 0
-      const errsAfter = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+      const errsAfter = (await (await apiFetch(`/api/devices/${device.id}/errors`)).json()).length
 
       if (errCountAfter === errCountBefore && errsAfter === errsBefore) {
         ok(`资源加载失败不计入 errorCount（${errCountBefore}→${errCountAfter}，errors ${errsBefore}→${errsAfter}）`)
@@ -821,7 +855,7 @@ async function main() {
      * - 不同错误独立上报，不被去重
      */
     {
-      const errsBefore = (await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()).length
+      const errsBefore = (await (await apiFetch(`/api/devices/${device.id}/errors`)).json()).length
 
       /**
        * 循环触发同一个 error 事件 20 次 + 1 个不同错误
@@ -850,7 +884,7 @@ async function main() {
       /** 等待 dedup 窗口（2s）flush 重复汇总 */
       await new Promise((r) => setTimeout(r, 3000))
 
-      const errorsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/errors`)).json()
+      const errorsAfter = await (await apiFetch(`/api/devices/${device.id}/errors`)).json()
 
       /**
        * 去重核心效果（不依赖精确 errorCount——浏览器对 dispatchEvent 的 ErrorEvent
@@ -881,7 +915,7 @@ async function main() {
     {
       await testPage.evaluate(() => document.getElementById('spam-log-btn')?.click())
       await new Promise((r) => setTimeout(r, 500))
-      const logsAfter = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const logsAfter = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
       /** 筛出 spam 日志条目 */
       const spamEntries = logsAfter.filter((l) => l.message.includes('silkpulse spam'))
       /** 应只有 1 条，且 repeat=10（总共出现 10 次：第一条上报 + 9 次重复聚合） */
@@ -905,7 +939,7 @@ async function main() {
       let wsEntry = null
       for (let attempt = 0; attempt < 20; attempt++) {
         await new Promise((r) => setTimeout(r, 150))
-        const net = await (await fetch(`${SERVER}/api/devices/${device.id}/network`)).json()
+        const net = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
         wsEntry = net.find((n) => n.protocol === 'ws')
         /** 等 close 事件帧出现（完整生命周期已采集） */
         if (wsEntry?.frames?.some((f) => f.dir === 'event' && f.data === 'close')) break
@@ -923,8 +957,9 @@ async function main() {
     }
 
     /** 9. 控制台 WS 实时推送（选中设备后能看到日志） */
-    const seen = await consolePage.evaluate(async (deviceId) => {
-      const ws = new WebSocket(`ws://${location.host}/ws/console`)
+    const seen = await consolePage.evaluate(async (deviceId, key) => {
+      const url = key ? `ws://${location.host}/ws/console?token=${encodeURIComponent(key)}` : `ws://${location.host}/ws/console`
+      const ws = new WebSocket(url)
       ws.send = ws.send.bind(ws)
       return new Promise((resolve) => {
         const got = { list: false, log: false }
@@ -936,7 +971,7 @@ async function main() {
         }
         setTimeout(() => resolve(got), 2000)
       })
-    }, device.id)
+    }, device.id, ADMIN_KEY)
     /** 触发一条新日志让推送生效 */
     await testPage.evaluate(() => document.getElementById('greet-btn')?.click())
     await new Promise((r) => setTimeout(r, 1000))
@@ -957,9 +992,10 @@ async function main() {
       })
       await new Promise((r) => setTimeout(r, 1500))
       /** 新控制台连接订阅，应能收到 device-list（server WS 仍正常接受连接） */
-      const afterBurst = await consolePage.evaluate(async (deviceId) => {
+      const afterBurst = await consolePage.evaluate(async (deviceId, key) => {
         return new Promise((resolve) => {
-          const ws = new WebSocket(`ws://${location.host}/ws/console`)
+          const url = key ? `ws://${location.host}/ws/console?token=${encodeURIComponent(key)}` : `ws://${location.host}/ws/console`
+          const ws = new WebSocket(url)
           let gotList = false
           ws.onopen = () => {
             ws.send(JSON.stringify({ type: 'subscribe', deviceId }))
@@ -967,10 +1003,10 @@ async function main() {
           }
           setTimeout(() => { ws.close(); resolve(gotList) }, 1500)
         })
-      }, device.id)
+      }, device.id, ADMIN_KEY)
       /** HTTP API 仍响应（server 存活） */
-      const apiAlive = (await fetch(`${SERVER}/api/devices`)).ok
-      const burstLogs = await (await fetch(`${SERVER}/api/devices/${device.id}/logs`)).json()
+      const apiAlive = (await apiFetch(`/api/devices`)).ok
+      const burstLogs = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
       const burstReceived = burstLogs.some((l) => String(l.message).includes('burst-'))
       if (afterBurst && apiAlive && burstReceived) {
         ok(`WS 背压保护：突发日志后 server 存活、控制台仍可连接、日志已入库（${burstLogs.length} 条）`)
@@ -1019,20 +1055,21 @@ async function main() {
     await testPage.evaluate(() => document.getElementById('fetch-404')?.click())
     await new Promise((r) => setTimeout(r, 1000))
 
-    const aiContext = await consolePage.evaluate(async (deviceId) => {
-      /** 模拟控制台的"生成 AI 上下文"：拉快照 + 聚合 errors/network/logs */
+    const aiContext = await consolePage.evaluate(async (deviceId, key) => {
+      /** 模拟控制台的"生成 AI 上下文"：拉快照 + 聚合 errors/network/logs（鉴权模式带 Bearer） */
+      const headers = key ? { Authorization: `Bearer ${key}` } : {}
       const [snapRes, errsRes, netRes, logsRes] = await Promise.all([
-        fetch(`/api/devices/${deviceId}/snapshot`),
-        fetch(`/api/devices/${deviceId}/errors`),
-        fetch(`/api/devices/${deviceId}/network`),
-        fetch(`/api/devices/${deviceId}/logs`),
+        fetch(`/api/devices/${deviceId}/snapshot`, { headers }),
+        fetch(`/api/devices/${deviceId}/errors`, { headers }),
+        fetch(`/api/devices/${deviceId}/network`, { headers }),
+        fetch(`/api/devices/${deviceId}/logs`, { headers }),
       ])
       const snapshot = await snapRes.text()
       const errors = await errsRes.json()
       const network = await netRes.json()
       const logs = await logsRes.json()
       return { snapshotLen: snapshot.length, errorCount: errors.length, networkCount: network.length, logCount: logs.length }
-    }, device.id)
+    }, device.id, ADMIN_KEY)
     if (aiContext.snapshotLen > 100 && aiContext.errorCount >= 1 && aiContext.networkCount >= 1) {
       ok(`AI 诊断上下文可聚合现场（快照 ${aiContext.snapshotLen} 字符，错误 ${aiContext.errorCount}，网络 ${aiContext.networkCount}，日志 ${aiContext.logCount}）`)
     } else {
@@ -1059,10 +1096,10 @@ async function main() {
       fail(`bookmarklet 注入未上线新设备（${beforeCount} → ${afterCount}）`)
     }
 
-    /** 13. 断线重连 —— 模拟网络闪断，验证设备自动重连 + 历史保留 */
-    const reconDev = await waitForDevice()
+    /** 13. 断线重连 —— 模拟网络闪断，验证设备自动重连 + 历史保留（断网的是 testPage，用其精确 id） */
+    const reconDev = device
     if (reconDev) {
-      const logsBeforeRecon = await (await fetch(`${SERVER}/api/devices/${reconDev.id}/logs`)).json()
+      const logsBeforeRecon = await (await apiFetch(`/api/devices/${reconDev.id}/logs`)).json()
       /** 用 CDP 模拟断网 → 等 WS 断开 → 恢复 → 等 SDK 重连 */
       const cdp = await testPage.target().createCDPSession()
       await cdp.send('Network.enable')
@@ -1077,7 +1114,7 @@ async function main() {
       const reconDevices = await fetchDevices()
       const reconMatch = reconDevices.find((d) => d.id === reconDev.id)
       if (reconMatch) {
-        const logsAfterRecon = await (await fetch(`${SERVER}/api/devices/${reconDev.id}/logs`)).json()
+        const logsAfterRecon = await (await apiFetch(`/api/devices/${reconDev.id}/logs`)).json()
         /** 验证：重连后历史日志不丢 */
         if (logsAfterRecon.length >= logsBeforeRecon.length) {
           ok(`断线重连成功（历史保留 ${logsBeforeRecon.length}→${logsAfterRecon.length} 条日志）`)
@@ -1093,8 +1130,8 @@ async function main() {
 
     /** 13.5 SDK 离线缓冲 —— 断线期间产生的数据，重连后不丢失 */
     {
-      const bufDev = await waitForDevice()
-      if (!bufDev) { fail('SDK 缓冲测试前置失败：无在线设备'); }
+      /** 断网/日志都发生在 testPage 上，其数据挂在 device.id 名下（不能用 /demo 页设备，会查错） */
+      if (!device) { fail('SDK 缓冲测试前置失败：无在线设备'); }
       else {
         /** 用唯一标记区分本次测试的日志 */
         const marker = `buffer-test-${Date.now()}`
@@ -1114,7 +1151,7 @@ async function main() {
         })
         await new Promise((r) => setTimeout(r, 7000))
         /** 验证带标记的日志到达 server（若无缓冲，断网期间的日志会丢） */
-        const logsAfter = await (await fetch(`${SERVER}/api/devices/${bufDev.id}/logs`)).json()
+        const logsAfter = await (await apiFetch(`/api/devices/${device.id}/logs`)).json()
         const arrived = logsAfter.some((l) => l.message.includes(marker))
         if (arrived) {
           ok(`SDK 离线缓冲生效（断线期间日志"${marker}"重连后到达 server）`)
@@ -1132,7 +1169,7 @@ async function main() {
      * 导致重复重连或卸载后建立幽灵 WS 连接。这里连续两次断线重连，验证稳定性。
      */
     {
-      const stabDev = await waitForDevice()
+      const stabDev = device
       if (!stabDev) { fail('连续重连测试前置失败：无在线设备'); }
       else {
         const cdp = await testPage.target().createCDPSession()
@@ -1152,7 +1189,7 @@ async function main() {
           })
           await new Promise((r) => setTimeout(r, 6000))
           /** 验证本轮带标记的日志到达（重连成功 + 缓冲 flush） */
-          const logs = await (await fetch(`${SERVER}/api/devices/${stabDev.id}/logs`)).json()
+          const logs = await (await apiFetch(`/api/devices/${stabDev.id}/logs`)).json()
           if (logs.some((l) => l.message.includes(mark))) reconOkCount++
         }
         if (reconOkCount === 2) {
@@ -1171,15 +1208,19 @@ async function main() {
      * 设备重连后从 recentlyOffline 移除。
      */
     {
-      /** 开一个独立 page 作为待下线设备 */
+      /** 开一个独立 page 作为待下线设备（记下 page 内 SDK 的 deviceId，避免误选其他设备） */
       const offlinePage = await browser.newPage()
       await offlinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+      /** 从页面拿当前 SDK 会话 id（SDK 存 sessionStorage.__silkpulse_device_id__），无则回退 url 匹配 */
+      const pageDevId = await offlinePage.evaluate(() => (sessionStorage.getItem('__silkpulse_device_id__') ?? null)).catch(() => null)
       await new Promise((r) => setTimeout(r, 1500))
       const offlineDevs = await fetchDevices()
-      const offlineDev = offlineDevs[offlineDevs.length - 1]
-      /** close page 触发 WS 断开 → server 检测下线（3s 等 close 事件传播） */
+      /** 优先按 id 匹配；回退：url 含 /demo 且不等于 testPage 那台 */
+      const offlineDev = offlineDevs.find((d) => pageDevId && d.id === pageDevId)
+        ?? offlineDevs.find((d) => d.url.includes('/demo') && d.id !== device.id)
+      /** close page 触发 WS 断开 → server 有 5s 下线宽限期（防 reload 抖动），须等满宽限期后才真正下线 */
       await offlinePage.close()
-      await new Promise((r) => setTimeout(r, 3000))
+      await new Promise((r) => setTimeout(r, 6500))
       const { devices: onlineNow, recentlyOffline: offlineHist } = await fetchDevicesResponse()
       const inOnline = onlineNow.some((d) => d.id === offlineDev.id)
       const inOffline = offlineHist.find((o) => o.id === offlineDev.id)
@@ -1191,14 +1232,14 @@ async function main() {
     }
 
     /** 14. 设备标签/备注 —— POST /tags 设置，GET /devices 反映，再触发 SPA 路由确认不被覆盖 */
-    const tagDev = await waitForDevice()
+    const tagDev = await waitForDemoDevice()
     if (tagDev) {
       /** 初始应为空标签 */
       if ((tagDev.tags ?? []).length === 0) ok(`设备初始无标签（符合预期）`)
       else fail(`设备初始不应有标签，实际: ${JSON.stringify(tagDev.tags)}`)
 
       /** 设置标签 + 备注 */
-      const setRes = await fetch(`${SERVER}/api/devices/${tagDev.id}/tags`, {
+      const setRes = await apiFetch(`/api/devices/${tagDev.id}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags: ['生产环境', '用户A'], note: 'iPhone 15 测试机' }),
@@ -1230,8 +1271,8 @@ async function main() {
       fail('标签测试前置失败：无在线设备')
     }
 
-    /** 15. source map 解析 —— 压缩代码错误自动映射回原始源码位置 */
-    const smDev = await waitForDevice()
+    /** 15. source map 解析 —— 压缩代码错误自动映射回原始源码位置（注入目标是 testPage，用其精确 id） */
+    const smDev = device
     if (smDev) {
       /** 注入带 sourceMappingURL 的压缩脚本，执行时抛错 */
       await testPage.evaluate(() => {
@@ -1241,7 +1282,7 @@ async function main() {
       })
       /** 等待错误捕获 + source map 异步解析（fetch crash.js → 解析 sourceMappingURL → fetch crash.js.map → 解析） */
       await new Promise((r) => setTimeout(r, 3000))
-      const errors = await (await fetch(`${SERVER}/api/devices/${smDev.id}/errors`)).json()
+      const errors = await (await apiFetch(`/api/devices/${smDev.id}/errors`)).json()
       /** 找到 crash.js 引发的错误（source 含 crash.js） */
       const crashErr = errors.reverse().find((e) => e.source?.includes('crash.js'))
       if (!crashErr) {
@@ -1253,7 +1294,7 @@ async function main() {
       }
 
       /** 16. __silkpulse_sourcemap exec 辅助函数 —— AI 主动解析堆栈位置 */
-      const smExecRes = await fetch(`${SERVER}/api/devices/${smDev.id}/exec`, {
+      const smExecRes = await apiFetch(`/api/devices/${smDev.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1281,10 +1322,10 @@ async function main() {
      * 验证三种类型都能正确返回 {key: value}，且值截断逻辑正常。
      */
     {
-      const storageDev = await waitForDevice()
+      const storageDev = device
       if (storageDev) {
         /** localStorage：应含 cs-token + cs-user（测试页初始化时设置） */
-        const localRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+        const localRes = await (await apiFetch(`/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: `return __silkpulse_storage('local')` }),
@@ -1292,7 +1333,7 @@ async function main() {
         const localOk = localRes.success && localRes.result?.includes('cs-token') && localRes.result?.includes('test-token-abc123') && localRes.result?.includes('cs-user')
 
         /** sessionStorage：应含 cs-tab */
-        const sessionRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+        const sessionRes = await (await apiFetch(`/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: `return __silkpulse_storage('session')` }),
@@ -1300,7 +1341,7 @@ async function main() {
         const sessionOk = sessionRes.success && sessionRes.result?.includes('cs-tab') && sessionRes.result?.includes('session-data')
 
         /** cookie：应含 cs-auth（HttpOnly 拿不到是浏览器限制，cs-auth 非 HttpOnly 可读） */
-        const cookieRes = await (await fetch(`${SERVER}/api/devices/${storageDev.id}/exec`, {
+        const cookieRes = await (await apiFetch(`/api/devices/${storageDev.id}/exec`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: `return __silkpulse_storage('cookie')` }),
@@ -1317,8 +1358,8 @@ async function main() {
       }
     }
 
-    /** 17. iframe 元素采集 —— snapshot 应穿透同源 iframe，元素带 frame 标识 */
-    const iframeDev = await waitForDevice()
+    /** 17. iframe 元素采集 —— snapshot 应穿透同源 iframe，元素带 frame 标识（注入目标是 testPage） */
+    const iframeDev = device
     if (iframeDev) {
       /** 创建同源 iframe（srcdoc 继承源），内含交互元素 */
       await testPage.evaluate(() => {
@@ -1336,7 +1377,7 @@ async function main() {
         if (ready) break
         await new Promise((r) => setTimeout(r, 100))
       }
-      const snapText = await (await fetch(`${SERVER}/api/devices/${iframeDev.id}/snapshot`)).text()
+      const snapText = await (await apiFetch(`/api/devices/${iframeDev.id}/snapshot`)).text()
       /** 验证 iframe 内元素被采集 + 带 frame 标识 */
       if (snapText.includes('[frame:embed-frame]') && snapText.includes('iframe按钮')) {
         ok(`iframe 元素采集成功（snapshot 含 frame:embed-frame 标记）`)
@@ -1345,7 +1386,7 @@ async function main() {
       }
 
       /** 18. exec 操作 iframe 内元素 —— click iframe 内按钮 */
-      const iframeClickRes = await fetch(`${SERVER}/api/devices/${iframeDev.id}/exec`, {
+      const iframeClickRes = await apiFetch(`/api/devices/${iframeDev.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1375,8 +1416,13 @@ async function main() {
 
     /** 19. Errors 搜索 + 堆栈折叠 —— 控制台 UI 错误面板的关键词过滤与堆栈展开 */
     {
-      /** 选中第一个设备（首次在 UI 选设备） */
-      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      /** 选中 testPage 对应设备（按 id 精确匹配，避免误选环境里其他在线设备） */
+      await consolePage.evaluate((deviceId) => {
+        const items = Array.from(document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'))
+        /** 设备条目带 data-id 或按位置匹配；回退：第一个 */
+        const target = items.find((el) => el.textContent?.includes('silkpulse 测试页')) ?? items[0]
+        if (target) target.click()
+      }, device.id)
       await new Promise((r) => setTimeout(r, 600))
       /** 切到 errors 面板 */
       await consolePage.evaluate(() => {
@@ -1583,7 +1629,7 @@ async function main() {
       await consolePage.evaluate(() => localStorage.removeItem('silkpulse-exec-history'))
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
-      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await consolePage.evaluate(() => { const items = Array.from(document.querySelectorAll("aside li, aside [class*=\"cursor-pointer\"]")); const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0]; if (target) target.click() })
       await new Promise((r) => setTimeout(r, 400))
       /** 切到 exec 面板 */
       await consolePage.evaluate(() => {
@@ -1662,7 +1708,7 @@ async function main() {
       await consolePage.evaluate(() => localStorage.removeItem('silkpulse-exec-history'))
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
-      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await consolePage.evaluate(() => { const items = Array.from(document.querySelectorAll("aside li, aside [class*=\"cursor-pointer\"]")); const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0]; if (target) target.click() })
       await new Promise((r) => setTimeout(r, 400))
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('nav button'))
@@ -1760,7 +1806,7 @@ async function main() {
       await consolePage.reload({ waitUntil: 'networkidle0' })
       await new Promise((r) => setTimeout(r, 500))
       /** 选中第一个设备 */
-      await consolePage.evaluate(() => { const li = document.querySelector('ul li'); if (li) li.click() })
+      await consolePage.evaluate(() => { const items = Array.from(document.querySelectorAll("aside li, aside [class*=\"cursor-pointer\"]")); const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0]; if (target) target.click() })
       await new Promise((r) => setTimeout(r, 400))
       /** 切到 exec 面板 */
       await consolePage.evaluate(() => {
@@ -1785,10 +1831,11 @@ async function main() {
         if (runBtn) runBtn.click()
       })
       await new Promise((r) => setTimeout(r, 1000))
-      /** 验证历史侧栏出现该条 */
+      /** 验证历史侧栏出现该条（历史项为 font-mono truncate 的 code 行） */
       const histAfterRun = await consolePage.evaluate(() => {
-        const items = document.querySelectorAll('.w-56 .truncate')
-        return Array.from(items).map((el) => el.textContent.trim())
+        const panel = Array.from(document.querySelectorAll('div')).find((d) => d.textContent?.trim().startsWith('执行历史') && d.className.includes('border-l'))
+        if (!panel) return []
+        return Array.from(panel.querySelectorAll('.truncate')).map((el) => el.textContent.trim())
       })
       if (histAfterRun.some((c) => c.includes('return 1 + 1'))) {
         ok(`exec 历史记录成功（侧栏含执行的代码）`)
@@ -1798,8 +1845,9 @@ async function main() {
 
       /** 验证点击历史项回填到编辑区 */
       await consolePage.evaluate(() => {
-        const items = document.querySelectorAll('.w-56 .truncate')
-        for (const it of items) {
+        const panel = Array.from(document.querySelectorAll('div')).find((d) => d.textContent?.trim().startsWith('执行历史') && d.className.includes('border-l'))
+        if (!panel) return
+        for (const it of panel.querySelectorAll('.truncate')) {
           if (it.textContent.includes('return 1 + 1')) { it.parentElement.click(); break }
         }
       })
@@ -1830,7 +1878,10 @@ async function main() {
         if (clearBtn) clearBtn.click()
       })
       await new Promise((r) => setTimeout(r, 200))
-      const histAfterClear = await consolePage.evaluate(() => document.querySelectorAll('.w-56 .truncate').length)
+      const histAfterClear = await consolePage.evaluate(() => {
+        const panel = Array.from(document.querySelectorAll('div')).find((d) => d.textContent?.trim().startsWith('执行历史') && d.className.includes('border-l'))
+        return panel ? panel.querySelectorAll('.truncate').length : 0
+      })
       if (histAfterClear === 0) {
         ok(`exec 历史清空成功`)
       } else {
@@ -1840,10 +1891,11 @@ async function main() {
 
     /** 20. 复制为 cURL —— network 详情面板的 cURL 生成（AI/本地复现远程请求） */
     {
-      /** 先在控制台 UI 选中第一个设备（之前的测试都走 HTTP API，UI 上未选设备） */
+      /** 先在控制台 UI 选中 testPage 设备（之前的测试都走 HTTP API，UI 上未选设备） */
       await consolePage.evaluate(() => {
-        const li = document.querySelector('ul li')
-        if (li) li.click()
+        const items = Array.from(document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'))
+        const target = items.find((el) => el.textContent?.includes('silkpulse 测试页')) ?? items[0]
+        if (target) target.click()
       })
       await new Promise((r) => setTimeout(r, 800))
       /** 切到 network 面板 */
@@ -1922,26 +1974,25 @@ async function main() {
         return { found: true }
       })
       await new Promise((r) => setTimeout(r, 300))
-      /** 读详情面板的响应体 <pre> 内容：格式化后应含换行 + 缩进空格 */
+      /** 读详情面板的响应体内容：格式化后应含换行 + 缩进空格 */
       const resBodyText = await consolePage.evaluate(() => {
-        /** 详情面板里"响应体"标题后的 <pre> */
+        /** "响应体"标题所在区块（标题后隔了工具栏，内容在区块容器内由 ObjectInspector 渲染） */
         const labels = Array.from(document.querySelectorAll('.text-xs.text-faint'))
         const resBodyLabel = labels.find((l) => l.textContent.trim() === '响应体')
         if (!resBodyLabel) return null
-        const pre = resBodyLabel.nextElementSibling
-        return pre ? pre.textContent : null
+        const section = resBodyLabel.closest('.flex.items-center.justify-between')?.parentElement
+        return section ? section.textContent : null
       })
       /**
-       * 格式化判定：原始 echo 响应是单行 {"ok":true,"received":{...}}，
-       * formatBody 美化后含换行 + 双空格缩进（如 '  "ok": true'）。
-       * 检测换行数 > 1 且含 '"ok":' 或 '"ok" :'（JSON key 跨行）。
+       * 格式化判定：详情面板用 ObjectInspector 渲染结构化树（"obj{ok: true, received: {...}}"），
+       * 验证 JSON key 已被解析展示（"ok:" 与 "received"），而非原始压缩单行字符串。
        */
       const isFormatted = resBodyText != null
-        && resBodyText.includes('\n')
-        && resBodyText.split('\n').length > 2
-        && /"?ok"?\s*:/.test(resBodyText)
+        && /ok\s*:\s*true/.test(resBodyText)
+        && /received/.test(resBodyText)
+        && !/\{"ok":true,"received":"/.test(resBodyText)
       if (formatted.found && isFormatted) {
-        ok(`network 详情 JSON 响应体格式化生效（${resBodyText.split('\n').length} 行缩进美化）`)
+        ok(`network 详情 JSON 响应体结构化展示生效（ObjectInspector 解析 ${resBodyText.length} 字符）`)
       } else {
         fail(`network 详情 JSON 格式化异常：found=${formatted.found} body=${resBodyText ? resBodyText.slice(0, 80) : 'null'}`)
       }
@@ -1957,8 +2008,9 @@ async function main() {
     {
       /** 确保 console 选中设备 + 切到 network 面板（前面测试可能切走） */
       await consolePage.evaluate(() => {
-        const li = document.querySelector('ul li')
-        if (li) li.click()
+        const items = Array.from(document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'))
+        const target = items.find((el) => el.textContent?.includes('silkpulse 测试页')) ?? items[0]
+        if (target) target.click()
         const tabs = Array.from(document.querySelectorAll('nav button'))
         const netTab = tabs.find((t) => t.textContent.trim().startsWith('Network'))
         if (netTab) netTab.click()
@@ -1986,12 +2038,13 @@ async function main() {
         const labels = Array.from(document.querySelectorAll('.text-xs.text-faint'))
         const frameLabel = labels.find((l) => l.textContent.includes('帧时间线'))
         if (!frameLabel) return { hasFrames: false }
-        /** 帧时间线容器内的文本（含 ↑ send / ↓ recv / ⚠） */
-        const container = frameLabel.nextElementSibling
+        /** 帧时间线整块容器（标题所在 v-if 容器）内找 ↑send/↓recv（中间隔了 Filter 工具栏，不能只看 nextElementSibling） */
+        const section = frameLabel.closest('div')
+        const text = section ? section.parentElement?.textContent || section.textContent : ''
         return {
           hasFrames: true,
-          hasSend: container ? !!container.textContent.match(/↑|send/) : false,
-          hasRecv: container ? !!container.textContent.match(/↓|recv/) : false,
+          hasSend: !!text.match(/↑\s*send/),
+          hasRecv: !!text.match(/↓\s*recv/),
         }
       })
       if (wsClicked.found && wsPanel.hasFrames && wsPanel.hasSend && wsPanel.hasRecv) {
@@ -2007,14 +2060,14 @@ async function main() {
       /** network 命令：应输出含请求头/响应头 */
       const netOut = execSync(
         `node ${skillScript} network ${device.id}`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const netHasHeaders = netOut.includes('请求头') || netOut.includes('content-type')
 
       /** inspect 命令：应聚合 错误 + 异常网络 + 慢请求 Top + 快照 */
       const inspectOut = execSync(
         `node ${skillScript} inspect ${device.id}`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const inspectOk = inspectOut.includes('silkpulse 设备诊断聚合')
         && inspectOut.includes('## 错误')
@@ -2044,11 +2097,11 @@ async function main() {
        */
       const logsFull = execSync(
         `node ${skillScript} logs ${device.id}`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const logsTail = execSync(
         `node ${skillScript} logs ${device.id} 5`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const fullLines = logsFull.split('\n').filter((l) => l.trim().startsWith('['))
       const tailLines = logsTail.split('\n').filter((l) => l.trim().startsWith('['))
@@ -2085,11 +2138,11 @@ async function main() {
 
       const errorsFull = execSync(
         `node ${skillScript} errors ${device.id}`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const errorsTail = execSync(
         `node ${skillScript} errors ${device.id} 3`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       /** errors 输出每条以 [时间戳] 开头，空行分隔 */
       const fullErrLines = errorsFull.split('\n').filter((l) => l.trim().startsWith('['))
@@ -2211,8 +2264,10 @@ async function main() {
       })
       await new Promise((r) => setTimeout(r, 300))
 
-      /** 验证：失败态下所有行都是 4xx/5xx/0，成功态行数 < 全部（有失败请求被滤掉），失败态行数 < 全部 */
+      /** 验证：失败态下所有行都是 4xx/5xx/0/无状态码（WS 帧、pending 请求显示 —），成功态行数 < 全部，失败态 < 全部 */
       const failStatusesAllError = errorOnly.statuses.every((s) => {
+        /** — 表示无状态码条目（WebSocket 帧/未完成请求），不属于成功态 */
+        if (s === '—' || s === '-') return true
         const n = Number(s)
         return n === 0 || n >= 400
       })
@@ -2253,7 +2308,7 @@ async function main() {
       const afterClear = await consolePage.evaluate(() => document.querySelectorAll('.font-mono.text-sm .border-light, [class*="border-b"][class*="border-light"]').length)
 
       /** 触发一条新日志（通过 exec 打一条 console.log） */
-      await fetch(`${SERVER}/api/devices/${device.id}/exec`, {
+      await apiFetch(`/api/devices/${device.id}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: 'console.log("清空后新日志测试"); return 1' }),
@@ -2336,14 +2391,14 @@ async function main() {
      * 因此手动 dispatch resize 事件模拟真实用户旋转/缩放。
      */
     {
-      const before = await (await fetch(`${SERVER}/api/devices/${device.id}`)).json()
+      const before = await (await apiFetch(`/api/devices/${device.id}`)).json()
       const beforeW = before.viewportWidth
       /** setViewport 改变 innerWidth（CDP 层），再手动 dispatch resize 事件触发 SDK 监听 */
       await testPage.setViewport({ width: beforeW + 200, height: 600 })
       await testPage.evaluate(() => window.dispatchEvent(new Event('resize')))
       /** 等 SDK 防抖（300ms）+ WS 上报 + server 处理 */
       await new Promise((r) => setTimeout(r, 1200))
-      const after = await (await fetch(`${SERVER}/api/devices/${device.id}`)).json()
+      const after = await (await apiFetch(`/api/devices/${device.id}`)).json()
 
       if (after.viewportWidth === beforeW + 200) {
         ok(`SDK resize 上报新视口（${beforeW}×${before.viewportHeight} → ${after.viewportWidth}×${after.viewportHeight}）`)
@@ -2373,7 +2428,7 @@ async function main() {
 
       /** 验证快照内容已加载（pre 有内容） */
       const snapLen = await consolePage.evaluate(() => {
-        const pre = document.querySelector('.flex-1.overflow-y-auto.p-4 pre')
+        const pre = document.querySelector('.flex-1.overflow-auto pre, .flex-1.overflow-y-auto.p-4 pre')
         return pre ? pre.textContent.length : 0
       })
 
@@ -2389,7 +2444,7 @@ async function main() {
       /** 搜索后行数统计应显示 */
       const searchState = await consolePage.evaluate(() => {
         const lineBadge = document.querySelector('.text-faint.whitespace-nowrap')
-        const pre = document.querySelector('.flex-1.overflow-y-auto.p-4 pre')
+        const pre = document.querySelector('.flex-1.overflow-auto pre, .flex-1.overflow-y-auto.p-4 pre')
         return {
           lineText: lineBadge ? lineBadge.textContent.trim() : '',
           contentLen: pre ? pre.textContent.length : 0,
@@ -2445,8 +2500,8 @@ async function main() {
         const aside = document.querySelector('aside')
         if (!aside) return null
         const text = aside.textContent
-        /** 匹配"在线 刚刚" / "在线 3 分钟" / "在线 1 小时" 等 */
-        const match = text.match(/在线\s+(刚刚|\d+\s*(分钟|小时|天))/)
+        /** 设备项展示 "· 刚刚" / "· 3 分钟"（relativeTime 相对时间，无"在线"前缀） */
+        const match = text.match(/·\s*(刚刚|\d+\s*(分钟|小时|天))/)
         return match ? match[0] : null
       })
 
@@ -2454,7 +2509,7 @@ async function main() {
       const skillScript = path.join(process.cwd(), 'tools/skill/scripts/silkpulse.mjs')
       const devicesOut = execSync(
         `node ${skillScript} devices`,
-        { env: { ...process.env, SILKPULSE_SERVER: SERVER }, encoding: 'utf8', timeout: 10000 },
+        { env: { ...process.env, SILKPULSE_SERVER: SERVER, SILKPULSE_API_KEY: ADMIN_KEY }, encoding: 'utf8', timeout: 10000 },
       )
       const skillHasOnline = devicesOut.includes('在线')
 
@@ -2649,10 +2704,10 @@ async function main() {
       })
       await new Promise((r) => setTimeout(r, 800))
 
-      /** 点击 header 里的 AI 上下文按钮 */
+      /** 点击 header 里的诊断上下文按钮（文案为"📋 诊断上下文"，需已选中设备） */
       const clicked = await consolePage.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'))
-        const btn = btns.find((b) => b.textContent.includes('AI 诊断上下文'))
+        const btn = btns.find((b) => b.textContent.includes('诊断上下文'))
         if (!btn || btn.disabled) return false
         btn.click()
         return true

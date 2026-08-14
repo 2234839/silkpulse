@@ -13,14 +13,19 @@
  *
  * 环境变量：
  *   SILKPULSE_SERVER  server 地址，默认 http://localhost:8080
+ *   SILKPULSE_API_KEY  鉴权密钥（线上部署必带，作为 Authorization: Bearer 头）
  */
 
 const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8080'
+/** 鉴权密钥：可选，鉴权部署时必带 */
+const API_KEY = process.env.SILKPULSE_API_KEY ?? ''
+/** 统一请求头（鉴权模式带 Bearer） */
+const AUTH_HEADERS = API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}
 
 const [cmd, ...args] = process.argv.slice(2)
 
 async function get(path) {
-  const res = await fetch(`${SERVER}${path}`)
+  const res = await fetch(`${SERVER}${path}`, { headers: AUTH_HEADERS })
   if (!res.ok) {
     console.error(`HTTP ${res.status}: ${await res.text()}`)
     process.exit(1)
@@ -35,7 +40,7 @@ async function getJson(path) {
 async function postJson(path, body) {
   const res = await fetch(`${SERVER}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...AUTH_HEADERS },
     body: JSON.stringify(body),
   })
   if (!res.ok) {

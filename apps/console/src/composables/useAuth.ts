@@ -116,6 +116,23 @@ function isAuthenticated(): boolean {
   return !!apiKey.value
 }
 
+/**
+ * URL ?key= 注入：优先级高于 localStorage（分享带密钥的控制台直达链接）。
+ * 用后即刻从地址栏清除，避免密钥留在浏览器历史/分享链路。
+ */
+function restoreKeyFromUrl(): void {
+  try {
+    const u = new URL(window.location.href)
+    const key = u.searchParams.get('key')
+    if (key) {
+      saveKey(key)
+      u.searchParams.delete('key')
+      window.history.replaceState(null, '', u.toString())
+    }
+  } catch { /** URL 解析异常忽略（如非浏览器环境） */ }
+}
+
+restoreKeyFromUrl()
 restoreKey()
 
 export function useAuth() {

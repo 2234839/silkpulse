@@ -20,6 +20,9 @@ import type {
   DeviceInfo,
 } from '@silkpulse/shared'
 
+/** 广播可观测性：发送/截断计数，供 health 端点读取，压测用 */
+export const fanoutStats = { sent: 0, skippedClosed: 0, skippedProject: 0, backpressureClosed: 0 }
+
 /** 生成设备 ID（8 位十六进制） */
 function generateDeviceId(): string {
   return Array.from({ length: 8 }, () =>
@@ -60,12 +63,19 @@ export function setupWebSocket(
     const deviceProjectId = targetDevice?.info.projectId
     const text = JSON.stringify(msg)
     for (const ws of watchers) {
-      if (ws.readyState !== ws.OPEN) continue
+      if (ws.readyState !== ws.OPEN) {
+        fanoutStats.skippedClosed++
+        continue
+      }
       /** 项目隔离：项目级控制台只能收到自己项目设备的数据 */
       const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
-      if (ctx?.role === 'project' && ctx.projectId !== deviceProjectId) continue
+      if (ctx?.role === 'project' && ctx.projectId !== deviceProjectId) {
+        fanoutStats.skippedProject++
+        continue
+      }
       /** 背压保护：积压超限的连接直接关闭，不再塞数据 */
       if (ws.bufferedAmount > MAX_BUFFERED) {
+        fanoutStats.backpressureClosed++
         ws.close(1011, 'backpressure: send buffer overflow')
         continue
       }
@@ -74,6 +84,7 @@ export function setupWebSocket(
        * 不带回调时 ws 库会抛同步异常。回调吞掉错误（close 回调统一清理死连接）。
        */
       ws.send(text, () => {})
+      fanoutStats.sent++
     }
   }
 

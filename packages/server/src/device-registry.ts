@@ -291,6 +291,19 @@ export class DeviceRegistry {
       this.unregister(deviceId)
     }, OFFLINE_GRACE_MS)
     this.graceTimers.set(deviceId, timer)
+    /**
+     * pending exec 不等宽限期：连接全断时指令通道已死，
+     * 挂起的 exec 应立即失败（AI 侧重试），而非傻等 5s 宽限 + 让调用方超时。
+     * reload 场景 exec 也会失败——但 exec 语义本来就是"对当前页面快照操作"，reload 后上下文已变，失败更正确。
+     */
+    for (const [execId, entry] of device.pendingExecs) {
+      clearTimeout(entry.timer)
+      entry.resolve({
+        success: false,
+        error: '设备已断开连接',
+      })
+      device.pendingExecs.delete(execId)
+    }
   }
 
   /** 设备下线（真正移除：宽限期超时 / 显式清理） */

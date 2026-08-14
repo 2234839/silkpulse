@@ -526,7 +526,8 @@ export async function handleExec(code: string, execId: string): Promise<void> {
     })()
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('SDK_EXEC_TIMEOUT')), SDK_EXEC_TIMEOUT)
+      /** 文案与 server 端对齐（含"超时"，消费方按关键词识别） */
+      setTimeout(() => reject(new Error('执行超时（SDK_EXEC_TIMEOUT，9s）')), SDK_EXEC_TIMEOUT)
     })
 
     const ret = await Promise.race([execPromise, timeoutPromise])

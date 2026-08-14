@@ -141,9 +141,10 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
               ? `data-api-key="${envAdminKey}"`
               : ''
           if (injectAttrs) {
+            /** 兼容两种写法：带 data-server 的完整形态 + 相对路径 /sdk.js 简写形态 */
             html = html.replace(
-              /(<script\s+src="[^"]*sdk\.js"\s+data-server="[^"]*")/,
-              `$1 ${injectAttrs}`,
+              /(<script\s+src="[^"]*sdk\.js"[^>]*?)(\s*\/?>)/,
+              `$1 ${injectAttrs}$2`,
             )
           }
         }

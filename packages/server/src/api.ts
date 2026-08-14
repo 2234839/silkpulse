@@ -12,14 +12,35 @@ import { sendSnapshot } from './snapshot-text.js'
 import { generateFeatureDetectScript } from '@silkpulse/feature-detect'
 import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
 import { renderSkillPrompt } from '@silkpulse/shared'
+import { performance } from 'node:perf_hooks'
+import { fanoutStats } from './ws-relay.js'
 
 /**
  * POST body 最大字节数
  *
  * exec 诊断代码实际几 KB，2MB 上限给 AI 生成脚本留充足余量。
- * 超限直接 413 终止读取，防止超大/恶意 POST 撑爆 server 内存。
+ * 超限直接 413 终止读取，防止超大/POST 撑爆 server 内存。
  */
 const MAX_BODY = 2 * 1024 * 1024
+
+/**
+ * 事件循环利用率采样器（增量式单例）
+ *
+ * eventLoopUtilization 直接测事件循环空闲/活跃时间占比，与 timer 精度无关
+ * （monitorEventLoopDelay 在部分容器/内核上 idle 也报 ≥resolution，不可信）。
+ * 每次调用返回自上次调用以来的利用率 0~1，天然窗口化、无累计污染。
+ */
+let _eluPrev: ReturnType<typeof performance.eventLoopUtilization> | null = null
+function loopUtilization(): number {
+  const cur = performance.eventLoopUtilization()
+  if (!_eluPrev) {
+    _eluPrev = cur
+    return 0
+  }
+  const u = performance.eventLoopUtilization(cur, _eluPrev)
+  _eluPrev = cur
+  return u.utilization
+}
 
 /**
  * 读取 POST body，带大小上限 + 错误/中断保护
@@ -98,6 +119,22 @@ export async function handleApiRoute(
   /** 当前请求的鉴权上下文 */
   authCtx: AuthContext = { role: 'admin' },
 ): Promise<boolean> {
+  /** /api/health —— 压测/监控探针（无需鉴权：只暴露进程级指标，无业务数据） */
+  if (req.url?.split('?')[0] === '/api/health') {
+    const mu = process.memoryUsage()
+    sendJson(res, {
+      ok: true,
+      rssMB: +(mu.rss / 1048576).toFixed(1),
+      heapUsedMB: +(mu.heapUsed / 1048576).toFixed(1),
+      eventLoopUtilPct: +(loopUtilization() * 100).toFixed(1),
+      fanoutSent: fanoutStats.sent,
+      fanoutSkippedClosed: fanoutStats.skippedClosed,
+      fanoutSkippedProject: fanoutStats.skippedProject,
+      fanoutBackpressureClosed: fanoutStats.backpressureClosed,
+      uptimeSec: Math.round(process.uptime()),
+    })
+    return true
+  }
   const url = new URL(req.url ?? '/', 'http://localhost')
   const pathname = url.pathname
   if (!pathname.startsWith('/api/')) return false

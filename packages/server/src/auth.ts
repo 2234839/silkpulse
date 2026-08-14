@@ -88,50 +88,6 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
-// ─── 限流器（滑动窗口） ────────────────────────────────────
-
-interface RateLimitEntry {
-  count: number
-  windowStart: number
-}
-
-/** 简单滑动窗口限流（IP 级，防暴力枚举密钥） */
-class RateLimiter {
-  private entries = new Map<string, RateLimitEntry>()
-  private readonly maxRequests: number
-  private readonly windowMs: number
-
-  constructor(maxRequests = 20, windowMs = 60_000) {
-    this.maxRequests = maxRequests
-    this.windowMs = windowMs
-  }
-
-  /**
-   * 检查是否超出限制
-   * @returns true=允许, false=拒绝
-   */
-  check(key: string): boolean {
-    const now = Date.now()
-    const entry = this.entries.get(key)
-    if (!entry || now - entry.windowStart > this.windowMs) {
-      this.entries.set(key, { count: 1, windowStart: now })
-      return true
-    }
-    entry.count++
-    return entry.count <= this.maxRequests
-  }
-
-  /** 清理过期条目（防止内存泄漏） */
-  cleanup(): void {
-    const now = Date.now()
-    for (const [key, entry] of this.entries) {
-      if (now - entry.windowStart > this.windowMs) {
-        this.entries.delete(key)
-      }
-    }
-  }
-}
-
 // ─── 项目存储（JSON 文件持久化） ──────────────────────────
 
 /**
@@ -326,16 +282,8 @@ function extractQueryParam(url: string, key: string): string | undefined {
   }
 }
 
-/** 获取客户端真实 IP（穿透代理） */
-export function getClientIp(req: IncomingMessage): string {
-  const forwarded = req.headers['x-forwarded-for']
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim()
-  }
-  return req.socket.remoteAddress ?? 'unknown'
-}
-
 /**
+
  * AuthManager —— 鉴权核心管理器
  *
  * 统一管理超管密钥 + 项目密钥的验证逻辑，
@@ -346,10 +294,6 @@ export class AuthManager {
   private adminKey: string | undefined
   /** 项目存储 */
   readonly projects: ProjectStore
-  /** 限流器（按 IP） */
-  private rateLimiter = new RateLimiter(30, 60_000)
-  /** 限流清理定时器 */
-  private cleanupTimer: ReturnType<typeof setInterval>
 
   constructor(projectStore: ProjectStore) {
     this.adminKey = process.env.SILKPULSE_ADMIN_KEY
@@ -357,10 +301,6 @@ export class AuthManager {
 
     /** Playground 游客模式：初始化时创建/确保存在一个真实的公开项目 */
     this.ensurePlaygroundProject()
-
-    // 每 5 分钟清理过期限流条目
-    this.cleanupTimer = setInterval(() => this.rateLimiter.cleanup(), 5 * 60_000)
-    this.cleanupTimer.unref?.()
   }
 
   /** 是否启用了鉴权（配置了超管密钥或至少一个项目） */
@@ -434,15 +374,9 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 尝试超管密钥（超管不受限流影响）
+    // 尝试超管密钥
     if (this.adminKey && safeEqual(token, this.adminKey)) {
       return { role: 'admin' }
-    }
-
-    // 限流检查（仅对非超管请求）
-    const ip = getClientIp(req)
-    if (!this.rateLimiter.check(ip)) {
-      return { role: 'anonymous' }
     }
 
     // 尝试项目密钥（包括 Playground 项目）
@@ -480,10 +414,8 @@ export class AuthManager {
     }
 
     // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
-    // 仍保留 IP 限流防恶意连接
+    // 连接数天然受 server 容量约束（WS 每连接有内存开销，超载时背压机制兜底）
     if (wsPath === '/ws/device') {
-      const ip = getClientIp(req)
-      if (!this.rateLimiter.check(ip)) return { role: 'anonymous' }
       /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
       if (projectId) {
         /** 验证 projectId 是否存在且启用 */

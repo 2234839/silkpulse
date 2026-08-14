@@ -285,9 +285,12 @@
       console.log('XHR(json) 发起: /api/devices')
       const xhr = new XMLHttpRequest()
       xhr.open('GET', '/api/devices')
+      /** 鉴权部署下 API 需带密钥（与 SDK 注入的 data-api-key 一致） */
+      const sdkKey = document.querySelector('script[src*="sdk.js"]')?.getAttribute('data-api-key')
+      if (sdkKey) xhr.setRequestHeader('Authorization', `Bearer ${sdkKey}`)
       xhr.responseType = 'json'
       xhr.onload = () => {
-        const count = Array.isArray(xhr.response) ? xhr.response.length : 0
+        const count = Array.isArray(xhr.response) ? xhr.response.length : (xhr.response?.devices?.length ?? 0)
         console.log('XHR(json) 完成:', xhr.status, '设备数', count)
         show(`XHR(json) 完成，状态码 ${xhr.status}，设备数 ${count}`)
       }
