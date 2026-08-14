@@ -15,7 +15,9 @@
  * 7. Diff 对比
  */
 import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useResizable } from '../composables/useResizable'
+import { diffLines, diffText, type TextDiffSegment } from '@silkpulse/renderer'
 import ObjectInspector from './ObjectInspector.vue'
 
 /** 工具页左右分栏宽度可拖拽 */
@@ -38,11 +40,184 @@ const tools = [
   { id: 'diff', icon: '📋', label: 'Diff' },
 ] as const
 
-const activeTool = ref<typeof tools[number]['id']>('json')
+const route = useRoute()
+const router = useRouter()
+
+/** 当前激活的工具 —— 初始值从 URL ?tool= 读取，支持复制链接直达 */
+const activeTool = ref<typeof tools[number]['id']>(
+  tools.some((t) => t.id === route.query.tool) ? (route.query.tool as typeof tools[number]['id']) : 'json',
+)
+
+/** URL → activeTool：外部导航（前进/后退/粘贴链接）时同步 */
+watch(() => route.query.tool, (val) => {
+  if (typeof val === 'string' && tools.some((t) => t.id === val)) {
+    activeTool.value = val as typeof tools[number]['id']
+  } else if (!val) {
+    activeTool.value = 'json'
+  }
+})
+
+/** activeTool → URL：点击切换时用 replace 不污染历史栈 */
+watch(activeTool, (val) => {
+  if (route.query.tool !== val) {
+    router.replace({ query: { ...route.query, tool: val } })
+  }
+})
 
 /* ════════ 1. JSON 可视化 + JQ ════════ */
 const jsonInput = ref('')
 const jsonJqFilter = ref('')
+
+/** 解析模式：JSON（标准）/ JSONC（带注释+尾逗号）/ JSON5（更宽松） */
+const jsonParseMode = ref<'json' | 'jsonc' | 'json5'>('json')
+
+/**
+ * 去除 JSONC 注释（不破坏字符串内的内容）
+ *
+ * 遍历每个字符，跟踪是否在字符串内部（及转义状态），
+ * 遇到字符串外的单行或多行注释标记时跳过。
+ */
+function stripComments(text: string): string {
+  let result = ''
+  let i = 0
+  /** 是否在字符串内部 */
+  let inString = false
+  /** 字符串的引号类型（双引号或单引号） */
+  let quoteChar = ''
+
+  while (i < text.length) {
+    const ch = text[i]
+    const next = text[i + 1]
+
+    /** 转义字符：跳过下一位 */
+    if (ch === '\\' && inString) {
+      result += ch + (next ?? '')
+      i += 2
+      continue
+    }
+
+    /** 进入/退出字符串 */
+    if ((ch === '"' || ch === "'") && !inString) {
+      inString = true
+      quoteChar = ch
+      result += ch
+      i++
+      continue
+    }
+    if (ch === quoteChar && inString) {
+      inString = false
+      quoteChar = ''
+      result += ch
+      i++
+      continue
+    }
+
+    if (!inString) {
+      /** 单行注释 // */
+      if (ch === '/' && next === '/') {
+        /** 跳到行尾 */
+        while (i < text.length && text[i] !== '\n') i++
+        continue
+      }
+      /** 多行注释 /* */
+      if (ch === '/' && next === '*') {
+        i += 2
+        while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
+        i += 2
+        continue
+      }
+    }
+
+    result += ch
+    i++
+  }
+  return result
+}
+
+/**
+ * 去除尾逗号（},] 或 },} 前面多余的逗号）
+ *
+ * 在 stripComments 之后执行，此时注释已清除。
+ */
+function stripTrailingCommas(text: string): string {
+  return text.replace(/,\s*([\]}])/g, '$1')
+}
+
+/**
+ * JSON5 → 标准 JSON 的预处理
+ *
+ * 处理 JSON5 的核心扩展语法：
+ * - 单引号字符串 → 双引号
+ * - 无引号的对象 key → 加双引号
+ * - 十六进制数字 (0x1F) → 十进制
+ * - 前导/尾随小数点 (.5 → 0.5, 5. → 5.0)
+ * - + 号开头的正数 (+42 → 42)
+ * - Infinity / -Infinity / NaN
+ */
+function json5ToStandardJson(text: string): string {
+  /** 先去注释和尾逗号 */
+  let s = stripTrailingCommas(stripComments(text))
+
+  /** 单引号字符串 → 双引号（逐字符遍历，正确处理转义） */
+  s = s.replace(/(['"])((?:\\.|(?!\1).)*)\1/g, (_, q, content) => {
+    if (q === '"') return _
+    /** 单引号：反转义单引号，转义双引号 */
+    const unescaped = content.replace(/\\'/g, "'").replace(/\\"/g, '"')
+    /** 转义内嵌双引号 */
+    const reEscaped = unescaped.replace(/"/g, '\\"')
+    return '"' + reEscaped + '"'
+  })
+
+  /** 无引号的 key：{ key: → { "key": 或 , key: → , "key": */
+  s = s.replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')
+
+  /** 十六进制数字 → 十进制 */
+  s = s.replace(/(^|[^\w.])-?(0x[0-9a-fA-F]+)/g, (_match, pre, hex) => {
+    return pre + String(parseInt(hex, 16))
+  })
+
+  /** 前导小数点 .5 → 0.5 */
+  s = s.replace(/(^|[^\w.])\.(\d)/g, '$10.$2')
+
+  /** + 开头正数 → 去掉 + */
+  s = s.replace(/([:{,\[\s])\+(\d)/g, '$1$2')
+
+  /** Infinity / -Infinity / NaN → null（JSON 不支持） */
+  s = s.replace(/(^|[^\w])Infinity/g, '$1null').replace(/(^|[^\w])-Infinity/g, '$1null')
+  s = s.replace(/(^|[^\w])NaN/g, '$1null')
+
+  return s
+}
+
+/** 根据当前模式解析 JSON */
+function parseByMode(text: string): unknown {
+  switch (jsonParseMode.value) {
+    case 'json':
+      return JSON.parse(text)
+    case 'jsonc':
+      return JSON.parse(stripTrailingCommas(stripComments(text)))
+    case 'json5':
+      return JSON.parse(json5ToStandardJson(text))
+  }
+}
+
+/** 当前模式下的输入框 placeholder */
+const jsonPlaceholder = computed(() => {
+  if (jsonParseMode.value === 'jsonc') {
+    return '// 配置文件\n{\n  "name": "silkpulse",\n  "debug": true,\n}'
+  }
+  if (jsonParseMode.value === 'json5') {
+    return "// JSON5\n{\n  name: 'silkpulse',\n  items: [1, 2, 3,]\n}"
+  }
+  return '{"name":"silkpulse","items":[{"id":1,"msg":"hello"}]}'
+})
+
+/** 当前模式的提示文案 */
+const jsonModeHint = computed(() => {
+  if (jsonParseMode.value === 'jsonc') return 'JSONC：支持单行/多行注释、尾逗号'
+  if (jsonParseMode.value === 'json5') return 'JSON5：支持注释、单引号、无引号 key、尾逗号、十六进制'
+  return '语法：.key 取字段，.arr[] 遍历数组，.a.b 嵌套路径'
+})
 
 /** 应用 JQ 风格路径表达式 */
 function applyJq(data: unknown, expr: string): unknown {
@@ -68,7 +243,7 @@ function applyJq(data: unknown, expr: string): unknown {
 const jsonParsed = computed(() => {
   if (!jsonInput.value.trim()) return undefined
   try {
-    let parsed: unknown = JSON.parse(jsonInput.value)
+    let parsed: unknown = parseByMode(jsonInput.value)
     const jq = jsonJqFilter.value.trim()
     if (jq && jq.startsWith('.')) {
       parsed = applyJq(parsed, jq)
@@ -327,8 +502,34 @@ const regexResult = computed(() => {
 const diffA = ref('')
 const diffB = ref('')
 const diffJsonMode = ref(true)
+/** 视图模式：inline=上下合并显示，split=左右并排 */
+const diffViewMode = ref<'inline' | 'split'>('inline')
+/** 字符级高亮：对变化的行进一步标出具体改了哪些字符 */
+const diffCharLevel = ref(true)
+/** 折叠连续未变化行（只保留首尾各 2 行上下文） */
+const diffCollapseSame = ref(true)
 
-const diffResult = computed(() => {
+/** 一行 diff 数据（行级） */
+interface DiffLine {
+  /** 行类型：equal=add=del */
+  type: 'equal' | 'add' | 'del'
+  /** 行文本（不含换行符） */
+  text: string
+  /** 旧文件行号（1-based，del/equal 有值，add 为 null） */
+  oldNum: number | null
+  /** 新文件行号（1-based，add/equal 有值，del 为 null） */
+  newNum: number | null
+  /** 字符级 inline diff（仅 add/del 行且启用字符级时有值） */
+  charDiff?: TextDiffSegment[]
+}
+
+/**
+ * 计算 diff 结果
+ *
+ * 算法：先用 diffLines 做行级 LCS（解决行错位问题），
+ * 再对相邻的 del+add 行对做字符级 diffText（标出具体改了哪些字符）。
+ */
+const diffResult = computed<DiffLine[]>(() => {
   let a = diffA.value
   let b = diffB.value
   if (!a && !b) return []
@@ -336,22 +537,150 @@ const diffResult = computed(() => {
     try { a = JSON.stringify(JSON.parse(a), null, 2) } catch { /* keep raw */ }
     try { b = JSON.stringify(JSON.parse(b), null, 2) } catch { /* keep raw */ }
   }
-  const linesA = a.split('\n')
-  const linesB = b.split('\n')
-  const result: { type: 'same' | 'add' | 'del'; text: string }[] = []
-  const minLen = Math.min(linesA.length, linesB.length)
-  for (let i = 0; i < minLen; i++) {
-    if (linesA[i] !== linesB[i]) {
-      result.push({ type: 'del', text: '- ' + linesA[i] })
-      result.push({ type: 'add', text: '+ ' + linesB[i] })
-    } else {
-      result.push({ type: 'same', text: '  ' + linesA[i] })
+
+  /** 行级 LCS diff */
+  const lineSegs = diffLines(a, b)
+
+  /** 展开为逐行 DiffLine，分配行号 */
+  const lines: DiffLine[] = []
+  let oldNum = 0
+  let newNum = 0
+
+  for (const seg of lineSegs) {
+    /** 按 \n 切分，去掉末尾空串（最后一段可能没有换行符） */
+    const segLines = seg.text.split('\n')
+    /** split('\n') 在末尾有换行时会产生空串，去掉它 */
+    if (seg.text.endsWith('\n')) segLines.pop()
+
+    for (const lineText of segLines) {
+      switch (seg.op) {
+        case 'equal':
+          oldNum++
+          newNum++
+          lines.push({ type: 'equal', text: lineText, oldNum, newNum })
+          break
+        case 'removed':
+          oldNum++
+          lines.push({ type: 'del', text: lineText, oldNum, newNum: null })
+          break
+        case 'added':
+          newNum++
+          lines.push({ type: 'add', text: lineText, oldNum: null, newNum })
+          break
+      }
     }
   }
-  for (let i = minLen; i < linesA.length; i++) result.push({ type: 'del', text: '- ' + linesA[i] })
-  for (let i = minLen; i < linesB.length; i++) result.push({ type: 'add', text: '+ ' + linesB[i] })
-  return result
+
+  /**
+   * 字符级 diff：对配对的 del+add 行做 inline char diff。
+   *
+   * 配对策略：找到所有连续的「del 块 + add 块」（不论顺序），
+   * 按位置逐对做 diffText，让用户在同一行内看到具体改了哪些字符。
+   * del 和 add 的相对顺序由 LCS 回溯决定，可能 del 在前也可能 add 在前。
+   */
+  if (diffCharLevel.value) {
+    let i = 0
+    while (i < lines.length) {
+      /** 跳过 equal 行 */
+      if (lines[i].type === 'equal') {
+        i++
+        continue
+      }
+      /** 收集连续的非 equal 行（del 和 add 混合） */
+      const blockStart = i
+      while (i < lines.length && lines[i].type !== 'equal') i++
+      const block = lines.slice(blockStart, i)
+
+      /** 从块中分离 del 和 add */
+      const dels = block.filter((l) => l.type === 'del')
+      const adds = block.filter((l) => l.type === 'add')
+
+      /** 按位置配对做字符级 diff */
+      const pairs = Math.min(dels.length, adds.length)
+      for (let p = 0; p < pairs; p++) {
+        const charDiff = diffText(dels[p].text, adds[p].text)
+        dels[p].charDiff = charDiff
+        adds[p].charDiff = charDiff
+      }
+    }
+  }
+
+  return lines
 })
+
+/** diff 统计信息 */
+const diffStats = computed(() => {
+  const lines = diffResult.value
+  let added = 0
+  let removed = 0
+  let unchanged = 0
+  for (const line of lines) {
+    if (line.type === 'add') added++
+    else if (line.type === 'del') removed++
+    else unchanged++
+  }
+  return { added, removed, unchanged, total: lines.length }
+})
+
+/**
+ * 折叠后的 diff 行（带折叠标记）
+ *
+ * 连续超过 4 行的 equal 段只保留首尾各 2 行，中间替换为一个折叠指示器。
+ */
+const diffCollapsed = computed(() => {
+  const lines = diffResult.value
+  if (!diffCollapseSame.value) {
+    return { lines: lines.map((l) => ({ kind: 'line' as const, line: l })), hiddenCount: 0 }
+  }
+
+  const CONTEXT = 2
+  const result: Array<
+    | { kind: 'line'; line: DiffLine }
+    | { kind: 'collapse'; count: number }
+  > = []
+  let hiddenTotal = 0
+
+  let i = 0
+  while (i < lines.length) {
+    /** 检测连续 equal 段 */
+    if (lines[i].type === 'equal') {
+      let j = i
+      while (j < lines.length && lines[j].type === 'equal') j++
+      const equalLen = j - i
+      if (equalLen > CONTEXT * 2 + 1) {
+        /** 保留前 CONTEXT 行 */
+        for (let k = i; k < i + CONTEXT; k++) result.push({ kind: 'line', line: lines[k] })
+        const hiddenCount = equalLen - CONTEXT * 2
+        result.push({ kind: 'collapse', count: hiddenCount })
+        hiddenTotal += hiddenCount
+        /** 保留后 CONTEXT 行 */
+        for (let k = j - CONTEXT; k < j; k++) result.push({ kind: 'line', line: lines[k] })
+      } else {
+        for (let k = i; k < j; k++) result.push({ kind: 'line', line: lines[k] })
+      }
+      i = j
+    } else {
+      result.push({ kind: 'line', line: lines[i] })
+      i++
+    }
+  }
+
+  return { lines: result, hiddenCount: hiddenTotal }
+})
+
+/**
+ * 提取 charDiff 中指定 op 的文本段（用于渲染）
+ *
+ * del 行只渲染 removed + equal 段（红底），
+ * add 行只渲染 added + equal 段（绿底）。
+ */
+function charDiffParts(line: DiffLine): TextDiffSegment[] {
+  if (!line.charDiff) return [{ op: 'equal', text: line.text }]
+  const wantRemoved = line.type === 'del'
+  return line.charDiff.filter((seg) =>
+    seg.op === 'equal' || (wantRemoved ? seg.op === 'removed' : seg.op === 'added')
+  )
+}
 </script>
 
 <template>
@@ -382,13 +711,30 @@ const diffResult = computed(() => {
       <!-- ════════ JSON 可视化 ════════ -->
       <div v-if="activeTool === 'json'" class="flex h-full max-h-[calc(100vh-160px)]">
         <div class="flex flex-col gap-2 min-w-0 flex-shrink-0" :style="{ width: toolLeftWidth + 'px' }">
-          <label class="text-xs text-muted">输入 JSON</label>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-muted">输入</label>
+            <div class="ml-auto flex items-center gap-1">
+              <button
+                v-for="m in [
+                  { id: 'json', label: 'JSON' },
+                  { id: 'jsonc', label: 'JSONC' },
+                  { id: 'json5', label: 'JSON5' },
+                ]"
+                :key="m.id"
+                @click="jsonParseMode = m.id as 'json' | 'jsonc' | 'json5'"
+                class="px-2 py-0.5 text-xs rounded border transition-colors"
+                :class="jsonParseMode === m.id
+                  ? 'border-blue-500 text-blue-500 bg-blue-500/10'
+                  : 'border-base text-muted hover:text-primary'"
+              >{{ m.label }}</button>
+            </div>
+          </div>
           <textarea
             v-model="jsonInput"
             rows="20"
             spellcheck="false"
             class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
-            placeholder='{"name":"silkpulse","items":[{"id":1,"msg":"hello"}]}'
+            :placeholder="jsonPlaceholder"
           ></textarea>
           <div class="flex gap-2 items-center">
             <input
@@ -399,7 +745,7 @@ const diffResult = computed(() => {
               placeholder="JQ 过滤（如 .items[].msg）"
             />
           </div>
-          <p class="text-xs text-faint">语法：.key 取字段，.arr[] 遍历数组，.a.b 嵌套路径</p>
+          <p class="text-xs text-faint">{{ jsonModeHint }}</p>
         </div>
         <!-- 拖拽手柄 -->
         <div
@@ -647,50 +993,182 @@ const diffResult = computed(() => {
       </div>
 
       <!-- ════════ Diff 对比 ════════ -->
-      <div v-else-if="activeTool === 'diff'" class="flex h-full max-h-[calc(100vh-160px)]">
-        <div class="flex flex-col gap-2 min-w-0 flex-shrink-0" :style="{ width: toolLeftWidth + 'px' }">
-          <label class="text-xs text-muted">文本 A（期望）</label>
-          <textarea
-            v-model="diffA"
-            rows="12"
-            spellcheck="false"
-            class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
-          ></textarea>
-          <label class="text-xs text-muted mt-1">文本 B（实际）</label>
-          <textarea
-            v-model="diffB"
-            rows="12"
-            spellcheck="false"
-            class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
-          ></textarea>
-          <div class="flex gap-2 items-center">
-            <label class="text-xs text-muted flex items-center gap-1">
-              <input type="checkbox" v-model="diffJsonMode" /> JSON 格式化
-            </label>
+      <div v-else-if="activeTool === 'diff'" class="flex flex-col h-full max-h-[calc(100vh-120px)]">
+        <!-- 输入区 -->
+        <div class="flex gap-2 flex-shrink-0 mb-2">
+          <div class="flex flex-col gap-1 flex-1 min-w-0">
+            <label class="text-xs text-muted">文本 A（期望）</label>
+            <textarea
+              v-model="diffA"
+              rows="6"
+              spellcheck="false"
+              class="w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
+            ></textarea>
+          </div>
+          <div class="flex flex-col gap-1 flex-1 min-w-0">
+            <label class="text-xs text-muted">文本 B（实际）</label>
+            <textarea
+              v-model="diffB"
+              rows="6"
+              spellcheck="false"
+              class="w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
+            ></textarea>
           </div>
         </div>
-        <!-- 拖拽手柄 -->
-        <div
-          class="w-1 cursor-col-resize bg-base hover:bg-blue-400/40 active:bg-blue-500 transition-colors flex-shrink-0 mx-1"
-          @mousedown="onToolLeftResize"
-        />
-        <div class="flex-1 overflow-auto min-w-0">
-          <label class="text-xs text-muted block mb-2">
-            差异
-            <span v-if="diffResult.length" class="text-amber-500">（{{ diffResult.filter(d => d.type !== 'same').length }} 行差异）</span>
+        <!-- 工具栏 -->
+        <div class="flex items-center gap-3 px-1 pb-2 border-b border-base flex-shrink-0 flex-wrap">
+          <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" v-model="diffJsonMode" class="cursor-pointer" /> JSON 格式化
           </label>
-          <div class="bg-surface border border-base rounded p-3 font-mono text-xs space-y-0">
-            <div
-              v-for="(line, i) in diffResult"
-              :key="i"
-              class="px-1 py-0.5"
-              :class="{
-                'text-green-500 bg-green-500/10': line.type === 'add',
-                'text-red-500 bg-red-500/10': line.type === 'del',
-              }"
-            >{{ line.text }}</div>
-            <div v-if="diffResult.length === 0 && diffA && diffB" class="text-green-500 text-center py-4">✅ 完全一致</div>
-            <div v-if="diffResult.length === 0 && (!diffA || !diffB)" class="text-faint text-center py-4">输入两段文本后自动对比...</div>
+          <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" v-model="diffCharLevel" class="cursor-pointer" /> 字符级高亮
+          </label>
+          <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" v-model="diffCollapseSame" class="cursor-pointer" /> 折叠相同行
+          </label>
+          <div class="flex rounded border border-base overflow-hidden">
+            <button
+              @click="diffViewMode = 'inline'"
+              class="px-2 py-0.5 text-xs"
+              :class="diffViewMode === 'inline' ? 'bg-blue-500 text-white' : 'bg-surface text-muted hover:text-primary'"
+            >合并</button>
+            <button
+              @click="diffViewMode = 'split'"
+              class="px-2 py-0.5 text-xs"
+              :class="diffViewMode === 'split' ? 'bg-blue-500 text-white' : 'bg-surface text-muted hover:text-primary'"
+            >并排</button>
+          </div>
+          <div v-if="diffStats.total" class="ml-auto flex items-center gap-3 text-xs">
+            <span class="text-green-500">+{{ diffStats.added }}</span>
+            <span class="text-red-500">−{{ diffStats.removed }}</span>
+            <span v-if="diffCollapsed.hiddenCount" class="text-faint">省略 {{ diffCollapsed.hiddenCount }} 行</span>
+          </div>
+        </div>
+        <!-- 结果区 -->
+        <div class="flex-1 overflow-auto min-h-0">
+          <div v-if="diffResult.length === 0 && diffA && diffB" class="text-green-500 text-center py-4">✅ 完全一致</div>
+          <div v-else-if="diffResult.length === 0" class="text-faint text-center py-4">输入两段文本后自动对比...</div>
+
+          <!-- ════ Inline 视图（VS Code 风格：删除行带删除线，字符级双层高亮） ════ -->
+          <div v-else-if="diffViewMode === 'inline'" class="font-mono text-xs">
+            <template v-for="(item, i) in diffCollapsed.lines" :key="i">
+              <!-- 折叠指示器 -->
+              <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-y border-base cursor-pointer select-none">
+                ⋯ {{ item.count }} 行未变化 ⋯
+              </div>
+              <!-- diff 行 -->
+              <div
+                v-else
+                class="flex items-stretch"
+                :class="{
+                  'diff-line-add': item.line.type === 'add',
+                  'diff-line-del': item.line.type === 'del',
+                }"
+              >
+                <!-- 行号区（gutter 配色） -->
+                <span
+                  class="inline-block w-12 text-right pr-2 select-none flex-shrink-0 text-faint"
+                  :class="{
+                    'diff-gutter-add': item.line.type === 'add',
+                    'diff-gutter-del': item.line.type === 'del',
+                  }"
+                >{{ item.line.oldNum ?? item.line.newNum ?? '' }}</span>
+                <!-- 变更符号 -->
+                <span
+                  class="inline-block w-5 text-center select-none flex-shrink-0 font-bold"
+                  :class="{
+                    'text-green-500 diff-gutter-add': item.line.type === 'add',
+                    'text-red-500 diff-gutter-del': item.line.type === 'del',
+                  }"
+                >{{ item.line.type === 'add' ? '+' : item.line.type === 'del' ? '−' : ' ' }}</span>
+                <!-- 内容区 -->
+                <span class="flex-1 whitespace-pre-wrap break-all py-px" :class="{ 'line-through opacity-70': item.line.type === 'del' }">
+                  <!-- 有 charDiff：字符级高亮（浓背景叠加在行背景上） -->
+                  <template v-if="item.line.charDiff">
+                    <span
+                      v-for="(part, j) in charDiffParts(item.line)"
+                      :key="j"
+                      :class="{
+                        'diff-char-del': part.op === 'removed',
+                        'diff-char-add': part.op === 'added',
+                      }"
+                    >{{ part.text }}</span>
+                  </template>
+                  <!-- 无 charDiff：纯文本 -->
+                  <template v-else>{{ item.line.text }}</template>
+                </span>
+              </div>
+            </template>
+          </div>
+
+          <!-- ════ Split 视图（VS Code 风格：左右独立渲染，字符级高亮，空白行对齐） ════ -->
+          <div v-else class="flex font-mono text-xs">
+            <!-- 左侧（旧文本） -->
+            <div class="flex-1 min-w-0 border-r border-base">
+              <template v-for="(item, i) in diffCollapsed.lines" :key="'l' + i">
+                <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none">
+                  ⋯ {{ item.count }} 行 ⋯
+                </div>
+                <!-- del 行或 equal 行 -->
+                <div
+                  v-else-if="item.line.type !== 'add'"
+                  class="flex items-stretch"
+                  :class="{ 'diff-line-del': item.line.type === 'del' }"
+                >
+                  <span
+                    class="inline-block w-12 text-right pr-2 select-none flex-shrink-0 text-faint"
+                    :class="{ 'diff-gutter-del': item.line.type === 'del' }"
+                  >{{ item.line.oldNum ?? '' }}</span>
+                  <span class="flex-1 whitespace-pre-wrap break-all py-px" :class="{ 'line-through opacity-70': item.line.type === 'del' }">
+                    <template v-if="item.line.charDiff && item.line.type === 'del'">
+                      <span
+                        v-for="(part, j) in charDiffParts(item.line)"
+                        :key="j"
+                        :class="{ 'diff-char-del': part.op === 'removed' }"
+                      >{{ part.text }}</span>
+                    </template>
+                    <template v-else>{{ item.line.text }}</template>
+                  </span>
+                </div>
+                <!-- add 行在左侧渲染为空白占位 -->
+                <div v-else class="flex items-stretch diff-empty">
+                  <span class="inline-block w-12 pr-2 select-none flex-shrink-0">&nbsp;</span>
+                </div>
+              </template>
+            </div>
+            <!-- 右侧（新文本） -->
+            <div class="flex-1 min-w-0">
+              <template v-for="(item, i) in diffCollapsed.lines" :key="'r' + i">
+                <div v-if="item.kind === 'collapse'" class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none">
+                  ⋯ {{ item.count }} 行 ⋯
+                </div>
+                <!-- add 行或 equal 行 -->
+                <div
+                  v-else-if="item.line.type !== 'del'"
+                  class="flex items-stretch"
+                  :class="{ 'diff-line-add': item.line.type === 'add' }"
+                >
+                  <span
+                    class="inline-block w-12 text-right pr-2 select-none flex-shrink-0 text-faint"
+                    :class="{ 'diff-gutter-add': item.line.type === 'add' }"
+                  >{{ item.line.newNum ?? '' }}</span>
+                  <span class="flex-1 whitespace-pre-wrap break-all py-px">
+                    <template v-if="item.line.charDiff && item.line.type === 'add'">
+                      <span
+                        v-for="(part, j) in charDiffParts(item.line)"
+                        :key="j"
+                        :class="{ 'diff-char-add': part.op === 'added' }"
+                      >{{ part.text }}</span>
+                    </template>
+                    <template v-else>{{ item.line.text }}</template>
+                  </span>
+                </div>
+                <!-- del 行在右侧渲染为空白占位 -->
+                <div v-else class="flex items-stretch diff-empty">
+                  <span class="inline-block w-12 pr-2 select-none flex-shrink-0">&nbsp;</span>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
       </div>
