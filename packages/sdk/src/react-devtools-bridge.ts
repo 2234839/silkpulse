@@ -422,6 +422,22 @@ async function reactivateBackend(): Promise<void> {
 }
 
 /**
+ * Agent DevTools 能力用：确保 backend 已激活（幂等）
+ *
+ * 无控制台 frontend 时也可激活——本地直调 rendererInterface/agent 不依赖 bridge 对端，
+ * bridge 发出的消息经 WS 透传无人接收，无副作用。
+ */
+export async function ensureReactBackendActive(): Promise<void> {
+  if (backendActivated && realHook) return
+  await activateBackend()
+}
+
+/** Agent DevTools 能力用：拿激活后的真 hook（含 rendererInterfaces / reactDevtoolsAgent） */
+export function getActiveReactHook(): RealHook | null {
+  return realHook
+}
+
+/**
  * 初始化 React DevTools bridge（SDK 顶层同步调用）
  *
  * 同步装 hook stub（react-dom 加载前），异步注册 server 消息处理。

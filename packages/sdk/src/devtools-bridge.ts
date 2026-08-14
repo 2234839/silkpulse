@@ -31,6 +31,20 @@ const IFRAME_MESSAGING_EVENT_KEY = '__devtools-kit-iframe-messaging-event-key__'
 let bridgeInitialized = false
 
 /**
+ * Agent DevTools 能力用：拿 devtools-core 的 RPC 函数集（本地直调，不走网络）
+ *
+ * getInspectorTree / getInspectorState / editInspectorState 等读写方法
+ * 与 createRpcServer 注册的实现是同一份。页面无 Vue 应用时返回 null。
+ */
+export function getVueDevToolsFunctions(): Record<string, (...args: unknown[]) => Promise<unknown>> | null {
+  const target = window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[]; devtools?: unknown } }
+  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__
+  /** 无 app 注册 = 页面没有 Vue 应用（或尚未创建） */
+  if (!hook?.apps?.length) return null
+  return devtoolsFunctions as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+}
+
+/**
  * 初始化 Vue DevTools backend
  *
  * 同步调用。必须在 Vue app 创建前执行（SDK 脚本是同步 IIFE，注入即执行，

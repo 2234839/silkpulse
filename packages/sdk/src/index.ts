@@ -16,6 +16,7 @@ import { installNetworkCollector, getStoredBody } from './network-collector.js'
 import { installErrorCatcher, getErrorCount, setResourceErrorHandler } from './error-catcher.js'
 import { pushRecentError } from './snapshot.js'
 import { installHelpers, setResultSender, handleExec } from './exec-runner.js'
+import { installDevToolsHelpers } from './devtools-helpers.js'
 import { installStorageWatcher, setStorageWatcherActive } from './storage-watcher.js'
 import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from './dom-watcher.js'
 import { startScreenShare, stopScreenShare } from './screen-capture.js'
@@ -314,8 +315,12 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   /** DOM 变化采集：MutationObserver 监听子树增删/属性/文本变化（Element 面板实时刷新用） */
   installDomWatcher((changes) => send({ type: 'dom-change', changes }))
 
-  /** 2. 安装 exec 辅助函数（必须在 connect 前挂到 window） */
+  /** 2. 安装 exec 辅助函数（必须在 connect 前挂到 window）
+   *
+   * devtools 辅助函数（__silkpulse_devtools_*）独立安装：
+   * 组件树读取 / state 读写（React overrideValueAtPath + Vue editInspectorState） */
   installHelpers()
+  installDevToolsHelpers()
 
   /** 3. 注册 exec 结果回传器 */
   setResultSender((execId, result) => send({ type: 'exec-result', execId, result }))

@@ -80,6 +80,24 @@ exec 的 code 作为 **async 函数体**执行，写 \`return\` 返回结果。
 - \`__silkpulse_screenshot(idx?, opts?)\` — 截图（不传 idx 截全页，传 idx 截指定元素，返回 dataURL）
 - \`__silkpulse_sourcemap(line, col, url?)\` — source map 解析（压缩代码定位源码）
 
+## DevTools 辅助函数（读写组件 state，React/Vue 通吃）
+
+调试框架应用时，优先用这些函数直接查看/修改组件数据（比 DOM 操作更接近问题本质）：
+
+- \`__silkpulse_devtools_available()\` → \`{ react: bool, vue: bool }\` — 探测页面框架
+- \`await __silkpulse_devtools_tree()\` — 组件树（\`{ framework, tree: [{ name, idx?, children }] }\`）
+- \`await __silkpulse_devtools_inspect(idx)\` — 读组件全量数据（props/state/hooks，idx 用 snapshot 或组件树里的）
+- \`await __silkpulse_devtools_set(idx, type, path, value, hookID?)\` — **修改组件数据**（立即生效触发重渲染）
+  - type: \`'state' | 'props' | 'hooks'\`（Vue 没有 hooks，setup 的 ref/reactive 都在 state 里）
+  - path: 目标容器**内部**的属性路径，如 \`['count']\`、\`['user','name']\`；改整个值用 \`[]\`
+  - React hooks 场景：hookID 必传（inspect 结果 hooks 数组的下标），path 是 hook 值内部路径
+  - 例：\`set(idx, 'hooks', [], 42, 0)\` 把第 0 个 hook（如 useState 的计数）设为 42
+
+典型用法：\`inspect\` 拿到 hooks 列表 → 找到目标 hook 序号 → \`set\` 修改 → \`snapshot\` 验证 UI 变化。
+React 读写走页面内 DevTools backend 本地直调（等效 setState）；Vue 直接读写组件实例的响应式对象（setupState/data/props）。
+首次调用会自动激活页面内的 DevTools backend（约 100ms），无需控制台打开。
+Vue 注意：根组件若是 template 定义无 name 会显示 Anonymous（id 仍有效）；树节点带 idx 可直接传给 inspect/set。
+
 ## snapshot 阅读指南
 
 \`\`\`
