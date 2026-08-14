@@ -55,7 +55,7 @@ const emit = defineEmits<{
 
 /** 是否展开（普通 children 或 shadow） */
 function isExpanded(n: ElementNode): boolean {
-  return (n.childCount > 0 && n.expanded) || (!!n.hasShadow && n.shadowExpanded)
+  return (n.childCount > 0 && !!n.expanded) || (!!n.hasShadow && !!n.shadowExpanded)
 }
 
 /** 是否有可展开内容 */

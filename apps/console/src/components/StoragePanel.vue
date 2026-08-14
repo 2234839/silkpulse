@@ -303,7 +303,7 @@ function isStoreExpanded(dbName: string, storeName: string): boolean {
 }
 
 /** IndexedDB 删除单条 record（通过 exec 通道） */
-async function deleteIndexedDBRecord(dbName: string, storeName: string, key: string) {
+async function deleteIndexedDBRecord(_dbName: string, storeName: string, key: string) {
   if (!props.deviceId) return
   const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
     method: 'POST',
@@ -437,7 +437,7 @@ const isNewValueJson = computed(() => {
         >+ 新增</button>
         <button
           v-if="storageType === 'indexeddb'"
-          @click="loadStorage"
+          @click="loadStorage(true)"
           :disabled="storageLoading"
           class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary disabled:opacity-50"
         >{{ storageLoading ? '...' : '刷新' }}</button>

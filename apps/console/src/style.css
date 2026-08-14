@@ -28,6 +28,25 @@
   --cs-red-soft: #fef2f2;     /** red-50 */
   --cs-red-border: #fecaca;   /** red-200 */
   --cs-red-text: #991b1b;     /** red-800 */
+
+  /** ObjectInspector 类型配色（亮色：VS Code Light+ 风格） */
+  --cs-oi-default: #1f2937;     /** 主文字（未匹配类型） */
+  --cs-oi-key: #0550ae;         /** 对象键名（蓝） */
+  --cs-oi-arrow: #6b7280;       /** 展开箭头（灰） */
+  --cs-oi-string: #963800;      /** 字符串（橙） */
+  --cs-oi-number: #05660a;      /** 数字（深绿） */
+  --cs-oi-boolean: #0566d6;     /** 布尔/null/undefined（蓝） */
+  --cs-oi-function: #7c4dff;    /** 函数（紫） */
+  --cs-oi-type: #098a6e;        /** 容器类型 object/array（青绿） */
+  --cs-oi-regexp: #b91c1c;      /** 正则（红） */
+  --cs-oi-error: #b91c1c;       /** 错误（红） */
+  --cs-oi-element: #8b5cf6;     /** DOM/Event（紫） */
+  --cs-oi-hint: #6b7280;        /** 折叠提示文字（灰） */
+  --cs-oi-row-hover: rgba(0, 0, 0, 0.06);   /** 行 hover 背景 */
+  --cs-oi-edit-hover: rgba(0, 0, 0, 0.1);   /** 可编辑叶子 hover 背景 */
+  --cs-oi-children-border: rgba(0, 0, 0, 0.1); /** 子节点竖线 */
+  --cs-oi-edit-border: #098a6e;  /** 编辑框边框 */
+  --cs-oi-edit-bg: #f9fafb;     /** 编辑框背景 */
 }
 
 /** 暗色主题 */
@@ -50,6 +69,25 @@
   --cs-red-soft: #2d1517;
   --cs-red-border: #7f1d1d;
   --cs-red-text: #fca5a5;
+
+  /** ObjectInspector 类型配色（暗色：VS Code Dark+ 风格） */
+  --cs-oi-default: #d4d4d4;
+  --cs-oi-key: #9cdcfe;
+  --cs-oi-arrow: #888;
+  --cs-oi-string: #ce9178;
+  --cs-oi-number: #b5cea8;
+  --cs-oi-boolean: #569cd6;
+  --cs-oi-function: #dcdcaa;
+  --cs-oi-type: #4ec9b0;
+  --cs-oi-regexp: #d16969;
+  --cs-oi-error: #f44747;
+  --cs-oi-element: #d7ba7d;
+  --cs-oi-hint: #666;
+  --cs-oi-row-hover: rgba(127, 127, 127, 0.08);
+  --cs-oi-edit-hover: rgba(127, 127, 127, 0.12);
+  --cs-oi-children-border: rgba(127, 127, 127, 0.12);
+  --cs-oi-edit-border: #4ec9b0;
+  --cs-oi-edit-bg: rgba(0, 0, 0, 0.3);
 }
 
 /** 语义 utility class —— 映射到 CSS 变量，双主题自动切换 */

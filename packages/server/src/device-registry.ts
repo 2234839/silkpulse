@@ -19,8 +19,8 @@ import type {
 
 /** 环形缓冲区大小常量 */
 const MAX_LOGS = 500
-const MAX_NETWORK = 100
-const MAX_ERRORS = 50
+const MAX_NETWORK = 300
+const MAX_ERRORS = 100
 
 /**
  * 环形缓冲区：固定容量，写满后覆盖最旧条目

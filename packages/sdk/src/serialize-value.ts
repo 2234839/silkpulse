@@ -5,33 +5,51 @@
  * 前端拿到 SerializedValue 后递归渲染为可展开/折叠的树。
  *
  * 核心设计：
- * - WeakSet 检测循环引用（祖先链模式：进递归 add，出递归 delete）
- * - 限深 maxDepth=5，超限显示 ...
- * - 每层限 50 个属性/元素（DevTools 也有限制）
+ * - WeakMap 检测循环引用（祖先链模式：进递归 add，出递归 delete）
+ * - 无深度/数量硬限制，用节点计数安全阀防止超大数据爆栈
+ * - 循环引用的对象正常展开，环路径标记 [Circular refId:N]
  * - 特殊类型（Date/RegExp/Error/Map/Set/Element 等）有专属 type + preview
  */
 
 import type { SerializedValue, SerializedProperty } from '@silkpulse/shared'
 
-/** 最大递归深度（防止深层嵌套爆栈和性能问题） */
-const MAX_DEPTH = 5
-/** 每层最多展开的属性/元素数 */
-const MAX_ENTRIES = 50
+/** 节点总数安全阀：超过此值停止递归，防止单次 exec 序列化超大数据爆栈 */
+const MAX_NODES = 50000
+
+/** 序列化上下文（在一次 toSerializedValue 调用中共享） */
+interface SerializeContext {
+  /** 祖先链：当前递归路径上的对象 → refId（用于检测循环引用） */
+  seen: WeakMap<object, number>
+  /** 所有遇到过的对象 → refId（用于分配唯一 id） */
+  refMap: Map<object, number>
+  /** 已创建的节点数（安全阀） */
+  nodeCount: number
+}
 
 /**
  * 主序列化入口
  *
- * @param val 要序列化的值
- * @param depth 当前递归深度
- * @param seen 祖先链 WeakSet（循环引用检测）
- * @param refMap 对象→refId 映射（跨树去重，同一对象第二次出现用 refId 标记）
+ * 循环引用处理：对象在祖先链上出现时标记 [Circular refId:N]，不再递归。
+ * 跨分支重复对象正常展开（数据冗余但保证展示完整性）。
  */
-export function toSerializedValue(
-  val: unknown,
-  depth = 0,
-  seen?: WeakMap<object, number>,
-  refMap?: Map<object, number>,
-): SerializedValue {
+export function toSerializedValue(val: unknown): SerializedValue {
+  const ctx: SerializeContext = {
+    seen: new WeakMap(),
+    refMap: new Map(),
+    nodeCount: 0,
+  }
+  return serialize(val, ctx)
+}
+
+/**
+ * 内部递归实现
+ */
+function serialize(val: unknown, ctx: SerializeContext): SerializedValue {
+  /** 安全阀：节点数超限停止递归 */
+  if (ctx.nodeCount++ > MAX_NODES) {
+    return { type: 'unknown', preview: '…(节点数超限 ' + MAX_NODES + ')' }
+  }
+
   /** 基本类型直接返回 */
   if (val === null) return { type: 'null', preview: 'null', value: 'null' }
   if (val === undefined) return { type: 'undefined', preview: 'undefined', value: 'undefined' }
@@ -55,36 +73,30 @@ export function toSerializedValue(
   /** 到此一定是 object，做循环引用检测 */
   const obj = val as object
 
-  /** 初始化 seen/refMap（仅在最外层创建一次） */
-  if (!seen) seen = new WeakMap()
-  if (!refMap) refMap = new Map()
-
-  /** 循环引用检测：如果这个对象在祖先链上出现过 */
-  const refSeen = seen.get(obj)
-  if (refSeen !== undefined) {
-    return { type: 'object', preview: '[Circular]', refId: refSeen }
+  /** 循环引用检测：如果这个对象在当前祖先链上 → 标记 [Circular] */
+  const ancestorRefId = ctx.seen.get(obj)
+  if (ancestorRefId !== undefined) {
+    return { type: 'object', preview: `[Circular refId:${ancestorRefId}]`, refId: ancestorRefId }
   }
 
-  /** 分配 refId（每个对象一个唯一 id） */
-  let refId: number | undefined
-  if (refMap.has(obj)) {
-    /** 这个对象之前在别的分支已经展开过了，标记为引用 */
-    refId = refMap.get(obj)!
-    return { type: 'object', preview: getPreview(val), refId }
+  /** 分配 refId（每个对象一个唯一 id，用于前端标记循环引用来源） */
+  let refId: number
+  const existing = ctx.refMap.get(obj)
+  if (existing !== undefined) {
+    refId = existing
   } else {
-    refId = refMap.size + 1
-    refMap.set(obj, refId)
+    refId = ctx.refMap.size + 1
+    ctx.refMap.set(obj, refId)
   }
 
   /** 标记当前对象在祖先链上 */
-  seen.set(obj, refId)
+  ctx.seen.set(obj, refId)
 
   try {
-    const result = serializeObject(val, depth, seen, refMap, refId)
-    return result
+    return serializeObject(val, ctx, refId)
   } finally {
     /** 退出祖先链 */
-    seen.delete(obj)
+    ctx.seen.delete(obj)
   }
 }
 
@@ -93,16 +105,9 @@ export function toSerializedValue(
  */
 function serializeObject(
   val: unknown,
-  depth: number,
-  seen: WeakMap<object, number>,
-  refMap: Map<object, number>,
+  ctx: SerializeContext,
   refId: number,
 ): SerializedValue {
-  /** 超过最大深度：返回截断标记 */
-  if (depth >= MAX_DEPTH) {
-    return { type: 'object', preview: '…', refId }
-  }
-
   /** Date */
   if (val instanceof Date) {
     return { type: 'date', preview: val.toISOString(), constructorName: 'Date' }
@@ -116,18 +121,18 @@ function serializeObject(
   /** Error */
   if (val instanceof Error) {
     const props: SerializedProperty[] = [
-      { key: 'message', value: toSerializedValue(val.message, depth + 1, seen, refMap) },
-      { key: 'stack', value: toSerializedValue(val.stack, depth + 1, seen, refMap) },
+      { key: 'message', value: serialize(val.message, ctx) },
+      { key: 'stack', value: serialize(val.stack, ctx) },
     ]
     return { type: 'error', preview: `${val.name}: ${val.message}`, properties: props, constructorName: val.name }
   }
 
   /** Map */
   if (val instanceof Map) {
-    const entries = Array.from(val.entries()).slice(0, MAX_ENTRIES)
+    const entries = Array.from(val.entries())
     const props: SerializedProperty[] = entries.map(([k, v]) => ({
       key: formatKey(k),
-      value: toSerializedValue(v, depth + 1, seen, refMap),
+      value: serialize(v, ctx),
     }))
     return {
       type: 'map',
@@ -141,8 +146,8 @@ function serializeObject(
 
   /** Set */
   if (val instanceof Set) {
-    const values = Array.from(val).slice(0, MAX_ENTRIES)
-    const elements: SerializedValue[] = values.map((v) => toSerializedValue(v, depth + 1, seen, refMap))
+    const values = Array.from(val)
+    const elements: SerializedValue[] = values.map((v) => serialize(v, ctx))
     return {
       type: 'set',
       preview: `Set(${val.size})`,
@@ -176,10 +181,10 @@ function serializeObject(
       : ''
     const text = el.textContent?.trim().slice(0, 30)
     const props: SerializedProperty[] = [
-      { key: 'tagName', value: toSerializedValue(tag.toUpperCase(), depth + 1, seen, refMap) },
-      { key: 'id', value: toSerializedValue(el.id, depth + 1, seen, refMap) },
-      { key: 'className', value: toSerializedValue(el.className, depth + 1, seen, refMap) },
-      { key: 'innerHTML', value: toSerializedValue(el.innerHTML?.slice(0, 200), depth + 1, seen, refMap) },
+      { key: 'tagName', value: serialize(tag.toUpperCase(), ctx) },
+      { key: 'id', value: serialize(el.id, ctx) },
+      { key: 'className', value: serialize(el.className, ctx) },
+      { key: 'innerHTML', value: serialize(el.innerHTML?.slice(0, 200), ctx) },
     ]
     return {
       type: 'element',
@@ -209,7 +214,7 @@ function serializeObject(
 
   /** Array */
   if (Array.isArray(val)) {
-    const elements = val.slice(0, MAX_ENTRIES).map((v) => toSerializedValue(v, depth + 1, seen, refMap))
+    const elements = val.map((v) => serialize(v, ctx))
     return {
       type: 'array',
       preview: `Array(${val.length}) [${val.slice(0, 3).map(previewOne).join(', ')}${val.length > 3 ? ', …' : ''}]`,
@@ -224,8 +229,8 @@ function serializeObject(
   if (ArrayBuffer.isView(val)) {
     /** ArrayBufferView（TypedArray / DataView）有 length 和数字索引 */
     const arr = val as unknown as { length: number; [i: number]: unknown }
-    const elements: SerializedValue[] = Array.from({ length: Math.min(arr.length, MAX_ENTRIES) }, (_, i) =>
-      toSerializedValue(arr[i], depth + 1, seen, refMap),
+    const elements: SerializedValue[] = Array.from({ length: arr.length }, (_, i) =>
+      serialize(arr[i], ctx),
     )
     const name = (val as { constructor: { name: string } }).constructor.name
     return {
@@ -243,14 +248,14 @@ function serializeObject(
   const isPlain = !ctorName || ctorName === 'Object'
 
   /** 收集自身 + 原型链第一层属性名 */
-  const allKeys: { key: string; isSymbol: boolean; isGetter: boolean }[] = []
+  const allKeys: { key: string; isSymbol: boolean }[] = []
   const seenKeys = new Set<string>()
 
   /** 自身可枚举属性 */
   for (const k of Object.keys(val as Record<string, unknown>)) {
     if (!seenKeys.has(k)) {
       seenKeys.add(k)
-      allKeys.push({ key: k, isSymbol: false, isGetter: false })
+      allKeys.push({ key: k, isSymbol: false })
     }
   }
 
@@ -258,7 +263,7 @@ function serializeObject(
   for (const k of Object.getOwnPropertyNames(val)) {
     if (!seenKeys.has(k)) {
       seenKeys.add(k)
-      allKeys.push({ key: k, isSymbol: false, isGetter: false })
+      allKeys.push({ key: k, isSymbol: false })
     }
   }
 
@@ -270,13 +275,13 @@ function serializeObject(
    */
   let proto = Object.getPrototypeOf(val)
   let protoDepth = 0
-  while (proto && protoDepth < 3 && allKeys.length < MAX_ENTRIES) {
+  while (proto && protoDepth < 3) {
     try {
       for (const k of Object.getOwnPropertyNames(proto)) {
         if (k === 'constructor') continue
         if (!seenKeys.has(k)) {
           seenKeys.add(k)
-          allKeys.push({ key: k, isSymbol: false, isGetter: false })
+          allKeys.push({ key: k, isSymbol: false })
         }
       }
     } catch { /** 安全降级 */ }
@@ -290,20 +295,22 @@ function serializeObject(
     const key = s.toString()
     if (!seenKeys.has(key)) {
       seenKeys.add(key)
-      allKeys.push({ key: s.description || key, isSymbol: true, isGetter: false })
+      allKeys.push({ key: s.description || key, isSymbol: true })
     }
   }
 
   /** 取属性值 + 检测 getter */
   const props: SerializedProperty[] = []
-  for (const { key, isSymbol } of allKeys.slice(0, MAX_ENTRIES)) {
+  for (const { key, isSymbol } of allKeys) {
+    /** 安全阀触发后不再递归 */
+    if (ctx.nodeCount > MAX_NODES) break
     try {
       const descriptor = Object.getOwnPropertyDescriptor(val, key)
       const isGetter = !!descriptor && typeof descriptor.get === 'function'
       const rawVal = (val as Record<string, unknown>)[key]
       props.push({
         key,
-        value: toSerializedValue(rawVal, depth + 1, seen, refMap),
+        value: serialize(rawVal, ctx),
         isGetter,
         isSymbol,
       })
@@ -346,11 +353,6 @@ function previewOne(val: unknown): string {
     return '{…}'
   }
   return String(val)
-}
-
-/** 获取对象预览文本 */
-function getPreview(val: unknown): string {
-  return previewOne(val)
 }
 
 /** 格式化 Map key */

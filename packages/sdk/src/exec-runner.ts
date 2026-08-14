@@ -444,21 +444,33 @@ export function installHelpers(): void {
     const scale = opts?.scale ?? 1
     const backgroundColor = opts?.backgroundColor ?? '#ffffff'
 
-    /** baseCSS 修复 flex/grid 容器内 truncate 文字溢出（详见 screen-capture.ts 注释） */
-    const baseCSS = `* { min-width: 0 !important; }`
+    /** per-capture plugin：修复 flex/grid 容器内 truncate 文字溢出（详见 screen-capture.ts 注释）
+     *
+     * snapdom SnapdomOptions 没有 baseCSS 字段（仅内部 CaptureContext 有）,
+     * 通过 afterClone 钩子向克隆 DOM 注入 <style> 实现等效效果。
+     */
+    const minWidthPlugin = {
+      name: 'fix-min-width',
+      afterClone(ctx: { clone?: HTMLElement | SVGElement | null }) {
+        if (!ctx.clone) return
+        const style = document.createElement('style')
+        style.textContent = `* { min-width: 0 !important; }`
+        ctx.clone.prepend(style)
+      },
+    }
 
     /** 根据格式选择 SnapDOM 导出方法 */
     if (format === 'png') {
-      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: true, baseCSS })
+      const img = await snapdom.toPng(target, { scale, backgroundColor, fast: true, plugins: [minWidthPlugin] })
       /** SnapDOM 返回 HTMLImageElement，从 src 取 dataURL */
       return img.src
     }
     if (format === 'webp') {
-      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: true, baseCSS })
+      const img = await snapdom.toWebp(target, { scale, backgroundColor, quality, fast: true, plugins: [minWidthPlugin] })
       return img.src
     }
     /** 默认 jpg */
-    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: true, baseCSS })
+    const img = await snapdom.toJpg(target, { scale, backgroundColor, quality, fast: true, plugins: [minWidthPlugin] })
     return img.src
   }
 }

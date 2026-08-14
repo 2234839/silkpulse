@@ -16,10 +16,11 @@ export class FrameCompositor {
   private lastKeyframeSeq = -1
   /** 上一帧序号（检测丢帧） */
   private lastSeq = -1
+  /** canvas 元素 */
+  private canvas: HTMLCanvasElement
 
-  constructor(
-    private canvas: HTMLCanvasElement,
-  ) {
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas
     this.ctx = canvas.getContext('2d')
   }
 

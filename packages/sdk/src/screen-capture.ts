@@ -259,15 +259,29 @@ async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
    * 因为 baseCSS 在 snapdom 的 <style> 中先于克隆 DOM 的 inline style，
    * 必须用 !important 才能生效。
    */
+  /**
+   * per-capture plugin：修复 flex/grid 容器内 truncate 文字溢出
+   *
+   * snapdom SnapdomOptions 没有 baseCSS 字段（仅内部 CaptureContext 有）,
+   * 通过 afterClone 钩子向克隆 DOM 注入 <style> 实现等效效果。
+   */
+  const minWidthPlugin = {
+    name: 'fix-min-width',
+    afterClone(ctx: { clone?: HTMLElement | SVGElement | null }) {
+      if (!ctx.clone) return
+      const style = document.createElement('style')
+      style.textContent = `* { min-width: 0 !important; }`
+      ctx.clone.prepend(style)
+    },
+  }
+
   const canvas = await snapdom.toCanvas(document.documentElement, {
     width: vw,
     height: vh,
     backgroundColor: '#ffffff',
     fast: true,
     clip: 'viewport',
-    baseCSS: `
-      * { min-width: 0 !important; }
-    `,
+    plugins: [minWidthPlugin],
   })
 
   return canvas
