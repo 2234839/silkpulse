@@ -31,8 +31,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(ROOT, 'plugins/react-devtools/assets')
 const TMP = join(ROOT, 'node_modules/.cache/build-react-devtools')
 
-/** React 版本（frontend UI 自身用，与目标页 React 版本无关） */
-const REACT_VERSION = '19.1.0'
+/** React 版本（frontend UI 自身用，与目标页 React 版本无关）
+ *
+ * ⚠️ 必须用 experimental channel：DevTools frontend 的 InspectedElement 轮询依赖
+ * unstable_useCacheRefresh 的 seed 形式 refresh(key, value)（React Cache seed），
+ * stable React 19 会 console.error "The seed argument is not enabled outside
+ * experimental channels." 并忽略 seed → 检查器永远显示首次选中的旧值（state 更新不生效）。
+ */
+const REACT_VERSION = 'experimental'
 /** react-devtools-inline 版本（7.x 对应 React DevTools 2025 版） */
 const INLINE_VERSION = '7.0.1'
 

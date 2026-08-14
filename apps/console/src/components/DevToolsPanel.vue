@@ -23,7 +23,7 @@
  * - react：{ event, payload, fromBackend? } 对象；控制台首次发 { activate: true }
  *   请求设备端激活 backend Agent
  */
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 /**
  * devtools relay 桥接函数（由父组件从 useConsoleSocket 传入，避免重复建连） */
@@ -75,6 +75,28 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * 当前插件是否不被目标页支持
+ *
+ * 探测到明确框架列表且不含当前插件时为 true（如 React 页切到 Vue 插件）。
+ * 探测结果未知（undefined）或为空时不禁用——宁可尝试连接，不误伤未上报的场景。
+ */
+const pluginUnsupported = computed(() => {
+  const fws = props.frameworks
+  if (!fws || fws.length === 0) return false
+  return !fws.includes(activePlugin.value)
+})
+
+/** 目标页实际检测到的框架名（不支持提示文案用，未知框架名原样显示） */
+const detectedLabel = computed(() =>
+  (props.frameworks ?? []).map((f) => PLUGIN_LABEL[f] ?? f).join(' + ') || '无',
+)
+
+/** 探测结果到达后当前插件已不支持 → 重置连接状态（不再显示「已连接」误导） */
+watch(pluginUnsupported, (unsupported) => {
+  if (unsupported) relayActive.value = false
+})
 
 /** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
 function isVueEnvelope(data: unknown): data is string {
@@ -206,16 +228,26 @@ onBeforeUnmount(() => {
         连接中…
       </span>
     </div>
-    <!-- 状态条：链路未通时提示 -->
+    <!-- 状态条：链路未通时提示（插件明确不支持时不显示，下方有独立提示区） -->
     <div
-      v-if="!relayActive"
-      class="px-3 py-1.5 text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 border-b border-base flex items-center gap-2"
+      v-if="!relayActive && !pluginUnsupported"
+      class="px-3 py-1.5 text-xs text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20 border-b border-base flex items-center gap-2"
     >
       <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
       正在连接目标页的 {{ PLUGIN_LABEL[activePlugin] }} DevTools backend…（需要目标页注入了 SilkPulse SDK 且运行 {{ PLUGIN_LABEL[activePlugin] }} 应用）
     </div>
+    <!-- 插件明确不支持：明确提示，不加载 client（避免无意义的转圈等待） -->
+    <div
+      v-if="pluginUnsupported"
+      class="flex-1 flex flex-col items-center justify-center gap-2 bg-surface text-muted p-6 text-center"
+    >
+      <div class="text-3xl">🚫</div>
+      <div class="text-sm font-medium">当前页面不支持 {{ PLUGIN_LABEL[activePlugin] }} DevTools</div>
+      <div class="text-xs">目标页未检测到 {{ PLUGIN_LABEL[activePlugin] }} 应用（检测到：{{ detectedLabel }}）</div>
+    </div>
     <!-- devtools client：vue 官方 SPA / react 自建 frontend -->
     <iframe
+      v-else
       ref="iframeRef"
       :src="PLUGIN_SRC[activePlugin]"
       class="flex-1 w-full border-0 bg-white"
