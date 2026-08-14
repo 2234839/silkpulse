@@ -22,8 +22,36 @@
  * - StoragePanel localStorage 编辑（可编辑 JSON / 文本）
  * - StoragePanel IndexedDB 记录（只读）
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, provide, inject } from 'vue'
+import type { Ref } from 'vue'
 import type { SerializedValue } from '@silkpulse/shared'
+
+/* ==================== 右键菜单：展开控制广播通道 ==================== */
+
+/**
+ * 子树展开覆盖信号
+ *
+ * 当用户右键"展开/收起全部子节点"时，根实例设置此信号。
+ * 所有节点通过 inject 读取，如果自己的 path 是 targetPath 的子孙，
+ * 则 expanded 被 override 为指定值。
+ *
+ * 用响应式 ref 实现——即使子节点尚未渲染，一旦渲染就会立即读取到 override 值，
+ * 实现"逐层自动展开"效果（Vue 的响应式更新 + nextTick 递进）。
+ */
+type ExpandOverride = { targetPath: number[]; value: boolean; /** 版本号，每次操作递增以触发 watch */ version: number } | null
+
+/** 右键菜单上下文 */
+interface MenuContext {
+  /** 触发菜单的节点 path */
+  path: number[]
+  /** 该节点的 SerializedValue */
+  node: SerializedValue
+  /** 鼠标坐标 */
+  x: number
+  y: number
+  /** 是否有子节点 */
+  hasChildren: boolean
+}
 
 const props = withDefaults(defineProps<{
   /** 结构化序列化值（优先使用，来自远程 exec） */
@@ -38,14 +66,19 @@ const props = withDefaults(defineProps<{
   depth?: number
   /** 是否可编辑 */
   editable?: boolean
+  /** 子节点索引（用于构建唯一 path，右键菜单展开控制用） */
+  childIndex?: number
 }>(), {
   depth: 0,
   editable: false,
+  childIndex: 0,
 })
 
 const emit = defineEmits<{
   /** 值被修改时触发（editable 模式），传递新值 */
   'update:modelValue': [value: unknown]
+  /** 右键菜单事件冒泡（子→父→根） */
+  'context-menu': [ctx: MenuContext]
 }>()
 
 /* ==================== 数据归一化：三入口 → SerializedValue ==================== */
@@ -153,9 +186,6 @@ const node = computed(() => normalizeToSerialized({
 
 /* ==================== 展开/折叠 ==================== */
 
-/** 是否展开 */
-const expanded = ref(props.depth < 1)
-
 /** 是否有子节点可展开 */
 const hasChildren = computed(() => {
   const v = node.value
@@ -173,12 +203,216 @@ const children = computed(() => {
 })
 
 watch(() => [props.value, props.raw, props.json], () => {
-  /** 外部数据变化时重置展开状态 */
-  expanded.value = props.depth < 1
+  /** 外部数据变化时重置展开状态 + 清除 override */
+  manualExpanded.value = props.depth < 1
+  if (isRoot) expandOverride.value = null
 })
 
+/** 展开/折叠切换（清除 override，让手动状态接管） */
 function toggle() {
-  if (hasChildren.value) expanded.value = !expanded.value
+  if (!hasChildren.value) return
+  /** 如果有 override，先清除再 toggle */
+  if (expandOverride.value) {
+    expandOverride.value = null
+  }
+  manualExpanded.value = !manualExpanded.value
+}
+
+/* ==================== 右键菜单：展开控制通道实现 ==================== */
+
+/** 是否为根实例 */
+const isRoot = props.depth === 0
+
+/** 从 inject 拿到父级 path */
+const parentPath = inject<number[]>('oi-path', [])
+
+/** 当前节点的 path = 父 path + 自己的 childIndex */
+const nodePath = computed(() => [...parentPath, props.childIndex])
+
+/** 根实例创建响应式的 expandOverride 并 provide；非根 inject 已有的 */
+const expandOverride = isRoot
+  ? ref<ExpandOverride>(null)
+  : inject<Ref<ExpandOverride>>('oi-expand-override', ref<ExpandOverride>(null))
+
+/** provide 给子组件 */
+provide('oi-path', nodePath.value)
+provide('oi-expand-override', expandOverride as Ref<ExpandOverride>)
+
+/** 判断 path A 是否为 path B 的子孙（或自身） */
+function isDescendantOrSelf(maybeChild: number[], ancestor: number[]): boolean {
+  if (maybeChild.length < ancestor.length) return false
+  return ancestor.every((seg, i) => maybeChild[i] === seg)
+}
+
+/** 用户手动 toggle 的展开状态（优先级低于 expandOverride） */
+const manualExpanded = ref(props.depth < 1)
+
+/** 当前展开状态：expandOverride 覆盖 > 手动 toggle */
+const expanded = computed({
+  get: () => {
+    const ov = expandOverride.value
+    if (ov && isDescendantOrSelf(nodePath.value, ov.targetPath)) {
+      return ov.value
+    }
+    return manualExpanded.value
+  },
+  set: (v: boolean) => { manualExpanded.value = v },
+})
+
+/**
+ * 监听 override 变化，同步 manualExpanded
+ *
+ * 这样当 override 被清除后，manualExpanded 已记录了 override 设置的值，
+ * 节点不会回退到旧状态。
+ */
+watch(expandOverride, (ov) => {
+  if (ov && isDescendantOrSelf(nodePath.value, ov.targetPath) && hasChildren.value) {
+    manualExpanded.value = ov.value
+  }
+}, { deep: true })
+
+/** 右键菜单状态（仅根实例持有） */
+const menuVisible = ref(false)
+const menuX = ref(0)
+const menuY = ref(0)
+/** 菜单操作目标的 path */
+const menuTargetPath = ref<number[]>([])
+/** 菜单操作目标的 SerializedValue */
+const menuTargetNode = ref<SerializedValue | null>(null)
+/** 菜单目标是否有子节点 */
+const menuTargetHasChildren = ref(false)
+/** 复制成功提示 */
+const copyToast = ref('')
+
+/** 右键事件 */
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  const ctx: MenuContext = {
+    path: nodePath.value,
+    node: node.value,
+    x: e.clientX,
+    y: e.clientY,
+    hasChildren: hasChildren.value,
+  }
+
+  if (isRoot) {
+    onChildContextMenu(ctx)
+  } else {
+    /** 非根：冒泡给父级 */
+    emit('context-menu', ctx)
+  }
+}
+
+/** 子节点右键冒泡到根 */
+function onChildContextMenu(ctx: MenuContext) {
+  if (!isRoot) return
+  menuTargetPath.value = ctx.path
+  menuTargetNode.value = ctx.node
+  menuTargetHasChildren.value = ctx.hasChildren
+  /** 边界检测：靠近右/下边缘时偏移 */
+  const menuW = 200, menuH = 160
+  menuX.value = ctx.x + menuW > window.innerWidth ? ctx.x - menuW : ctx.x
+  menuY.value = ctx.y + menuH > window.innerHeight ? ctx.y - menuH : ctx.y
+  menuVisible.value = true
+}
+
+/** 从 SerializedValue 重建可 JSON 序列化的 JS 值 */
+function serializedToJson(val: SerializedValue): unknown {
+  switch (val.type) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+      return val.value ?? null
+    case 'null':
+      return null
+    case 'undefined':
+      return undefined
+    case 'bigint':
+      return val.value ?? null
+    case 'array':
+      return (val.elements ?? []).map(serializedToJson)
+    case 'object':
+    case 'map':
+    case 'set': {
+      const props = val.properties ?? []
+      const obj: Record<string, unknown> = {}
+      for (const p of props) {
+        obj[p.key] = serializedToJson(p.value)
+      }
+      return obj
+    }
+    case 'date':
+      return val.preview
+    case 'regexp':
+      return val.preview
+    case 'function':
+      return `[function ${val.preview}]`
+    default:
+      return val.preview
+  }
+}
+
+/** 执行菜单操作 */
+async function copyJson() {
+  if (!menuTargetNode.value) return
+  const jsonVal = serializedToJson(menuTargetNode.value)
+  const text = JSON.stringify(jsonVal, null, 2)
+  await doCopy(text)
+}
+
+async function copyValue() {
+  if (!menuTargetNode.value) return
+  const text = menuTargetNode.value.preview
+  await doCopy(text)
+}
+
+async function doCopy(text: string) {
+  menuVisible.value = false
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast('✓ 已复制')
+  } catch {
+    showToast('✗ 复制失败')
+  }
+}
+
+function showToast(msg: string) {
+  copyToast.value = msg
+  setTimeout(() => { copyToast.value = '' }, 1500)
+}
+
+/**
+ * 展开/收起全部子节点
+ *
+ * 设置 expandOverride 信号：所有 targetPath 下的子孙节点的 expanded computed
+ * 会读取 override 值。由于 override 是响应式 ref，新渲染的子节点（因父级展开
+ * 而出现的）也会立即读到 override 值并自动展开——实现逐层自动展开效果。
+ * 同时 watch override 会把 manualExpanded 同步过来，保证 override 清除后状态不回退。
+ */
+function expandAll() {
+  menuVisible.value = false
+  if (!isRoot) return
+  expandOverride.value = {
+    targetPath: menuTargetPath.value,
+    value: true,
+    version: (expandOverride.value?.version ?? 0) + 1,
+  }
+}
+
+function collapseAll() {
+  menuVisible.value = false
+  if (!isRoot) return
+  expandOverride.value = {
+    targetPath: menuTargetPath.value,
+    value: false,
+    version: (expandOverride.value?.version ?? 0) + 1,
+  }
+}
+
+function closeMenu() {
+  menuVisible.value = false
 }
 
 /* ==================== 编辑模式 ==================== */
@@ -313,12 +547,22 @@ function typeBadge(type: string): string {
   }
   return badges[type] || type
 }
+
+/** 处理子组件冒泡上来的右键菜单事件 */
+function handleChildContextMenu(ctx: MenuContext) {
+  if (isRoot) {
+    onChildContextMenu(ctx)
+  } else {
+    /** 非根：继续向上冒泡 */
+    emit('context-menu', ctx)
+  }
+}
 </script>
 
 <template>
   <div class="oi-node">
     <!-- 行：箭头 + key + 值预览 -->
-    <div class="oi-row" @click.stop="toggle">
+    <div class="oi-row" @click.stop="toggle" @contextmenu="onContextMenu">
       <!-- 展开箭头 -->
       <span class="oi-arrow" :class="{ 'oi-expanded': expanded && hasChildren, 'oi-hidden': !hasChildren }">
         ▶
@@ -369,13 +613,51 @@ function typeBadge(type: string): string {
         :value="child.value"
         :key-name="child.key"
         :depth="depth + 1"
+        :child-index="idx"
         :editable="editable"
         @update:model-value="onChildUpdate(child.key, $event)"
+        @context-menu="handleChildContextMenu"
       />
       <div v-if="children.length > 50" class="oi-more">
         … {{ children.length - 50 }} more
       </div>
     </div>
+
+    <!-- 右键上下文菜单（仅根实例渲染） -->
+    <Teleport to="body">
+      <div
+        v-if="isRoot && menuVisible"
+        class="oi-context-menu"
+        :style="{ left: menuX + 'px', top: menuY + 'px' }"
+        @click.stop
+        @contextmenu.prevent.stop
+      >
+        <button v-if="menuTargetHasChildren" class="oi-menu-item" @click="expandAll">
+          <span class="oi-menu-icon">▾</span> 展开全部子节点
+        </button>
+        <button v-if="menuTargetHasChildren" class="oi-menu-item" @click="collapseAll">
+          <span class="oi-menu-icon">▸</span> 收起全部子节点
+        </button>
+        <div v-if="menuTargetHasChildren" class="oi-menu-sep"></div>
+        <button class="oi-menu-item" @click="copyJson">
+          <span class="oi-menu-icon">📋</span> 复制 JSON
+        </button>
+        <button class="oi-menu-item" @click="copyValue">
+          <span class="oi-menu-icon">📄</span> 复制值
+        </button>
+      </div>
+      <!-- 遮罩层：点击关闭菜单 -->
+      <div
+        v-if="isRoot && menuVisible"
+        class="oi-menu-overlay"
+        @click="closeMenu"
+        @contextmenu.prevent.stop="closeMenu"
+      ></div>
+      <!-- 复制提示 toast -->
+      <div v-if="isRoot && copyToast" class="oi-copy-toast">
+        {{ copyToast }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -486,5 +768,86 @@ function typeBadge(type: string): string {
   font-style: italic;
   padding-left: 16px;
   font-size: 11px;
+}
+</style>
+
+<!-- 右键菜单样式（非 scoped，因为 Teleport 到 body） -->
+<style>
+.oi-context-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 180px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  font-family: -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+
+.oi-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  color: #cccccc;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.oi-menu-item:hover {
+  background: #04395e;
+  color: #ffffff;
+}
+
+.oi-menu-icon {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.oi-menu-sep {
+  height: 1px;
+  background: #454545;
+  margin: 4px 0;
+}
+
+.oi-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 99999;
+}
+
+.oi-copy-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100001;
+  background: #2d4f2d;
+  color: #b5cea8;
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: -apple-system, 'Segoe UI', sans-serif;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  animation: oi-toast-in 0.2s ease;
+}
+
+@keyframes oi-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 </style>
