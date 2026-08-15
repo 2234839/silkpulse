@@ -18,7 +18,7 @@
  * - client SPA 检测 self !== top 自动选 iframe preset，与我们的 Console 桥天然匹配
  */
 
-import { initDevTools, createRpcServer } from '@vue/devtools-kit'
+import { initDevTools, createRpcServer, devtoolsContext, DevToolsContextHookKeys } from '@vue/devtools-kit'
 import { functions as devtoolsFunctions } from '@vue/devtools-core'
 import SuperJSON from 'superjson'
 import { send } from './ws-client.js'
@@ -136,10 +136,16 @@ export function initVueDevToolsBridge(): void {
    *  findRegistered 回调跳过已注册 app，扫全部元素开销极低（querySelectorAll + 属性检查） */
   setInterval(recoverExistingVueApps, 5000)
 
-  /** 监听 server 转发的控制台 RPC 消息，解信封后交给 RPC server */
+  /** 监听 server 转发的控制台 RPC 消息，解信封后交给 RPC server；
+   *  另识别控制台「刷新」专用指令（非 SuperJSON 信封）触发原地拉新 */
   registerServerMessageHandler((msg) => {
     if (msg.type !== 'devtools-relay' || msg.plugin !== 'vue') return
     if (typeof msg.payload !== 'string') return
+    /** 「刷新」指令：触发 backend 广播树+状态更新（client 原地刷新，保留 UI 状态） */
+    if (msg.payload === '__silkpulse_refresh__') {
+      broadcastInspectorUpdate()
+      return
+    }
     try {
       const parsed = SuperJSON.parse(msg.payload) as { event?: string; data?: unknown }
       if (parsed?.event !== IFRAME_MESSAGING_EVENT_KEY) return
@@ -148,5 +154,37 @@ export function initVueDevToolsBridge(): void {
       /** 非 SuperJSON 格式，忽略 */
     }
   })
+}
+
+/**
+ * 主动广播 inspector 树+状态更新（控制台「刷新」按钮用）
+ *
+ * 走官方事件流：callHook(SEND_INSPECTOR_TREE/STATE) → devtools-kit 内部
+ * debounce 120ms → 现场遍历组件树（ComponentWalker）→ SEND_INSPECTOR_TREE_
+ * TO_CLIENT 广播 → client 原地更新（保留展开/选中状态，不重载 iframe）。
+ * 生产构建的页面框架不发自发更新事件，这正是补上「拉新」的官方等价物。
+ *
+ * devtoolsContext 是 kit 的全局单例（与 createRpcServer 内部用的是同一份
+ * hooks 实例），hook.apps 为空 = 页面无 Vue 应用，静默跳过。
+ */
+/** SEND_INSPECTOR_TREE 事件的 payload 形状（kit 内部 components 插件消费） */
+interface SendInspectorTreePayload {
+  inspectorId: string
+  plugin: { descriptor: { id: string; label: string; app: unknown }; setupFn: () => Record<string, never> }
+}
+
+function broadcastInspectorUpdate(): void {
+  const hook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }).__VUE_DEVTOOLS_GLOBAL_HOOK__
+  if (!hook?.apps?.length) return
+  const hooks = devtoolsContext.hooks
+  /** SEND_INSPECTOR_TREE 事件；kit 的 components 插件监听并 debounce 120ms
+   *  现场遍历树（ComponentWalker）后广播 TO_CLIENT。
+   *  plugin 形状仿 kit 内部 createDevToolsApi 的 sendInspectorState 调用
+   *  （descriptor.app 只在多 app 场景做匹配，用第一个注册的 app） */
+  const payload: SendInspectorTreePayload = {
+    inspectorId: 'components',
+    plugin: { descriptor: { id: 'components', label: 'Components', app: hook.apps[0] }, setupFn: () => ({}) },
+  }
+  ;(hooks.callHook as (event: string, payload: unknown) => void)(DevToolsContextHookKeys.SEND_INSPECTOR_TREE, payload)
 }
 

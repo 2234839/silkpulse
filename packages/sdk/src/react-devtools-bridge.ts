@@ -569,13 +569,21 @@ export function initReactDevToolsBridge(): void {
 
   registerServerMessageHandler((msg) => {
     if (msg.type !== 'devtools-relay' || msg.plugin !== 'react') return
-    const data = msg.payload as { event?: string; payload?: unknown; activate?: boolean; fromBackend?: boolean }
+    const data = msg.payload as { event?: string; payload?: unknown; activate?: boolean; refresh?: boolean; fromBackend?: boolean }
 
     /** 控制台打开面板时请求激活（幂等，backendActivated 守卫）
      *
      * payload 可能是 SuperJSON 信封字符串（vue 串扰）或普通对象，只认对象形态 */
     if (typeof data === 'object' && data?.activate === true) {
       void activateBackend()
+      return
+    }
+
+    /** 控制台「刷新」指令：reactivate 重建 bridge → flushInitialOperations
+     *  重发全量树事件 → frontend 原地更新（保留选中/展开状态，不重载 iframe）。
+     *  生产构建无 onCommitFiberRoot 推送，这是官方等价的「拉新」路径 */
+    if (typeof data === 'object' && data?.refresh === true) {
+      void reactivateBackend()
       return
     }
 

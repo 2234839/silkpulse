@@ -108,11 +108,31 @@ watch(pluginUnsupported, (unsupported) => {
  * 场景：script 先注入的 SPA（vite build），SDK 上报 frameworks=[] 后 Vue/React
  * app 才 mount，SDK 定期重报 frameworks=['vue']。若不重载，之前因「不支持」
  * 没加载的 client（或加载了但握不上手的 channel）无法自愈。重载即重新握手。
+ *
+ * ⚠️ 必须深比较：devices 心跳每次都产生新数组引用，浅 watch 会在用户操作中
+ * 意外重载 iframe（选中/展开状态全丢）。只有框架集合内容真正变化才重载。
  */
-watch(() => props.frameworks, () => {
+watch(() => props.frameworks, (after, before) => {
   if (pluginUnsupported.value) return
+  /** 内容没变（纯引用变化，心跳刷新的常态）→ 不动 iframe */
+  if (before && after && before.join(',') === after.join(',')) return
   reloadIframe()
-})
+}, { deep: false })
+
+/** 手动刷新：让 backend 原地广播最新树/状态（保留用户展开/选中状态）
+ *
+ * 不重载 iframe——重载会丢失用户在 client 里的操作状态。vue 走官方
+ * SEND_INSPECTOR_TREE/STATE 事件流（client 原地更新）；react 走 reactivate
+ * （bridge 重建后 flushInitialOperations 重发全量树，frontend 原地消费）。
+ * 生产构建页面无框架推送时，这是用户「拉新」的唯一入口 */
+function refreshData(): void {
+  if (pluginUnsupported.value) return
+  if (activePlugin.value === 'vue') {
+    props.send(props.deviceId, 'vue', '__silkpulse_refresh__')
+  } else {
+    props.send(props.deviceId, 'react', { refresh: true })
+  }
+}
 
 /** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
 function isVueEnvelope(data: unknown): data is string {
@@ -236,14 +256,14 @@ onBeforeUnmount(() => {
         />
       </button>
       <div class="ml-auto flex items-center gap-2">
-        <!-- 手动刷新：重载 iframe → 重新握手 → backend 重新遍历组件树拉最新数据。
+        <!-- 手动刷新：backend 原地广播最新树/状态（保留展开/选中状态，不重载 client）。
              生产构建的页面框架更新事件被编译时移除（无响应式推送），
-             DevTools 面板数据会停留在握手时刻的快照——点此手动拉新（通用兜底，dev 页也可用） -->
+             面板数据停留在握手时刻——点此拉新（dev 页也可用，等价于触发一次官方更新事件） -->
         <button
           :disabled="pluginUnsupported"
           class="px-2 py-1 rounded-md transition-colors text-muted hover:bg-base disabled:opacity-40 disabled:cursor-not-allowed"
-          title="重新拉取组件树与最新数据。生产构建的页面没有框架更新推送（Vue/React 生产包不触发 devtools 事件），面板数据不会自动更新，需要手动刷新"
-          @click="reloadIframe()"
+          title="原地拉取最新组件树与数据（保留当前展开/选中状态）。生产构建的页面没有框架更新推送，数据不会自动更新，需要时点此刷新"
+          @click="refreshData()"
         >
           ⟳ 刷新
         </button>
