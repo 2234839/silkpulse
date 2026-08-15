@@ -415,18 +415,27 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
    * 控制台 DevTools 面板据 frameworks 判定「不支持」直接拒绝连接（不加载
    * client iframe），页面 app 起来后也无法自愈。
    *
-   * 这里轮询探测（detectFrameworks 是纯 DOM/hook 检查，开销可忽略），
-   * 结果与上次不同才上报，稳态零流量。Vue app mount、React root create
-   * 之后 ≤5s 内面板即可恢复连接能力。
+   * 自适应间隔（setTimeout 链）：
+   * - 未探到框架：1s 高频——SPA 启动窗口内（chunk 加载 + mount）尽快上报，
+   *   用户在面板上几乎无感等待
+   * - 已探到框架：5s 低频——兜底后续动态 mount 的 app（路由级 createApp、
+   *   微前端子应用），稳态开销可忽略
+   *
+   * detectFrameworks 是纯 DOM/hook 检查，结果与上次相同（join 比较）时
+   * 零流量；不用 MutationObserver 是因为框架在容器上挂的是 JS expando
+   * 属性（__vue_app__ / __reactContainer$），attribute 观察不到。
    */
   let lastFrameworks = (info.frameworks ?? []).join(',')
-  setInterval(() => {
+  const probeFrameworks = (): void => {
     const current = detectFrameworks()
     const joined = current.join(',')
-    if (joined === lastFrameworks) return
-    lastFrameworks = joined
-    send({ type: 'update-info', device: { id: deviceId, frameworks: current } })
-  }, 5000)
+    if (joined !== lastFrameworks) {
+      lastFrameworks = joined
+      send({ type: 'update-info', device: { id: deviceId, frameworks: current } })
+    }
+    setTimeout(probeFrameworks, current.length > 0 ? 5000 : 1000)
+  }
+  setTimeout(probeFrameworks, 1000)
 
   /** 6. SPA 路由变化时上报新 url/title（让 server/AI 看到正确的页面位置） */
   /** 劫持 pushState/replaceState 捕获 SPA 路由跳转，popstate 捕获浏览器前进后退 */
