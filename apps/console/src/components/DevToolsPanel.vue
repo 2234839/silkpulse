@@ -228,14 +228,16 @@ const unsubscribeReconnect = props.onReconnect((deviceId) => {
   reloadIframe()
 })
 
-/** 设备/插件切换时重置连接状态（client 会重新握手） */
+/** 设备/插件切换时重载 client iframe（frontend 重新握手）
+ *
+ * 两种插件都必须重载：
+ * - react：frontend 需重新 initialize + 重发 activate
+ * - vue：旧设备的树/状态已渲染在 client 里，不重载会继续显示旧设备
+ *   数据（「已连接」但内容是上一台设备的）。重载后 client 重新握手
+ *   RPC channel 并主动拉新设备的树/状态 */
 watch([() => props.deviceId, activePlugin], () => {
   relayActive.value = false
-  /** react：iframe 重载（frontend 需重新 initialize + 重发 activate） */
-  if (activePlugin.value === 'react') {
-    reloadIframe()
-    /** 新 iframe load 后会重发 frontend-ready → 触发 activate 流程 */
-  }
+  reloadIframe()
 })
 
 onMounted(() => {

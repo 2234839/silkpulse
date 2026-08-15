@@ -128,19 +128,12 @@ export function initVueDevToolsBridge(): void {
   /** initDevTools 创建 __VUE_DEVTOOLS_GLOBAL_HOOK__，Vue app 创建时自动注册并回放事件 */
   initDevTools()
 
-  /** 桥接 kit 的 TO_CLIENT 广播 → rpc server broadcast（→ ws 出站）。
-   *  官方 iframe preset 里这步由 client 连接后调 initDevToolsServerListener RPC 触发；
-   *  我们的场景 client（控制台 iframe）不会主动调，必须在 backend 侧直接调，
-   *  否则 sendInspectorTreeToClient / sendInspectorStateToClient 等事件的
-   *  订阅者为 0——树/状态广播根本发不出去，刷新按钮只能靠 client 自己重拉 */
-  ;(devtoolsFunctions as unknown as {
-    initDevToolsServerListener: () => void
-    updateDevToolsClientDetected: (params: Record<string, boolean>) => void
-  }).initDevToolsServerListener()
   /** 告知 kit 已有 client 在监听：内部会 toggleHighPerfMode(false)。
    *  highPerf 开着时 kit 的 debounceSendInspectorTree/State 开头就短路，
    *  所有推送广播被吞（拉模式 RPC 不受影响，所以树能显示但永远不更新）。
-   *  官方 client 检测到面板可见时也会调同样的 RPC，这里后端侧直接补上 */
+   *  官方 client 检测到面板可见时也会调同样的 RPC，这里后端侧直接补上。
+   *  （initDevToolsServerListener 不在此调：面板 client mount 时会经 RPC
+   *  自己调，backend 再调一次会双注册 → 每条广播双发） */
   ;(devtoolsFunctions as unknown as {
     initDevToolsServerListener: () => void
     updateDevToolsClientDetected: (params: Record<string, boolean>) => void
@@ -193,7 +186,7 @@ export function initVueDevToolsBridge(): void {
  *
  * 生产构建页面无框架事件（componentUpdated 等被编译移除），数据变化不会
  * 自发推到 devtools。但数据变化必然触发重渲染 → DOM 变化，MutationObserver
- * 是框架无关的通用信号：防抖 800ms（等一轮渲染稳定）+ 节流 2s（高频变化
+ * 是框架无关的通用信号：防抖 300ms（等一轮渲染稳定）+ 节流 2s（高频变化
  * 页面不刷屏）后触发 broadcastInspectorUpdate，client 原地更新（保留展开/
  * 选中状态，不打断用户在面板上的操作）。
  *
@@ -201,7 +194,7 @@ export function initVueDevToolsBridge(): void {
  * attributes——动画/样式高频刷 class 不值得拉新。无 Vue app 时
  * broadcastInspectorUpdate 开头静默返回，observer 回调只剩一个防抖 timer。
  */
-const AUTO_REFRESH_DEBOUNCE_MS = 800
+const AUTO_REFRESH_DEBOUNCE_MS = 300
 const AUTO_REFRESH_THROTTLE_MS = 2000
 
 function setupDomChangeAutoRefresh(): void {
