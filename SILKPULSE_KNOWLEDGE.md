@@ -190,6 +190,9 @@ git add -A && git commit -m "feat(xxx): 描述"
 ### 陷阱 11：React 生产构建 set 是官方级限制，如实报错
 react-dom prod 的 inject 对象 `overrideHookState/overrideProps/scheduleUpdate` 全为 `null`（源码证实，官方扩展同此限制）。`setReact` 检测 `typeof renderer.overrideHookState !== 'function'` 时返回明确 error「目标页 React 是生产构建（bundleType=0）…」，**不要假成功**。树/inspect（只读）/点击交互在 prod 全部正常。
 
+### 陷阱 12：frameworks 探测时序——真实 vite build SPA 先注入必踩
+script 标签先注入时 SDK 在 `<head>` 同步执行，vite build 的 Vue/React app（ESM chunk 异步加载）**尚未 mount**，`collectDeviceInfo` 探到 `frameworks=[]` 上报后**永远没人重报**（只有 SPA 路由变化才重报）。控制台面板据 frameworks 判「不支持」直接不加载 client iframe，页面 app 起来后也无法自愈——用户看到的就是「vue build 的页面不支持」。修复：SDK `init` 后 `setInterval(detectFrameworks, 5s)` **变化才上报**（稳态零流量）；面板侧 `watch(frameworks)` 时 `reloadIframe()` 重新握手。验证脚本：`scripts/diag-vite-spa-preinject.mjs`（用 console 自身当目标页——它就是真实 Vue vite build 产物）。
+
 ---
 
 ## 7. compact 快照文本规则（测试匹配必读）

@@ -406,6 +406,28 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
       send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
     }
   })
+  /**
+   * 5.2 框架定期重报（变化才上报）
+   *
+   * 为什么需要：script 标签先注入的接入方式下，SDK 在 <head> 同步执行时
+   * 真实 vite build 的 Vue/React app 尚未 mount（ESM chunk 异步加载），
+   * collectDeviceInfo 探到 frameworks=[] 上报后，只有 SPA 路由变化才会重报。
+   * 控制台 DevTools 面板据 frameworks 判定「不支持」直接拒绝连接（不加载
+   * client iframe），页面 app 起来后也无法自愈。
+   *
+   * 这里轮询探测（detectFrameworks 是纯 DOM/hook 检查，开销可忽略），
+   * 结果与上次不同才上报，稳态零流量。Vue app mount、React root create
+   * 之后 ≤5s 内面板即可恢复连接能力。
+   */
+  let lastFrameworks = (info.frameworks ?? []).join(',')
+  setInterval(() => {
+    const current = detectFrameworks()
+    const joined = current.join(',')
+    if (joined === lastFrameworks) return
+    lastFrameworks = joined
+    send({ type: 'update-info', device: { id: deviceId, frameworks: current } })
+  }, 5000)
+
   /** 6. SPA 路由变化时上报新 url/title（让 server/AI 看到正确的页面位置） */
   /** 劫持 pushState/replaceState 捕获 SPA 路由跳转，popstate 捕获浏览器前进后退 */
   const reportUrlChange = () => {
@@ -426,7 +448,9 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
         send({ type: 'update-info', device: { id: deviceId, icon: iconDataUrl } })
       }
     })
-    send({ type: 'update-info', device: { id: deviceId, frameworks: detectFrameworks() } })
+    const currentFws = detectFrameworks()
+    lastFrameworks = currentFws.join(',')
+    send({ type: 'update-info', device: { id: deviceId, frameworks: currentFws } })
   }
   for (const method of ['pushState', 'replaceState'] as const) {
     const original = history[method].bind(history) as (...args: unknown[]) => void

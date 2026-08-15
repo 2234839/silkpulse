@@ -102,6 +102,18 @@ watch(pluginUnsupported, (unsupported) => {
   if (unsupported) relayActive.value = false
 })
 
+/**
+ * frameworks 变化时重载 client iframe
+ *
+ * 场景：script 先注入的 SPA（vite build），SDK 上报 frameworks=[] 后 Vue/React
+ * app 才 mount，SDK 定期重报 frameworks=['vue']。若不重载，之前因「不支持」
+ * 没加载的 client（或加载了但握不上手的 channel）无法自愈。重载即重新握手。
+ */
+watch(() => props.frameworks, () => {
+  if (pluginUnsupported.value) return
+  reloadIframe()
+})
+
 /** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
 function isVueEnvelope(data: unknown): data is string {
   return typeof data === 'string' && data.includes(IFRAME_MESSAGING_EVENT_KEY)
