@@ -146,6 +146,9 @@ export function initVueDevToolsBridge(): void {
     updateDevToolsClientDetected: (params: Record<string, boolean>) => void
   }).updateDevToolsClientDetected({ iframe: true })
 
+  /** DOM 变化 → 自动广播（自动更新），见 setupDomChangeAutoRefresh 注释 */
+  setupDomChangeAutoRefresh()
+
   /** 后注入兜底：页面已有 Vue app（prod 构建不发事件）时补注册 */
   recoverExistingVueApps()
 
@@ -185,6 +188,51 @@ export function initVueDevToolsBridge(): void {
  * devtoolsContext 是 kit 的全局单例（与 createRpcServer 内部用的是同一份
  * hooks 实例），hook.apps 为空 = 页面无 Vue 应用，静默跳过。
  */
+/**
+ * DOM 变化自动广播（自动更新）
+ *
+ * 生产构建页面无框架事件（componentUpdated 等被编译移除），数据变化不会
+ * 自发推到 devtools。但数据变化必然触发重渲染 → DOM 变化，MutationObserver
+ * 是框架无关的通用信号：防抖 800ms（等一轮渲染稳定）+ 节流 2s（高频变化
+ * 页面不刷屏）后触发 broadcastInspectorUpdate，client 原地更新（保留展开/
+ * 选中状态，不打断用户在面板上的操作）。
+ *
+ * 只监听 childList + characterData（节点增删/文本变化），不监听
+ * attributes——动画/样式高频刷 class 不值得拉新。无 Vue app 时
+ * broadcastInspectorUpdate 开头静默返回，observer 回调只剩一个防抖 timer。
+ */
+const AUTO_REFRESH_DEBOUNCE_MS = 800
+const AUTO_REFRESH_THROTTLE_MS = 2000
+
+function setupDomChangeAutoRefresh(): void {
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined
+  let lastBroadcastAt = 0
+
+  function trigger(): void {
+    lastBroadcastAt = Date.now()
+    broadcastInspectorUpdate()
+  }
+
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => {
+      const sinceLast = Date.now() - lastBroadcastAt
+      if (sinceLast < AUTO_REFRESH_THROTTLE_MS) {
+        /** 节流窗口内：推迟到窗口结束再触发一次 */
+        debounceTimer = setTimeout(trigger, AUTO_REFRESH_THROTTLE_MS - sinceLast)
+        return
+      }
+      trigger()
+    }, AUTO_REFRESH_DEBOUNCE_MS)
+  })
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  })
+}
+
 /** SEND_INSPECTOR_TREE / SEND_INSPECTOR_STATE 事件的 payload 形状（kit 内部 components 插件消费） */
 interface SendInspectorTreePayload {
   inspectorId: string
