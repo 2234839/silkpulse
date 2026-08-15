@@ -15,7 +15,10 @@
     "test:events": "node scripts/framework-event-test.mjs",
     "check": "vp check",
     "docker:build": "pnpm build && docker build -t gs/silkpulse:latest .",
-    "docker:run": "docker run --rm -p 8080:8080 gs/silkpulse:latest"
+    "docker:run": "docker run --rm -p 8080:8080 gs/silkpulse:latest",
+    "build:testpages": "node scripts/build-react-vite-testpage.mjs",
+    "test:devtools": "node scripts/devtools-matrix-test.mjs && node scripts/diag-react-vite.mjs && node scripts/diag-vite-spa-preinject.mjs",
+    "test:all": "pnpm typecheck && pnpm test && pnpm test:devtools"
   },
   "devDependencies": {
     "puppeteer-core": "catalog:",

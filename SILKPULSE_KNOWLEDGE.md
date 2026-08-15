@@ -89,6 +89,19 @@ sleep 2  # 等 server 起来
 SILKPULSE_SERVER=http://localhost:8083 pnpm test
 ```
 
+### DevTools 矩阵测试（Vue/React × dev/prod × 先/后注入）
+```bash
+pnpm test:devtools
+# 内含：devtools-matrix-test（36 项）+ diag-react-vite（真实 vite build 产物 14 项）
+#       + diag-vite-spa-preinject（frameworks 时序自愈）
+# 前置：8080 server 在跑 + react-vite 测试页已构建（pnpm build:testpages，一次性）
+```
+
+### 一键全量（typecheck + 94 项核心 + DevTools 矩阵）
+```bash
+pnpm test:all
+```
+
 ### 标准迭代循环（改代码后）
 ```bash
 pnpm typecheck && pnpm build && \
