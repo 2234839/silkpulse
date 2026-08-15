@@ -124,9 +124,23 @@ watch(() => props.frameworks, (after, before) => {
  * 不重载 iframe——重载会丢失用户在 client 里的操作状态。vue 走官方
  * SEND_INSPECTOR_TREE/STATE 事件流（client 原地更新）；react 走 reactivate
  * （bridge 重建后 flushInitialOperations 重发全量树，frontend 原地消费）。
- * 生产构建页面无框架推送时，这是用户「拉新」的唯一入口 */
+ * 生产构建页面无框架推送时，这是用户「拉新」的唯一入口。
+ *
+ * 反馈：点击后 refreshing=true 转圈；backend 广播到达（onRelay 里收到
+ * 响应即刷新生效）或 2s 超时自动复位——用户能确认点击已生效 */
+const refreshing = ref(false)
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 刷新周期结束（backend 广播已到或超时兜底） */
+function finishRefresh(): void {
+  refreshing.value = false
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = undefined }
+}
+
 function refreshData(): void {
-  if (pluginUnsupported.value) return
+  if (pluginUnsupported.value || refreshing.value) return
+  refreshing.value = true
+  refreshTimer = setTimeout(finishRefresh, 2000)
   if (activePlugin.value === 'vue') {
     props.send(props.deviceId, 'vue', '__silkpulse_refresh__')
   } else {
@@ -178,11 +192,13 @@ function onWindowMessage(event: MessageEvent) {
   props.send(props.deviceId, 'react', { event: evt, payload })
 }
 
-/** 设备 → iframe：backend 的响应，postMessage 回 iframe */
+/** 设备 → iframe：backend 的响应，postMessage 回 iframe。
+ *  另：刷新周期中收到广播 = 拉新已生效，提前结束转圈 */
 const unsubscribeRelay = props.onRelay((msg) => {
   if (msg.deviceId !== props.deviceId || msg.plugin !== activePlugin.value) return
   const iframe = iframeRef.value
   if (!iframe) return
+  if (refreshing.value) finishRefresh()
 
   if (activePlugin.value === 'react') {
     /** react：backend 消息 { event, payload, fromBackend } → 原样 postMessage 给 frontend */
@@ -260,12 +276,13 @@ onBeforeUnmount(() => {
              生产构建的页面框架更新事件被编译时移除（无响应式推送），
              面板数据停留在握手时刻——点此拉新（dev 页也可用，等价于触发一次官方更新事件） -->
         <button
-          :disabled="pluginUnsupported"
+          :disabled="pluginUnsupported || refreshing"
           class="px-2 py-1 rounded-md transition-colors text-muted hover:bg-base disabled:opacity-40 disabled:cursor-not-allowed"
-          title="原地拉取最新组件树与数据（保留当前展开/选中状态）。生产构建的页面没有框架更新推送，数据不会自动更新，需要时点此刷新"
+          :title="refreshing ? '正在拉取最新数据…' : '原地拉取最新组件树与数据（保留当前展开/选中状态）。生产构建的页面没有框架更新推送，数据不会自动更新，需要时点此刷新'"
           @click="refreshData()"
         >
-          ⟳ 刷新
+          <span :class="refreshing ? 'inline-block animate-spin' : 'inline-block'">⟳</span>
+          {{ refreshing ? '刷新中…' : '刷新' }}
         </button>
         <span v-if="relayActive" class="text-green-600 dark:text-green-400 flex items-center gap-1">
           <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />

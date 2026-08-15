@@ -128,6 +128,24 @@ export function initVueDevToolsBridge(): void {
   /** initDevTools 创建 __VUE_DEVTOOLS_GLOBAL_HOOK__，Vue app 创建时自动注册并回放事件 */
   initDevTools()
 
+  /** 桥接 kit 的 TO_CLIENT 广播 → rpc server broadcast（→ ws 出站）。
+   *  官方 iframe preset 里这步由 client 连接后调 initDevToolsServerListener RPC 触发；
+   *  我们的场景 client（控制台 iframe）不会主动调，必须在 backend 侧直接调，
+   *  否则 sendInspectorTreeToClient / sendInspectorStateToClient 等事件的
+   *  订阅者为 0——树/状态广播根本发不出去，刷新按钮只能靠 client 自己重拉 */
+  ;(devtoolsFunctions as unknown as {
+    initDevToolsServerListener: () => void
+    updateDevToolsClientDetected: (params: Record<string, boolean>) => void
+  }).initDevToolsServerListener()
+  /** 告知 kit 已有 client 在监听：内部会 toggleHighPerfMode(false)。
+   *  highPerf 开着时 kit 的 debounceSendInspectorTree/State 开头就短路，
+   *  所有推送广播被吞（拉模式 RPC 不受影响，所以树能显示但永远不更新）。
+   *  官方 client 检测到面板可见时也会调同样的 RPC，这里后端侧直接补上 */
+  ;(devtoolsFunctions as unknown as {
+    initDevToolsServerListener: () => void
+    updateDevToolsClientDetected: (params: Record<string, boolean>) => void
+  }).updateDevToolsClientDetected({ iframe: true })
+
   /** 后注入兜底：页面已有 Vue app（prod 构建不发事件）时补注册 */
   recoverExistingVueApps()
 
@@ -167,7 +185,7 @@ export function initVueDevToolsBridge(): void {
  * devtoolsContext 是 kit 的全局单例（与 createRpcServer 内部用的是同一份
  * hooks 实例），hook.apps 为空 = 页面无 Vue 应用，静默跳过。
  */
-/** SEND_INSPECTOR_TREE 事件的 payload 形状（kit 内部 components 插件消费） */
+/** SEND_INSPECTOR_TREE / SEND_INSPECTOR_STATE 事件的 payload 形状（kit 内部 components 插件消费） */
 interface SendInspectorTreePayload {
   inspectorId: string
   plugin: { descriptor: { id: string; label: string; app: unknown }; setupFn: () => Record<string, never> }
@@ -177,14 +195,21 @@ function broadcastInspectorUpdate(): void {
   const hook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }).__VUE_DEVTOOLS_GLOBAL_HOOK__
   if (!hook?.apps?.length) return
   const hooks = devtoolsContext.hooks
-  /** SEND_INSPECTOR_TREE 事件；kit 的 components 插件监听并 debounce 120ms
-   *  现场遍历树（ComponentWalker）后广播 TO_CLIENT。
-   *  plugin 形状仿 kit 内部 createDevToolsApi 的 sendInspectorState 调用
-   *  （descriptor.app 只在多 app 场景做匹配，用第一个注册的 app） */
+  /** plugin 形状仿 kit 内部 createDevToolsApi 的调用（descriptor.app 在多 app
+   *  场景做匹配，用第一个注册的 app） */
   const payload: SendInspectorTreePayload = {
     inspectorId: 'components',
     plugin: { descriptor: { id: 'components', label: 'Components', app: hook.apps[0] }, setupFn: () => ({}) },
   }
-  ;(hooks.callHook as (event: string, payload: unknown) => void)(DevToolsContextHookKeys.SEND_INSPECTOR_TREE, payload)
+  const call = hooks.callHook as (event: string, payload: unknown) => void
+  /** ① 树：ComponentWalker 现场遍历，同时通过 mark() 把组件写入 instanceMap */
+  call(DevToolsContextHookKeys.SEND_INSPECTOR_TREE, payload)
+  /** ② 状态：读 inspector.selectedNodeId 重抓该组件数据。必须等 ① 的遍历
+   *  完成——后注入场景 instanceMap 初始只有 root，selectedNodeId 指向的
+   *  组件要靠 ① 的 mark() 填充后才能被 getComponentInstance 取到。
+   *  ①② 各有 120ms debounce，间隔 300ms 足够两者都落地 */
+  setTimeout(() => {
+    call(DevToolsContextHookKeys.SEND_INSPECTOR_STATE, payload)
+  }, 300)
 }
 
