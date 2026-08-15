@@ -235,14 +235,27 @@ onBeforeUnmount(() => {
           title="目标页检测到该框架"
         />
       </button>
-      <span v-if="relayActive" class="ml-auto text-green-600 dark:text-green-400 flex items-center gap-1">
-        <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
-        已连接
-      </span>
-      <span v-else class="ml-auto text-amber-600 dark:text-amber-400 flex items-center gap-1">
-        <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        连接中…
-      </span>
+      <div class="ml-auto flex items-center gap-2">
+        <!-- 手动刷新：重载 iframe → 重新握手 → backend 重新遍历组件树拉最新数据。
+             生产构建的页面框架更新事件被编译时移除（无响应式推送），
+             DevTools 面板数据会停留在握手时刻的快照——点此手动拉新（通用兜底，dev 页也可用） -->
+        <button
+          :disabled="pluginUnsupported"
+          class="px-2 py-1 rounded-md transition-colors text-muted hover:bg-base disabled:opacity-40 disabled:cursor-not-allowed"
+          title="重新拉取组件树与最新数据。生产构建的页面没有框架更新推送（Vue/React 生产包不触发 devtools 事件），面板数据不会自动更新，需要手动刷新"
+          @click="reloadIframe()"
+        >
+          ⟳ 刷新
+        </button>
+        <span v-if="relayActive" class="text-green-600 dark:text-green-400 flex items-center gap-1">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+          已连接
+        </span>
+        <span v-else class="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+          连接中…
+        </span>
+      </div>
     </div>
     <!-- 状态条：链路未通时提示（插件明确不支持时不显示，下方有独立提示区） -->
     <div
