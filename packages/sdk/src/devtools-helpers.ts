@@ -103,15 +103,29 @@ export function installDevToolsHelpers(): void {
   /**
    * 探测目标页可用的 devtools 框架能力
    *
-   * 返回 { react: boolean, vue: boolean }——agent 先调这个判断页面支持哪种
+   * 返回 { react, vue }——agent 先调这个判断页面支持哪种。
+   * react：hook.renderers 有注册（stub 装早了自然收到，装晚了由
+   * recoverReactRoots 合成注册），或 DOM 上有 __reactContainer$（恢复
+   * 尚未触发，树读取路径仍可从 fiber 根遍历）。
+   * vue：hook.apps 有注册（正常时序 + 后注入 recoverExistingVueApps
+   * 补注册），或 DOM 上有 __vue_app__（保底）。
    */
   w.__silkpulse_devtools_available = (): { react: boolean; vue: boolean } => {
     const reactHook = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: { renderers?: Map<unknown, unknown> } }
     const vueHook = window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }
-    return {
-      react: (reactHook.__REACT_DEVTOOLS_GLOBAL_HOOK__?.renderers?.size ?? 0) > 0,
-      vue: (vueHook.__VUE_DEVTOOLS_GLOBAL_HOOK__?.apps?.length ?? 0) > 0,
+    let react = (reactHook.__REACT_DEVTOOLS_GLOBAL_HOOK__?.renderers?.size ?? 0) > 0
+    if (!react) {
+      for (const el of document.querySelectorAll('#root, #app, #__next, body > div')) {
+        if (Object.getOwnPropertyNames(el).some(k => k.startsWith('__reactContainer$'))) { react = true; break }
+      }
     }
+    let vue = (vueHook.__VUE_DEVTOOLS_GLOBAL_HOOK__?.apps?.length ?? 0) > 0
+    if (!vue) {
+      for (const el of document.querySelectorAll('#app, #root, body > div')) {
+        if ((el as unknown as { __vue_app__?: unknown }).__vue_app__) { vue = true; break }
+      }
+    }
+    return { react, vue }
   }
 
   /**
@@ -222,13 +236,14 @@ export function installDevToolsHelpers(): void {
     await ensureReactBackendActive()
     const hook = getActiveReactHook()
     if (!hook) return err('React backend 激活失败') as unknown as { framework: string; tree: DevToolsComponentNode[] }
-    /** fiber root 来源：stubFiberRoots 已在激活时合并进真 hook 的 getFiberRoots(rendererID) */
+    /** fiber root 来源：stubFiberRoots 已在激活时合并进真 hook 的 getFiberRoots(rendererID)；
+     *  后注入场景由 recoverReactRoots 合成的 renderer + fiberRoots 覆盖 */
     const roots: object[] = []
     const { rendererID } = getReactRenderer()
     if (rendererID != null) {
       for (const root of hook.getFiberRoots(rendererID)) roots.push(root as object)
     }
-    /** 兜底：DOM 容器上的 __reactContainer$ */
+    /** 兜底：DOM 容器上的 __reactContainer$（renderer 注册全失败时树仍可读，仅无 inspect id） */
     if (roots.length === 0) roots.push(...domBasedReactRoots())
 
     /** 0=FunctionComponent 1=ClassComponent 11=ForwardRef 10=MemoComponent 15=SimpleMemoComponent */
@@ -308,7 +323,7 @@ export function installDevToolsHelpers(): void {
   /** React 检查：DOM → 组件 id → rendererInterface.inspectElement（全量数据） */
   async function inspectReact(el: Element): Promise<Record<string, unknown>> {
     await ensureReactBackendActive()
-    const { rendererID, renderer, agent, error } = getReactRenderer()
+    const { rendererID, renderer, error } = getReactRenderer()
     if (error) return err(error)
     const { fiber, error: ferr } = getReactFiberFromDOM(el)
     if (ferr) return err(ferr)
@@ -550,17 +565,4 @@ export function installDevToolsHelpers(): void {
   }
 }
 
-/** JSON 解析（异常返回 null） */
-function safeParse(raw: string): unknown {
-  try {
-    return JSON.parse(raw)
-  } catch {
-    /** SuperJSON 输出不是纯 JSON 时的兜底：去 meta 字段 */
-    try {
-      const cleaned = raw.replace(/,\s*"meta":\s*\{[^}]*\}\s*$/, '}')
-      return JSON.parse(cleaned)
-    } catch {
-      return null
-    }
-  }
-}
+

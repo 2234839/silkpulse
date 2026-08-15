@@ -200,6 +200,93 @@ function installDelegatingHookStub(): void {
 let backendLoadPromise: Promise<BackendModule> | null = null
 
 /**
+ * 后注入恢复：DOM 扫描已存在的 React root，合成 renderer 注册进 stub
+ *
+ * 场景：SDK 在 react-dom 之后才注入。react-dom 模块求值时同步调
+ * hook.inject(internals) 并缓存 hook 引用——我们 stub 装晚了收不到
+ * inject，pendingRenderers 为空，激活后 backend 无 renderer 可 attach。
+ *
+ * 恢复路径：React 18+ 在每个 root 容器上挂 `__reactContainer$<random>`
+ * （值即 FiberRoot）。扫出来后合成 renderer 对象（backend 的
+ * attachRenderer 只要求 version/bundleType + findFiberByHostInstance
+ * 或 currentDispatcherRef 走 fiber 分支），激活时与真实 inject 一样
+ * replay 进真 hook。fiberRoots 也一并注入，flushInitialOperations
+ * 会从 getFiberRoots 建全量树；后续 commit 走 stub.onCommitFiberRoot
+ * （react-dom 持有的是 stub 引用）持续增量。
+ *
+ * findFiberByHostInstance 用 hostInstance 上的 __reactFiber$ 回溯实现
+ * （官方 renderer 是从 fiber 树反查，我们正查等价）。version 优先取
+ * React 全局版本（__SECRET_INTERNALS 或 18 的 React.__VERSION 不在
+ * 页面全局时兜底 '18.0.0'——fiber 常量表按版本分支，18+ 的 tag 体系
+ * 18/19 一致，19 专属 tag（Activity 31 等）在旧常量表里是 -1 会被
+ * 当未知类型跳过显示，树仍可用）。
+ */
+function recoverReactRoots(): void {
+  const target = window as unknown as Record<string, unknown>
+  /** stub 已有 renderer（react-dom 在 stub 之后加载，inject 走到了）则无需恢复 */
+  if (stubRenderersRecovered) return
+  if (pendingRenderers.length > 0) return
+
+  const roots = new Set<unknown>()
+  for (const el of document.querySelectorAll('*')) {
+    for (const key of Object.getOwnPropertyNames(el)) {
+      if (!key.startsWith('__reactContainer$')) continue
+      const container = (el as unknown as Record<string, unknown>)[key]
+      /** FiberRoot 形状：{ current: HostRootFiber, ... }；只收非空 root */
+      if (container && (container as { current?: unknown }).current) roots.add(container)
+    }
+  }
+  if (roots.size === 0) return
+
+  /** 探测 React 版本（页面全局可能有 React 挂载信息） */
+  const reactGlobal = (target.React ?? target.__REACT__) as { version?: string } | undefined
+  const version = reactGlobal?.version ?? '18.0.0'
+
+  const syntheticRenderer: RendererInternals = {
+    version,
+    reconcilerVersion: version,
+    /** 1 = development build（fiber 里有 _debugSource 等字段，backend 会展示源码定位） */
+    bundleType: 1,
+    rendererPackageName: 'react-dom',
+    findFiberByHostInstance(instance: unknown) {
+      /** hostInstance 上的 __reactFiber$ 属性即所属 fiber（React 17+ 恒有） */
+      if (!instance || typeof instance !== 'object') return null
+      for (const key of Object.getOwnPropertyNames(instance)) {
+        if (key.startsWith('__reactFiber$')) {
+          return (instance as Record<string, unknown>)[key] ?? null
+        }
+      }
+      return null
+    },
+  }
+
+  /** 注入 stub（与 react-dom 主动 inject 同路径），fiberRoots 一并登记 */
+  const rendererID = stubInjectForRecovery(syntheticRenderer)
+  if (rendererID == null) return
+  const fiberRoots = stubFiberRoots[rendererID] ??= new Set()
+  for (const root of roots) fiberRoots.add(root)
+  stubRenderersRecovered = true
+}
+
+/** 恢复是否已执行过（一个页面生命周期只做一次 DOM 全扫） */
+let stubRenderersRecovered = false
+
+/**
+ * 恢复路径专用 inject：绕过 realHook 判断（恢复可能发生在激活之后）
+ *
+ * 返回分配的 rendererID，hook 不可用时返回 null。
+ */
+function stubInjectForRecovery(renderer: RendererInternals): number | null {
+  /** 激活后直接走真 hook（backend 立即 attachRenderer + 从 fiberRoots 建树） */
+  if (realHook) return realHook.inject(renderer)
+  const stub = (window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: { inject?: (r: RendererInternals) => number } }).__REACT_DEVTOOLS_GLOBAL_HOOK__
+  if (!stub?.inject) return null
+  const id = stub.inject(renderer)
+  pendingRenderers.push({ id, renderer })
+  return id
+}
+
+/**
  * 推导 server origin（backend bundle 的下载地址）
  *
  * 优先级：
@@ -347,6 +434,10 @@ async function activateBackend(): Promise<void> {
   }
   backendActivated = true
   try {
+    /** 后注入兜底：react-dom 早于 SDK 加载时（stub 没收到 inject），
+     *  DOM 扫描合成 renderer——必须在 loadBackendBundle 之前，
+     *  让 replay 与真实 inject 走同一条路 */
+    recoverReactRoots()
     const backend = await loadBackendBundle()
 
     /** shadow target：一个空对象，installHook 会把真 hook defineProperty 到它上面 */
@@ -444,6 +535,10 @@ export function getActiveReactHook(): RealHook | null {
  */
 export function initReactDevToolsBridge(): void {
   installDelegatingHookStub()
+
+  /** 后注入兜底：react-dom 已加载（inject 已飞走）时立即恢复一次。
+   *  react-dom 在 SDK 之后加载的场景由 stub.inject 自然覆盖 */
+  recoverReactRoots()
 
   registerServerMessageHandler((msg) => {
     if (msg.type !== 'devtools-relay' || msg.plugin !== 'react') return

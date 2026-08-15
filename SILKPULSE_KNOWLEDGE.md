@@ -224,10 +224,11 @@ git add -A && git commit -m "feat(xxx): 描述"
 
 ---
 
-## 10. 当前状态（截至 2026-08-06）
+## 10. 当前状态（截至 2026-08-15）
 
 - 分支：`master`，已迭代至 53+ 轮
-- 最近提交：inspect CLI WebSocket 连接独立段（WS 条目从失败/慢请求分析中分离，不再被 readyState=0 误判为失败）；WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__silkpulse_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__silkpulse_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
+- 最近提交：**Vue/React DevTools 后注入桥接恢复**——官方扩展靠 document_start 时机在页面框架启动前装 hook，SDK 后注入错过 inject/app:init 事件。恢复锚点全在 DOM 上：Vue 扫全元素 `__vue_app__`（rootContainer 无条件挂载，prod 也在）手动 `hook.emit('app:init', app, version, 四 vnode type 符号)`，devtools-kit 的 `createAppRecord` 有 `app._container?._vnode?.component` 兜底专为 prod 无 `_instance` 设计，ComponentWalker 纯拉模式现场递归 subTree，补注册后树立即完整；React 扫元素自有属性 `__reactContainer$` 前缀收 FiberRoot（`{current: HostRootFiber}`），合成 renderer（version 探测 + findFiberByHostInstance 沿 hostInstance 的 `__reactFiber$` 正查）走 stub.inject 拿 rendererID，fiberRoots 收进 `stubFiberRoots[id]`，backend 激活后 `flushInitialOperations` 从 fiberRoots 全量建树，后续 `onCommitFiberRoot` 增量天然工作。Vue 侧每 5s 补扫动态 mount 的 app（事件驱动是主路径，补扫兜底）；React 恢复有守卫（已恢复 / pendingRenderers 非空则跳过）。`__silkpulse_devtools_available` 增加 DOM 锚点兜底（`__vue_app__` / `__reactContainer$`），恢复未触发也能正确报告框架能力
+- 前一轮：inspect CLI WebSocket 连接独立段（WS 条目从失败/慢请求分析中分离，不再被 readyState=0 误判为失败）；WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__silkpulse_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__silkpulse_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
 - 测试：无头测试 **94 项**全通过
 - network 面板支持 WebSocket：WS 连接作为 network 条目，点击展示 send/recv/event 帧时间线（对齐 DevTools WS Messages）
 - `__silkpulse_setValue` 已支持 checkbox/radio（含 radio 同组互斥，合成事件下手动取消同组）

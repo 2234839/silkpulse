@@ -45,6 +45,53 @@ export function getVueDevToolsFunctions(): Record<string, (...args: unknown[]) =
 }
 
 /**
+ * 后注入恢复：扫描 DOM 找已存在的 Vue app，补注册到 devtools-kit
+ *
+ * 场景：SDK 在页面 Vue app mount 之后才注入（如 exec 动态注入、
+ * SSR 水合完成的页面）。此时 app:init 事件早已错过（甚至 prod 构建
+ * 根本不发事件），但 Vue core 无条件在根容器上挂 `__vue_app__`
+ * （apiCreateApp.ts），我们扫出来手动补发 app:init 即可。
+ *
+ * devtools-kit 的组件树是纯拉模式（ComponentWalker 现场遍历
+ * instance.subTree），不依赖历史事件——补注册后树立即完整可用。
+ *
+ * prod 构建的 app 没有 `_instance`，devtools-kit 的 createAppRecord
+ * 有 `app._container?._vnode?.component` 兜底（上游为此专门写的）。
+ */
+function recoverExistingVueApps(): void {
+  const target = window as unknown as {
+    __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[]; emit?: (event: string, ...args: unknown[]) => void }
+  }
+  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__
+  if (!hook?.emit) return
+
+  /** Vue3 Fragment/Text/Comment/Static 的 type 符号值（与 runtime-core vnode.ts 一致） */
+  const vueTypes = {
+    Fragment: Symbol.for('v-fgt'),
+    Text: Symbol.for('v-txt'),
+    Comment: Symbol.for('v-cmt'),
+    Static: Symbol.for('v-stc'),
+  }
+
+  /** 全 DOM 扫描根容器（__vue_app__ 挂在 mount 容器上，开销可忽略：
+   *  未注册 app 时短路在 includes 检查，无副作用） */
+  const seen = new Set<unknown>()
+  for (const el of document.querySelectorAll('*')) {
+    const app = (el as unknown as { __vue_app__?: unknown }).__vue_app__
+    if (!app || seen.has(app)) continue
+    seen.add(app)
+    /** 已注册过（正常时序注入，或官方 hook 自带）的不重复注册 */
+    if (hook.apps?.includes(app)) continue
+    const appObj = app as { version?: string }
+    try {
+      hook.emit('app:init', app, appObj.version ?? '3', vueTypes)
+    } catch {
+      /** 单个 app 恢复失败不阻塞其余 */
+    }
+  }
+}
+
+/**
  * 初始化 Vue DevTools backend
  *
  * 同步调用。必须在 Vue app 创建前执行（SDK 脚本是同步 IIFE，注入即执行，
@@ -80,6 +127,14 @@ export function initVueDevToolsBridge(): void {
 
   /** initDevTools 创建 __VUE_DEVTOOLS_GLOBAL_HOOK__，Vue app 创建时自动注册并回放事件 */
   initDevTools()
+
+  /** 后注入兜底：页面已有 Vue app（prod 构建不发事件）时补注册 */
+  recoverExistingVueApps()
+
+  /** 定期补扫：后注入 + 后续动态 mount 的 app（SPA 路由级 createApp、延迟挂载的微前端子应用）
+   *  轻量兜底，仅补漏——正常时序下 hook 的事件驱动注册是主路径。
+   *  findRegistered 回调跳过已注册 app，扫全部元素开销极低（querySelectorAll + 属性检查） */
+  setInterval(recoverExistingVueApps, 5000)
 
   /** 监听 server 转发的控制台 RPC 消息，解信封后交给 RPC server */
   registerServerMessageHandler((msg) => {
