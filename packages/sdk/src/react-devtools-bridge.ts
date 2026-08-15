@@ -56,9 +56,16 @@ interface RendererInternals {
   [key: string]: unknown
 }
 
+/** rendererInterfaces 里 interface 的形状（backend attachRenderer 的返回物，
+ *  reactivate 时要调 flushInitialOperations） */
+interface RendererInterface {
+  flushInitialOperations: () => void
+  [key: string]: unknown
+}
+
 /** 真 hook 的形状（installHook 装上的完整对象） */
 interface RealHook {
-  rendererInterfaces: Map<number, unknown>
+  rendererInterfaces: Map<number, RendererInterface>
   renderers: Map<number, RendererInternals>
   hasUnsupportedRendererAttached: boolean
   emit: (event: string, data?: unknown) => void
@@ -255,11 +262,12 @@ function recoverReactRoots(): void {
   const version = reactGlobal?.version ?? '18.0.0'
 
   /** hooks 重放需要页面 react 的 ReactCurrentDispatcher：inspect 时 backend 会把
-   *  它的 H 换成 DispatcherProxy 后重放组件函数。拿不到时 backend 会退到
-   *  bundle 内置 react 副本的 internals——与页面 react-dom 不同源，重放时
-   *  useState 报 #321 Invalid hook call。
-   *  React 18 UMD: __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED；
-   *  React 19: __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE */
+   *  它的 H 换成 DispatcherProxy 后重放组件函数。UMD 页面拿得到（挂 window）；
+   *  vite ESM 页面拿不到（undefined）——此时 backend 退回内置副本重放会 #321，
+   *  但 bundleType: 0 下 inspectHooks 不走重放，此字段无效但保留（未来若
+   *  能拿到可安全升级 bundleType）。React 18 UMD:
+   *  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED；React 19:
+   *  __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE */
   const internals = reactGlobal?.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
     ?? reactGlobal?.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
   const dispatcherRef = (internals as { ReactCurrentDispatcher?: object } | undefined)?.ReactCurrentDispatcher
@@ -267,8 +275,14 @@ function recoverReactRoots(): void {
   const syntheticRenderer: RendererInternals = {
     version,
     reconcilerVersion: version,
-    /** 1 = development build（fiber 里有 _debugSource 等字段，backend 会展示源码定位） */
-    bundleType: 1,
+    /** 0 = production build。fiber 上没有 _debugSource，backend 跳过源码定位；
+     *  更关键的是 hooks 检查/重放（inspectHooks）按 bundleType 分支——
+     *  声称 dev 会触发组件函数重放，而 vite ESM 页面拿不到页面 react 的
+     *  currentDispatcherRef（renderer.currentDispatcherRef 为 undefined），
+     *  backend 退回内置副本重放 → 页面 useState 报 #321 Invalid hook call，
+     *  InspectedElementContextController 崩溃、右侧面板白屏。
+     *  bundleType: 0 = 不重放，直接读 fiber.memoizedState 链展示 hooks 值 */
+    bundleType: 0,
     rendererPackageName: 'react-dom',
     /** 真实 inject 时 react-dom 会传这个字段；hooks 检查/改写全靠它 */
     currentDispatcherRef: dispatcherRef,
@@ -438,6 +452,43 @@ function completeActivationHandshake(dispatch: (msg: { event: string; payload: u
 let reactivatePromise: Promise<void> | null = null
 
 /**
+ * reactivate 的 renderer id 映射（oldId → newId）
+ *
+ * 每次 reactivate 重新 inject 会分配新 id，而 react-dom 终身持有最老 id。
+ * rendererInterfaces 只保留 newId 单 entry（防 initBackend 的 forEach 双 flush），
+ * oldId 的 commit 调用由 hook 方法包装层转发到 newId。
+ */
+const rendererIdRemap = new Map<number, number>()
+
+/**
+ * 包装 realHook 的按 rendererID 寻址的方法：oldId 调用透明转发到 newId
+ *
+ * 覆盖 onCommitFiberRoot / onCommitFiberUnmount / onPostCommitFiberRoot /
+ * getFiberRoots——bundle 内部（onCommitFiberRoot 查 mountedRoots）与
+ * react-dom（经 stub 委托）都通过属性访问调用，包装稳定生效。
+ * 映射未命中时透传原 id（首次激活路径无映射，零开销）。
+ * 幂等：重复安装会叠加包装但语义不变（remap 查两次同结果）。
+ */
+function installRendererIdRemap(hook: RealHook, remap: Map<number, number>): void {
+  /** 单个 id 重写（映射未命中时透传原 id） */
+  const rewrite = (id: number): number => remap.get(id) ?? id
+
+  const origCommitRoot = hook.onCommitFiberRoot.bind(hook)
+  hook.onCommitFiberRoot = (id, root, priorityLevel) => origCommitRoot(rewrite(id), root, priorityLevel)
+
+  const origCommitUnmount = hook.onCommitFiberUnmount.bind(hook)
+  hook.onCommitFiberUnmount = (id, fiber) => origCommitUnmount(rewrite(id), fiber)
+
+  if (hook.onPostCommitFiberRoot) {
+    const origPostCommit = hook.onPostCommitFiberRoot.bind(hook)
+    hook.onPostCommitFiberRoot = (id, root) => origPostCommit(rewrite(id), root)
+  }
+
+  const origGetRoots = hook.getFiberRoots.bind(hook)
+  hook.getFiberRoots = (id) => origGetRoots(rewrite(id))
+}
+
+/**
  * 激活 React DevTools backend
  *
  * 1. fetch backend bundle
@@ -510,9 +561,17 @@ async function activateBackend(): Promise<void> {
 /**
  * 重新握手：为重载后的 frontend 重建 bridge + agent
  *
- * shutdown 旧 bridge（agent 会摘掉自己的 hook 监听）→ 重新 createBridge/activate。
- * hook/renderer 注册都在 shadow hook 上未动，activate 内部 initBackend 会重新
- * registerRendererInterface + flushInitialOperations，新 frontend 即收到初始树。
+ * shutdown 旧 bridge（agent 会摘掉自己的 hook 监听）→ 重建 rendererInterfaces
+ * → 重新 createBridge/activate。
+ *
+ * rendererInterfaces 必须重建（不能复用）：interface 闭包内的
+ * rootToFiberInstanceMap / rootPseudoKeys 等状态属于旧 agent 生命周期。
+ * 复用时新 agent 的 handleCommitFiberRoot 走 update 分支（旧 map 非空），
+ * 永远不写新 agent 的 rootPseudoKeys（那个 Map 在 agent 闭包里），
+ * inspectElement 轮询 getPathForElement 抛
+ * "Expected mounted root to have known pseudo key"，选中节点的 state 冻结。
+ * 清空后重新 inject：attachRenderer 造全新 interface，flushInitialOperations
+ * 重走 mount 分支，pseudo key 重新建立。
  */
 async function reactivateBackend(): Promise<void> {
   try {
@@ -525,6 +584,22 @@ async function reactivateBackend(): Promise<void> {
     try { activeBridge?.shutdown() } catch { /** 已关闭忽略 */ }
     activeBridge = null
 
+    /** 旧 renderer 的 [id, internals]（inject 分配的 id 被 react-dom 终身持有，
+     *  commit 时用它查 rendererInterfaces）。
+     *  按 renderer 对象去重并保留最老 entry：历史 reactivate 会往 renderers 累积
+     *  同一 renderer 的多个 id 条目（inject 每次分配新 id），不去重会指数级重复
+     *  注入（树 ×2^n）；而 react-dom 终身持有的恰是 Map 保序的第一个（最老）id，
+     *  保留它才能让 onCommitFiberRoot(oldId) 继续命中新 interface。
+     *  renderers 本身无读者（仅 inject 写入），累积无害，故不 clear */
+    const seenRenderers = new Set<RendererInternals>()
+    const oldRenderers = [...realHook.renderers.entries()].filter(
+      ([, renderer]) => (seenRenderers.has(renderer) ? false : (seenRenderers.add(renderer), true)),
+    )
+
+    /** 清旧 interface：新 agent initBackend 的 rendererInterfaces.forEach 才不会
+     *  复用旧闭包状态（pseudo key 冻结的根因） */
+    realHook.rendererInterfaces.clear()
+
     const { wall, dispatch, mute } = createRelayWall()
     muteActiveWall = mute
     frontendToBackend = dispatch
@@ -532,6 +607,40 @@ async function reactivateBackend(): Promise<void> {
     const shadowTarget = { __REACT_DEVTOOLS_GLOBAL_HOOK__: realHook } as Record<string, unknown>
     const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
     backend.activate(shadowTarget as unknown as Window, { bridge })
+
+/** 重新 attach：inject → attachRenderer 造全新 interface → emit
+     *  renderer-attached → agent 注册回调自动 flushInitialOperations（官方
+     *  时序，与扩展 reload 场景一致）。
+     *
+     *  ⚠️ 不手动 flush、不往 rendererInterfaces 塞 oldId 别名 entry：
+     *  initBackend 的 rendererInterfaces.forEach 会对每个 entry 各跑一次
+     *  registerRendererInterface（内含 flushInitialOperations），双 entry =
+     *  同一 interface flush 两次 = 全量树 operations 双发 = frontend Store
+     *  mount 两棵树（树 ×2 的直接根因）。
+     *  react-dom 持有的 oldId 增量路由改由下方 hook 级 id 映射转发兜住 */
+    for (const [oldId, renderer] of oldRenderers) {
+      const newId = realHook.inject(renderer)
+      const newInterface = realHook.rendererInterfaces.get(newId)
+      if (newInterface == null) continue
+
+      /** fiberRoots 迁移 oldId → newId：flushInitialOperations 按 interface 闭包
+       *  固化的 newId 读 getFiberRoots(newId)，不迁移则初始树为空 */
+      const oldRoots = realHook.getFiberRoots(oldId)
+      const newRoots = realHook.getFiberRoots(newId)
+      for (const root of oldRoots) newRoots.add(root)
+
+      /** oldId → newId 映射：react-dom 终身持有 oldId（inject 返回值已缓存），
+       *  onCommitFiberRoot(oldId) 等 hook 方法必须重写到 newId 才能命中
+       *  rendererInterfaces 里唯一的 newId entry，否则增量永久丢失 */
+      rendererIdRemap.set(oldId, newId)
+    }
+
+    /** hook 级 id 映射转发：包装 realHook 的四个按 rendererID 寻址的方法，
+     *  oldId 调用透明转发到 newId（bundle 内部与 react-dom 都通过属性访问
+     *  调这些方法，包装稳定生效）。幂等：多次 reactivate 只重包一次
+     *  （包装函数检查映射未命中时透传原 id） */
+    installRendererIdRemap(realHook, rendererIdRemap)
+
     activeBridge = bridge as unknown as { shutdown: () => void }
     completeActivationHandshake(dispatch)
   } catch {

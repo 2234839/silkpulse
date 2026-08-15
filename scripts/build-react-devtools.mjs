@@ -103,13 +103,47 @@ execSync(
 )
 
 console.log('[4/4] esbuild 打包 backend（IIFE，SDK 按需 fetch）')
+const backendOut = join(OUT_DIR, 'backend.bundle.js')
 execSync(
   `node ${join(TMP, 'node_modules/esbuild/bin/esbuild')} ${join(TMP, 'node_modules/react-devtools-inline/dist/backend.js')}` +
     ' --bundle --format=iife --global-name=ReactDevToolsBackend' +
-    ` --outfile=${join(OUT_DIR, 'backend.bundle.js')}` +
+    ` --outfile=${backendOut}` +
     ` --define:process.env.NODE_ENV='"development"'`,
   { stdio: 'inherit' },
 )
+
+/**
+ * SilkPulse patch：后注入页面的 hooks inspect 降级
+ *
+ * 背景：SDK 后注入（页面 React 先跑完）时，recoverReactRoots() 构造的合成
+ * renderer 没有 currentDispatcherRef（页面纯 ESM 产物里 React internals 在
+ * 模块闭包中拿不到——官方 devtools 同样做不到）。此时 backend 的
+ * inspectHooksOfFiber 会 fallback 到 backend 内置的 ReactSharedInternals
+ * 去重放组件函数，页面组件里的 useState 读到的是页面 React 未被替换的
+ * dispatcher → render phase 外调用 → Minified React error #321 →
+ * ReactDebugToolsRenderError → frontend throw 崩面板。
+ *
+ * 修复：拿不到 dispatcher 就返回 null（hooks: null 是 backend 协议的合法值，
+ * 纯 props 组件本来就是 null），props/state/owners 照常显示，面板不崩。
+ * 先注入场景（script 标签，生产主路径）renderer 自带 currentDispatcherRef，
+ * 不受影响。
+ */
+const HOOKS_ANCHOR = 'return inspectHooksOfFiber(fiber, getDispatcherRef(renderer));'
+const HOOKS_PATCH = [
+  'var __silkpulseDispatcherRef = getDispatcherRef(renderer);',
+  '// SilkPulse: 合成 renderer（后注入）无 currentDispatcherRef，重放组件必报 #321，降级为无 hooks',
+  'if (__silkpulseDispatcherRef === void 0) {',
+  '  return null;',
+  '}',
+  'return inspectHooksOfFiber(fiber, __silkpulseDispatcherRef);',
+].join('\n')
+const backendSrc = readFileSync(backendOut, 'utf8')
+const anchorCount = backendSrc.split(HOOKS_ANCHOR).length - 1
+if (anchorCount !== 1) {
+  throw new Error(`backend patch 锚点数量异常（期望 1，实际 ${anchorCount}），请检查 react-devtools-inline 版本变化`)
+}
+writeFileSync(backendOut, backendSrc.replace(HOOKS_ANCHOR, HOOKS_PATCH))
+console.log('      backend patch 已应用（hooks dispatcher 降级）')
 
 /** 记录版本信息（同 vue-devtools 的 version.json 格式） */
 writeFileSync(

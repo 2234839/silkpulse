@@ -144,7 +144,16 @@ function refreshData(): void {
   if (activePlugin.value === 'vue') {
     props.send(props.deviceId, 'vue', '__silkpulse_refresh__')
   } else {
-    props.send(props.deviceId, 'react', { refresh: true })
+    /** react：重载 frontend iframe（而非 backend reactivate）
+     *
+     * reactivate 虽然单发全量树（backend 侧已修复单次 flush），但 frontend
+     * Store 是长驻的——旧树节点不会因新 operations 到达而清理，每次全量
+     * mount 都叠加成 N 份树。官方扩展的 reload 语义 = 全新 Store 收初始树，
+     * 这里重载 iframe 等价复刻：frontend 重新握手（ready → activate），
+     * backend 侧 reactivateBackend 重建 bridge + agent，单次 flush 的初始
+     * 树被全新 Store 消费，树恒为 1 份。
+     * 代价：丢失面板内展开/选中状态（与官方 reload 一致） */
+    reloadIframe()
   }
 }
 

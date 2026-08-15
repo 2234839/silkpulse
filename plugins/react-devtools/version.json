@@ -2,6 +2,6 @@
   "plugin": "react",
   "reactDevtoolsInline": "7.0.1",
   "react": "experimental",
-  "builtAt": "2026-08-14T09:59:35.616Z",
+  "builtAt": "2026-08-15T15:55:21.523Z",
   "source": "react-devtools-inline dist + esbuild IIFE（scripts/build-react-devtools.mjs）"
 }
