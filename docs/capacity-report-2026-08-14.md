@@ -67,6 +67,22 @@
 - Docker 增加平台特定二进制（uws_linux_x64_137.node 按 Node ABI 锁定，升级 Node 需重装）
 - 94 项回归需全量重验
 
-**迁移判定：性能收益已实证，但当前容量（实际使用 ≪ 2000 设备）远未触及 ws 瓶颈，ws 送达率 30% 的掉帧仅发生在超出产品容量的实验室负载。暂不迁移，保留 PoC（/tmp/uws-poc）与基线数据，触及 2000+ 设备规模或扇出掉帧真实出现时立即启动。**
+**迁移判定（2026-08-15 更新）：已完成生产迁移。** HTTP/WS 层全量重写为 uWebSockets.js v20.52.0（commit 66448b7），路由逻辑一行不漏，94 项回归全绿。生产实测（2000 设备 / 6k msg/s / 30s）：
+
+| 指标 | ws 版（迁移前） | uWS 版（生产实测） | 变化 |
+|---|---|---|---|
+| 事件循环利用率（洪峰） | 80.2% | **9.3-9.5%** | **-88%** |
+| 洪峰后 server RSS | 512-549MB | **261-299MB** | **-48%** |
+| 广播送达率 | 30% | **100%**（174000 发送 / 4350 精确送达） | 消灭掉帧 |
+| exec QPS（并发 10） | 2006 | **3535** | +76% |
+| exec p99 | 18.3ms | **11.0ms** | -40% |
+| HTTP 轮询 p99 | 24.1ms | 11.0ms | -54% |
+| register 风暴（2000 台） | — | p50=25.7ms p99=74ms，4.2s 全量在线 | — |
+
+架构要点：
+- `src/uws/http-helpers.ts`：Ctx 模型（同步缓存 url/method/headers——uWS req 异步即失效）、onAborted 标记、writeResponse cork 批写
+- `src/uws/ws-socket.ts`：SilkWs 包装（readyState/send/end 兼容层）+ WsUserData 承载 upgrade→open 的 authCtx/url 传递（uWS 官方 UserData 模式）
+- 心跳语义变更：uWS `idleTimeout:32 + sendPingsAutomatically` 替代旧 30s 应用层 ping 循环；console 侧 25s `{type:'ping'}→{type:'pong'}` 保留
+- 已知 trade-off：uWS 不支持 permessage-deflate（WS 消息不压缩，作者设计哲学）；部署产物需带 `node_modules/uWebSockets.js`（原生 .node 二进制，按 Node ABI 锁定）
 
 PoC 复刻件：`/tmp/uws-poc/server.mjs`（可独立运行复现全部数据）。
