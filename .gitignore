@@ -17,6 +17,12 @@ packages/server/public/assets
 packages/server/public/index.html
 packages/server/public/sdk.js
 
+# 部署同步产物（console public 拷贝 + 测试页部署 + 第三方 vendor 库）
+packages/server/public/blog/
+packages/server/public/vendor/
+packages/server/public/post-inject-*.html
+packages/server/public/react-vite-*.html
+
 # dotenv environment variable files
 .env
 .env.*
