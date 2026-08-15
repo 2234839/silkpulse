@@ -190,6 +190,9 @@ git add -A && git commit -m "feat(xxx): 描述"
 ### 陷阱 11：React 生产构建 set 是官方级限制，如实报错
 react-dom prod 的 inject 对象 `overrideHookState/overrideProps/scheduleUpdate` 全为 `null`（源码证实，官方扩展同此限制）。`setReact` 检测 `typeof renderer.overrideHookState !== 'function'` 时返回明确 error「目标页 React 是生产构建（bundleType=0）…」，**不要假成功**。树/inspect（只读）/点击交互在 prod 全部正常。
 
+### 陷阱 12b：React ESM 构建后注入 inspect #321 的结构性限制与静态解析 fallback
+ESM vite build 的 React 没有 window.React（ReactSharedInternals 在模块闭包），后注入恢复时合成 renderer 的 currentDispatcherRef 拿不到 → backend 重放组件函数必 #321。官方扩展靠 document_start 先装 hook 让 react-dom inject 时传 dispatcher，后注入无解。**fallback**：fiber.memoizedState hook 链静态解析（queue.lastRenderedState → state 类、create+deps → effect 类），产出与官方 inspect hooks 数组同构（isStateEditable:false + note 说明）。先注入场景不受影响（react-dom inject 真实 renderer 含 dispatcher）。验证：scripts/diag-react-vite.mjs（真实 React 18.3.1 vite build 产物 × 先/后注入 14/14）。组件名在 prod minify 后是压缩名（Sd/wd）——官方 React DevTools 同样显示。
+
 ### 陷阱 12：frameworks 探测时序——真实 vite build SPA 先注入必踩
 script 标签先注入时 SDK 在 `<head>` 同步执行，vite build 的 Vue/React app（ESM chunk 异步加载）**尚未 mount**，`collectDeviceInfo` 探到 `frameworks=[]` 上报后**永远没人重报**（只有 SPA 路由变化才重报）。控制台面板据 frameworks 判「不支持」直接不加载 client iframe，页面 app 起来后也无法自愈——用户看到的就是「vue build 的页面不支持」。修复：SDK 探测用**自适应间隔 setTimeout 链**（未探到框架 1s 高频，探到后 5s 低频兜底，变化才上报稳态零流量）；面板侧 `watch(frameworks)` 时 `reloadIframe()` 重新握手。验证脚本：`scripts/diag-vite-spa-preinject.mjs`（用 console 自身当目标页——它就是真实 Vue vite build 产物）。
 

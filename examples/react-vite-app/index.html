@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>React vite build - 真实产物测试页</title>
+    <!-- 先注入：等价真实接入的 script 标签（document_start 语义） -->
+    <script src="/sdk.js" data-server="http://localhost:8080"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -222,6 +222,47 @@ export function installDevToolsHelpers(): void {
     return 'Unknown'
   }
 
+  /**
+   * 静态解析 React hooks 链（#321 fallback 用）
+   *
+   * fiber.memoizedState 是 hook 单链表（useState/useEffect/... 各节点
+   * memoizedState 存 hook 数据，queue 指向更新队列）。只读视角：
+   * - useState/useReducer：hook.memoizedState 是当前值（pair: [state, dispatch]
+   *   只在 useState 的链表里直接是值）
+   * - useEffect/useLayoutEffect：memoizedState 是 Effect 对象（create/destroy/deps）
+   * - useRef/ useContext：memoizedState 即 ref.current / context value
+   *
+   * hook 类型无运行时标记（React 不存 hookName），按 React 内部结构启发式
+   * 判断：有 queue 且 queue.lastRenderedState 存在 → state 类；有 deps+create
+   * → effect 类；其余原样给 memoizedState。产出与官方 inspect 的 hooks 数组
+   * 同构（id/name/value），消费方（AI/console）无需区分来源
+   */
+  function staticReactHooks(compFiber: Record<string, unknown>): Array<Record<string, unknown>> {
+    const hooks: Array<Record<string, unknown>> = []
+    let hook = compFiber.memoizedState as Record<string, unknown> | null
+    let id = 0
+    while (hook && id < 50) {
+      const entry: Record<string, unknown> = { id }
+      const ms = hook.memoizedState
+      const queue = hook.queue as { lastRenderedState?: unknown } | undefined
+      if (queue && 'lastRenderedState' in queue) {
+        entry.name = 'state'
+        entry.value = queue.lastRenderedState
+        entry.isStateEditable = false
+      } else if (ms && typeof ms === 'object' && 'create' in (ms as object) && 'deps' in (ms as object)) {
+        entry.name = 'effect'
+        entry.deps = (ms as { deps?: unknown[] }).deps
+      } else {
+        entry.name = 'ref-or-context'
+        entry.value = ms
+      }
+      hooks.push(entry)
+      hook = hook.next as Record<string, unknown> | null
+      id++
+    }
+    return hooks
+  }
+
   /** fiber 链向上找最近的类/函数组件 fiber（跳过宿主组件） */
   function nearestComponentFiber(fiber: Record<string, unknown>): Record<string, unknown> | null {
     let cur: Record<string, unknown> | null = fiber
@@ -356,7 +397,32 @@ export function installDevToolsHelpers(): void {
       ? inspected.value as Record<string, unknown>
       : inspected
     if (data.type === 'not-found') return err(`组件 id=${id} 不在 DevTools 注册表中`)
-    if (data.type === 'error') return err(`检查组件失败: ${String(data.message ?? '未知错误')}`)
+    if (data.type === 'error') {
+      /**
+       * #321 fallback：hooks 重放需要页面 react 的 ReactCurrentDispatcher。
+       * ESM 构建后注入时 window.React 不存在（模块闭包内拿不到 internals），
+       * 重放组件函数必然 #321——这是结构性限制，官方扩展靠 document_start
+       * 先装 hook 让 react-dom inject 时传入 dispatcher，后注入无解。
+       * 但 fiber 是公开的：hook 链（fiber.memoizedState → next）可静态解析，
+       * props 同理（fiber.memoizedProps）——只读视角完全可恢复
+       */
+      if (String(data.message ?? '').includes('#321')) {
+        return {
+          framework: 'react',
+          id,
+          rendererID,
+          name: renderer!.getDisplayNameForElementID(id) ?? fiberDisplayName(compFiber),
+          idx: ensureIdxSafe(hostEl),
+          props: compFiber.memoizedProps,
+          hooks: staticReactHooks(compFiber),
+          /** 静态解析无法写（写入需要重放路径的 override，本就 prod 禁用） */
+          canEditHooks: false,
+          canEditState: false,
+          note: 'hooks 为静态解析（ESM 后注入无全局 React，重放路径 #321）',
+        }
+      }
+      return err(`检查组件失败: ${String(data.message ?? '未知错误')}`)
+    }
     const out: Record<string, unknown> = {
       framework: 'react',
       id,
