@@ -232,6 +232,9 @@ catalogs:
     typescript:
       specifier: ^7.0.2
       version: 7.0.2
+    uWebSockets.js:
+      specifier: github:uNetworking/uWebSockets.js#v20.52.0
+      version: 20.52.0
     vite-plus:
       specifier: 0.2.6
       version: 0.2.6
@@ -241,9 +244,6 @@ catalogs:
     vue-router:
       specifier: ^5.2.0
       version: 5.2.0
-    ws:
-      specifier: ^8.18.0
-      version: 8.21.2
 
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.6
@@ -348,9 +348,9 @@ importers:
       '@silkpulse/shared':
         specifier: workspace:*
         version: link:../shared
-      ws:
+      uWebSockets.js:
         specifier: 'catalog:'
-        version: 8.21.2
+        version: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/cfc9a40d8132a34881813cec3d5f8e3a185b3ce3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1837,6 +1837,10 @@ packages:
     engines: {node: '>=16.20.0'}
     hasBin: true
 
+  uWebSockets.js@https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/cfc9a40d8132a34881813cec3d5f8e3a185b3ce3:
+    resolution: {gitHosted: true, integrity: sha512-1eSUhK/WLig+fbq6dB18hsmkoaC+6YGVkAp2r0tQ6PGBxsOPpLUmMsKN/7ANoYtWiou+lU46+Bnf8JBYES9EsA==, tarball: https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/cfc9a40d8132a34881813cec3d5f8e3a185b3ce3}
+    version: 20.52.0
+
   ufo@1.6.4:
     resolution: {integrity: sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA==}
 
@@ -3208,6 +3212,8 @@ snapshots:
       '@typescript/typescript-sunos-x64': 7.0.2
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
+
+  uWebSockets.js@https://codeload.github.com/uNetworking/uWebSockets.js/tar.gz/cfc9a40d8132a34881813cec3d5f8e3a185b3ce3: {}
 
   ufo@1.6.4: {}
 

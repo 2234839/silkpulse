@@ -10,9 +10,10 @@
  *   2. 转发给所有订阅了该设备的控制台
  */
 
-import type { WebSocketServer, WebSocket } from 'ws'
+import type { WebSocketBehavior } from 'uWebSockets.js'
 import type { DeviceRegistry, Device } from './device-registry.js'
 import type { AuthContext } from './auth.js'
+import { SilkWs, getSilk, type WsUserData } from './uws/ws-socket.js'
 import type {
   DeviceMessage,
   ServerToConsoleMessage,
@@ -35,14 +36,14 @@ function generateDeviceId(): string {
  * 返回 notifyDeviceListChanged，供 HTTP API（如 tags 修改）触发控制台刷新
  */
 export function setupWebSocket(
-  wss: WebSocketServer,
-  registry: DeviceRegistry
-): { notifyDeviceListChanged: () => void } {
+  registry: DeviceRegistry,
+  auth: { authorizeWsConnection: (url: string, wsPath: string) => AuthContext; isAuthEnabled: () => boolean }
+): { behavior: WebSocketBehavior<WsUserData>; notifyDeviceListChanged: () => void } {
   /** 每个 WS 连接对应的设备 ID（设备端）或订阅集合（控制台端） */
-  const deviceSockets = new Map<WebSocket, Device>()
+  const deviceSockets = new Map<SilkWs, Device>()
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
-  const consoleSubscriptions = new Map<WebSocket, Set<string>>()
-  const deviceWatchers = new Map<string, Set<WebSocket>>()
+  const consoleSubscriptions = new Map<SilkWs, Set<string>>()
+  const deviceWatchers = new Map<string, Set<SilkWs>>()
 
   /** 向所有订阅了某设备的控制台广播消息 */
   /**
@@ -68,7 +69,7 @@ export function setupWebSocket(
         continue
       }
       /** 项目隔离：项目级控制台只能收到自己项目设备的数据 */
-      const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+      const ctx = ws.authCtx
       if (ctx?.role === 'project' && ctx.projectId !== deviceProjectId) {
         fanoutStats.skippedProject++
         continue
@@ -76,14 +77,11 @@ export function setupWebSocket(
       /** 背压保护：积压超限的连接直接关闭，不再塞数据 */
       if (ws.bufferedAmount > MAX_BUFFERED) {
         fanoutStats.backpressureClosed++
-        ws.close(1011, 'backpressure: send buffer overflow')
+        ws.end(1011, 'backpressure: send buffer overflow')
         continue
       }
-      /**
-       * send 带回调：连接已死但 readyState 尚未更新的竞态下，send 内部会回调报错，
-       * 不带回调时 ws 库会抛同步异常。回调吞掉错误（close 回调统一清理死连接）。
-       */
-      ws.send(text, () => {})
+      /** close 后 send 自动 no-op（竞态安全，close 回调统一清理死连接） */
+      ws.send(text)
       fanoutStats.sent++
     }
   }
@@ -94,7 +92,7 @@ export function setupWebSocket(
    * key = 控制台 ws，value = 该控制台当前观看的设备 + 启用的 watcher 集合。
    * 控制台切换面板时发 set-watchers 更新此偏好。
    */
-  const consoleWatcherPrefs = new Map<WebSocket, { deviceId: string; watchers: Set<string> }>()
+  const consoleWatcherPrefs = new Map<SilkWs, { deviceId: string; watchers: Set<string> }>()
 
   /**
    * 汇总某设备所有订阅控制台的 watcher 偏好，取并集
@@ -113,7 +111,7 @@ export function setupWebSocket(
   }
 
   /** 取消某控制台对所有设备的订阅 */
-  function unsubscribeAll(ws: WebSocket) {
+  function unsubscribeAll(ws: SilkWs) {
     const subs = consoleSubscriptions.get(ws)
     if (!subs) return
     for (const deviceId of subs) {
@@ -137,29 +135,107 @@ export function setupWebSocket(
     }
   }
 
-  wss.on('connection', (ws, req) => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
+  /**
+   * uWS WebSocket 行为定义（设备/控制台共用，靠 open 时的 url 区分）
+   *
+   * idleTimeout=32 + sendPingsAutomatically：协议层心跳（等价旧版 30s ping 循环，
+   * 浏览器自动回 pong 刷新 idle 计时，脏断开 32s 内被强制清理）。
+   * maxBackpressure=1MB：uWS 原生背压上限，超限直接断慢消费者。
+   */
+  const behavior: WebSocketBehavior<WsUserData> = {
+    idleTimeout: 32,
+    sendPingsAutomatically: true,
+    maxBackpressure: MAX_BUFFERED,
+    maxPayloadLength: 4 * 1024 * 1024,
+
+    open: (ws) => {
+      const silk = getSilk(ws)
+      handleOpen(silk)
+    },
+    message: (ws, message) => {
+      const silk = getSilk(ws)
+      /** uWS message 是 ArrayBuffer（回调返回后被 neuter），立刻转字符串 */
+      let raw: string
+      try {
+        raw = Buffer.from(message).toString()
+      } catch {
+        return
+      }
+      handleMessage(silk, raw)
+    },
+    close: (ws) => {
+      const silk = getSilk(ws)
+      silk.closed = true
+      /** 摘除连接：还有其他活连接（多标签页）则设备仍在线；
+       *  最后一条断开走宽限期（reload 窗口内重连无缝续接，不丢历史缓冲） */
+      const closeUrl = new URL(getUrlFromSocket(silk), 'http://localhost')
+      if (closeUrl.pathname === '/ws/device') {
+        const state = deviceStates.get(silk)
+        if (state?.deviceId) {
+          registry.detachSocket(state.deviceId, silk)
+        }
+        deviceStates.delete(silk)
+      }
+      if (closeUrl.pathname === '/ws/console') {
+        unsubscribeAll(silk)
+      }
+    },
+  }
+
+  /** ---------- 连接生命周期处理 ---------- */
+  function handleOpen(silk: SilkWs) {
+    const url = new URL(getUrlFromSocket(silk), 'http://localhost')
     const pathname = url.pathname
 
     /** ---------- 设备端连接 ---------- */
     if (pathname === '/ws/device') {
-      let deviceId = ''
-      let device: Device | undefined
+      deviceStates.set(silk, { deviceId: '', device: undefined })
+    }
 
-      ws.on('message', (raw) => {
+    /** ---------- 控制台连接 ---------- */
+    if (pathname === '/ws/console') {
+      consoleSubscriptions.set(silk, new Set())
+
+      /** 控制台连上后立即推送当前设备列表（按项目过滤） */
+      const consoleProjectId = silk.authCtx.role === 'project' ? silk.authCtx.projectId : undefined
+      silk.send(
+        JSON.stringify({
+          type: 'device-list',
+          devices: registry.listByProject(consoleProjectId),
+        } satisfies ServerToConsoleMessage)
+      )
+    }
+  }
+
+  /** 每个设备连接的状态（device 路径专用） */
+  const deviceStates = new Map<SilkWs, { deviceId: string; device: Device | undefined }>()
+
+  function handleMessage(silk: SilkWs, raw: string): void {
+    const url = new URL(getUrlFromSocket(silk), 'http://localhost')
+    const pathname = url.pathname
+
+    /** ---------- 设备端消息 ---------- */
+    if (pathname === '/ws/device') {
+      const state = deviceStates.get(silk)
+      if (!state) return
+      let { deviceId } = state
+      let { device } = state
+
+      {
         let msg: DeviceMessage
         try {
-          msg = JSON.parse(raw.toString())
+          msg = JSON.parse(raw)
         } catch {
           return
         }
 
-        switch (msg.type) {
+        {
+          switch (msg.type) {
           case 'register': {
             /** 设备首次注册：分配/复用 id，建立映射 */
             deviceId = msg.device.id || generateDeviceId()
             /** 从 WS 连接的鉴权上下文获取 projectId */
-            const wsAuthCtx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+            const wsAuthCtx = silk.authCtx
             const info: DeviceInfo = {
               ...msg.device,
               id: deviceId,
@@ -170,15 +246,15 @@ export function setupWebSocket(
               tags: msg.device.tags ?? [],
               note: msg.device.note,
             }
-            const registered = registry.register(info, ws, msg.sessionToken ?? '')
+            const registered = registry.register(info, silk, msg.sessionToken ?? '')
             if (!registered) {
               /** deviceId 已被另一个活着的标签页占用（复制标签页，Web Locks 不可用时的
                *  server 端仲裁）：告知设备换新 id 重连。此连接不再接受消息。 */
-              ws.send(JSON.stringify({ type: 'device-id-conflict' } satisfies import('@silkpulse/shared').ServerToDeviceMessage))
+              silk.send(JSON.stringify({ type: 'device-id-conflict' } satisfies import('@silkpulse/shared').ServerToDeviceMessage))
               return
             }
             device = registered
-            deviceSockets.set(ws, device)
+            deviceSockets.set(silk, device)
             /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
             broadcast(deviceId, {
               type: 'device-online',
@@ -391,40 +467,24 @@ export function setupWebSocket(
             break
           }
         }
-      })
-
-      ws.on('close', () => {
-        /** 摘除连接：还有其他活连接（多标签页）则设备仍在线；
-         *  最后一条断开走宽限期（reload 窗口内重连无缝续接，不丢历史缓冲） */
-        if (deviceId) {
-          registry.detachSocket(deviceId, ws)
+        /** 写回 per-socket state（deviceId/device 随 register 更新） */
+        state.deviceId = deviceId
+        state.device = device
         }
-        deviceSockets.delete(ws)
-      })
+      }
       return
     }
 
-    /** ---------- 控制台连接 ---------- */
+    /** ---------- 控制台消息 ---------- */
     if (pathname === '/ws/console') {
-      consoleSubscriptions.set(ws, new Set())
-
-      /** 控制台连上后立即推送当前设备列表（按项目过滤） */
-      const consoleAuthCtx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
-      const consoleProjectId = consoleAuthCtx?.role === 'project' ? consoleAuthCtx.projectId : undefined
-      ws.send(
-        JSON.stringify({
-          type: 'device-list',
-          devices: registry.listByProject(consoleProjectId),
-        } satisfies ServerToConsoleMessage)
-      )
-
-      ws.on('message', (raw) => {
+      {
         let msg: ConsoleMessage
         try {
-          msg = JSON.parse(raw.toString())
+          msg = JSON.parse(raw)
         } catch {
           return
         }
+        const ws = silk
         switch (msg.type) {
           case 'subscribe': {
             const subs = consoleSubscriptions.get(ws)!
@@ -501,22 +561,20 @@ export function setupWebSocket(
             break
           }
         }
-      })
-
-      ws.on('close', () => unsubscribeAll(ws))
+      }
     }
-  })
+  }
 
   /** 设备列表变化时推送给所有控制台（按项目隔离） */
   function notifyDeviceListChanged() {
     for (const ws of consoleSubscriptions.keys()) {
       if (ws.readyState !== ws.OPEN) continue
       /** 每个控制台只收到它有权访问的设备列表 */
-      const ctx = (ws as unknown as { __authCtx?: AuthContext }).__authCtx
+      const ctx = ws.authCtx
       const pid = ctx?.role === 'project' ? ctx.projectId : undefined
       const msg: ServerToConsoleMessage = { type: 'device-list', devices: registry.listByProject(pid) }
-      /** 加错误回调防 send 抛异常中断循环（与 broadcast 保持一致） */
-      ws.send(JSON.stringify(msg), () => {})
+      /** close 后 send 自动 no-op（与 broadcast 保持一致） */
+      ws.send(JSON.stringify(msg))
     }
   }
 
@@ -540,35 +598,25 @@ export function setupWebSocket(
     }
   })
 
-  /**
-   * WS 心跳：每 30s ping 所有连接，检测脏断开（移动端弱网/TCP 未正常关闭）。
-   * 每个连接标记 alive，ping 后删除标记，收到 pong 重新标记。
-   * 下个周期仍无标记 → 连接已死，terminate 强制清理（触发 close → 下线）。
-   */
-  const HEARTBEAT_INTERVAL = 30000
-  const aliveSet = new WeakSet<WebSocket>()
-
-  /** 新连接默认存活 + 监听 pong */
-  wss.on('connection', (ws) => {
-    aliveSet.add(ws)
-    ws.on('pong', () => aliveSet.add(ws))
-  })
-
-  const interval = setInterval(() => {
-    wss.clients.forEach((ws) => {
-      if (ws.readyState !== ws.OPEN) return
-      if (!aliveSet.has(ws)) {
-        /** 上个周期 ping 后没收到 pong → 脏断开，强制关闭 */
-        ws.terminate()
-        return
-      }
-      aliveSet.delete(ws)
-      ws.ping()
-    })
-  }, HEARTBEAT_INTERVAL)
-
-  /** server 关闭时清理心跳定时器 */
-  wss.on('close', () => clearInterval(interval))
-
-  return { notifyDeviceListChanged }
+  return { behavior, notifyDeviceListChanged }
 }
+
+/**
+ * 从 SilkWs 取连接时的完整 URL
+ *
+ * uWS 不在 open 回调里直接给 URL —— upgrade 阶段把 URL 存进 UserData（见 index.ts），
+ * 这里读出来解析路径。
+ */
+export function getUrlFromSocket(silk: SilkWs): string {
+  return socketUrls.get(silk) ?? '/'
+}
+
+/** SilkWs → 连接 URL（upgrade 阶段由 index.ts 注册） */
+const socketUrls = new WeakMap<SilkWs, string>()
+
+/** 注册连接 URL（upgrade 阶段调用，open 回调前） */
+export function registerSocketUrl(silk: SilkWs, url: string): void {
+  socketUrls.set(silk, url)
+}
+
+

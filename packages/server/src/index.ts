@@ -1,24 +1,30 @@
 /**
- * silkpulse server 入口 —— 启动 HTTP + WebSocket 服务
+ * silkpulse server 入口 —— 启动 HTTP + WebSocket 服务（uWebSockets.js 原生实现）
  *
  * 服务职责：
  * 1. WebSocket /ws/device   —— 接收设备端 SDK 连接（采集数据上报 + exec 指令下发）
  * 2. WebSocket /ws/console  —— 控制台连接（订阅设备实时数据）
  * 3. HTTP /api/*            —— AI skill 调用入口（devices/snapshot/exec/logs/network/errors）
  * 4. 静态资源               —— 控制台 UI（/）+ SDK 脚本（/sdk.js）
+ *
+ * uWS 关键约定（与 node:http 的差异）：
+ * - 异步 handler 返回前必须 res.onAborted（否则进程 abort）
+ * - upgrade 第 5 参数必须是 upgrade 回调的 context（否则 socket hang up）
+ * - res 的 status/headers 必须在 end 前一次性写完
  */
 
-import http from 'node:http'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { WebSocketServer } from 'ws'
+import uWS from 'uWebSockets.js'
 import { DeviceRegistry } from './device-registry.js'
-import { setupWebSocket } from './ws-relay.js'
+import { setupWebSocket, registerSocketUrl } from './ws-relay.js'
 import { handleApiRoute } from './api.js'
 import { handleAgentApiRoute } from './agent-api.js'
-import { AuthManager, ProjectStore, handleProjectApiRoute, readAndCacheBody, type AuthContext } from './auth.js'
+import { AuthManager, ProjectStore, handleProjectApiRoute, type AuthContext } from './auth.js'
 import { maybeGzipResponse } from './gzip.js'
+import { createCtx, onAborted, readBody, writeResponse, sendNotModified, type Ctx } from './uws/http-helpers.js'
+import { SilkWs, type WsUserData } from './uws/ws-socket.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -34,9 +40,12 @@ export interface SilkPulseServerOptions {
 }
 
 /**
- * 创建并启动 silkpulse server
+ * 创建并启动 silkpulse server（uWS 版）
+ *
+ * 返回 uWS TemplatedApp（listen 已调用并就绪）。
+ * uWS 不支持 server.close() 式的编程接口 —— 进程退出即服务终止。
  */
-export function createServer(options: SilkPulseServerOptions = {}): http.Server {
+export async function createServer(options: SilkPulseServerOptions = {}): Promise<uWS.TemplatedApp> {
   const port = options.port ?? 8080
 
   /** 项目数据持久化路径：优先 options，否则用环境变量，最后默认 ~/.silkpulse/projects.json */
@@ -49,39 +58,104 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
   /** 静态资源目录：优先用 options.staticRoot，否则用 ../public（console-ui 构建产物 + sdk） */
   const staticRoot = options.staticRoot ?? path.resolve(__dirname, '../public')
 
-  const server = http.createServer(async (req, res) => {
-    /** 安全响应头 */
-    res.setHeader('X-Content-Type-Options', 'nosniff')
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+  const app = uWS.App()
 
-    /** 缓存请求体（项目管理 + 鉴权 API 需要） */
-    if (req.url?.startsWith('/api/projects') || req.url?.startsWith('/api/auth')) {
-      await readAndCacheBody(req)
-      /** 项目管理 API + 鉴权状态 API */
-      if (handleProjectApiRoute(req, res, auth)) return
+  /** WS 行为定义（设备/控制台共用，鉴权在 upgrade 阶段做） */
+  const { behavior, notifyDeviceListChanged } = setupWebSocket(registry, auth)
+
+  /**
+   * WS upgrade 处理器工厂（device/console 各一份）
+   *
+   * 鉴权失败的连接在 upgrade 前回 401（uWS 语义：非 101 状态直接拒绝握手）。
+   * 通过鉴权的连接：UserData 挂 SilkWs 占位 + WeakMap 存 URL，
+   * 真正的 SilkWs 实例化延迟到 open 回调（那时才能拿到 WebSocket 对象）。
+   */
+  /**
+   * upgrade→open 的状态传递
+   *
+   * uWS 的 upgrade 只能带 plain object（UserData），且 open 回调里拿不到
+   * 原始 req —— 鉴权上下文和 URL 都在 upgrade 阶段解析后挂进 UserData，
+   * open 回调里直接读取（upgrade 传入的对象就是 getUserData() 返回的同一个）。
+   * 这是 uWS 官方推荐的 UserData 传递模式，无竞态。
+   */
+  const wsUpgrade = (wsPath: string) => (res: uWS.HttpResponse, req: uWS.HttpRequest, context: uWS.us_socket_context_t) => {
+    const url = req.getUrl() + (req.getQuery() ? '?' + req.getQuery() : '')
+    const wsAuthCtx = auth.authorizeWsConnection(url, wsPath)
+    if (wsAuthCtx.role === 'anonymous' && auth.isAuthEnabled()) {
+      res.writeStatus('401 Unauthorized').end()
+      return
+    }
+    res.upgrade(
+      { silk: undefined as never, authCtx: wsAuthCtx, url },
+      req.getHeader('sec-websocket-key'),
+      req.getHeader('sec-websocket-protocol'),
+      req.getHeader('sec-websocket-extensions'),
+      context,
+    )
+  }
+
+  /** 包装 behavior：open 时完成 SilkWs 实例化（真正的业务挂载点） */
+  const wrappedBehavior: uWS.WebSocketBehavior<WsUserData> = {
+    ...behavior,
+    open: (ws) => {
+      const data = ws.getUserData() as WsUserData & { authCtx?: AuthContext; url?: string }
+      const silk = new SilkWs(ws, data.authCtx ?? { role: 'device' })
+      data.silk = silk
+      registerSocketUrl(silk, data.url ?? '/')
+      behavior.open?.(ws)
+    },
+  }
+
+  app.ws<WsUserData>('/ws/device', { ...wrappedBehavior, upgrade: wsUpgrade('/ws/device') })
+  app.ws<WsUserData>('/ws/console', { ...wrappedBehavior, upgrade: wsUpgrade('/ws/console') })
+
+  /** 测试用 echo WS：收到什么回什么，验证 SDK 的 WS 采集（连接/send/recv/close） */
+  app.ws('/ws/test-ws', {
+    idleTimeout: 32,
+    sendPingsAutomatically: true,
+    message: (ws, message) => {
+      ws.send(message)
+    },
+  })
+
+  /** 主请求处理（app.any 全方法通配，内部按路径分发） */
+  app.any('/*', async (res, req) => {
+    const ctx = createCtx(res, req)
+    onAborted(ctx)
+
+    /** 安全响应头（所有响应统一带上） */
+    const securityHeaders = {
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'SAMEORIGIN',
     }
 
-    /** 1. 鉴权上下文（附加到 req 上，后续 API 路由使用） */
-    const authCtx = auth.authorizeHttpRequest(req)
-    ;(req as unknown as { __authCtx?: AuthContext }).__authCtx = authCtx
+    /** 缓存请求体（项目管理 + 鉴权 API 需要） */
+    if (ctx.url.startsWith('/api/projects') || ctx.url.startsWith('/api/auth')) {
+      await readBody(ctx)
+      if (ctx.aborted) return
+      /** 项目管理 API + 鉴权状态 API */
+      if (handleProjectApiRoute(ctx, auth)) return
+    }
+
+    /** 1. 鉴权上下文（路由参数直接传，不再挂 req 上） */
+    const authCtx = auth.authorizeHttpRequest(ctx)
 
     /** 1.5 先交给 agent API 路由（/api/agent/*） */
-    if (await handleAgentApiRoute(req, res, registry, authCtx)) return
+    if (await handleAgentApiRoute(ctx, registry, authCtx)) return
 
     /** 1.6 再交给内部 API 路由（/api/devices/* 等） */
-    if (await handleApiRoute(req, res, registry, notifyDeviceListChanged, auth, authCtx)) return
+    if (await handleApiRoute(ctx, registry, notifyDeviceListChanged, auth, authCtx)) return
 
-    const url = new URL(req.url ?? '/', 'http://localhost')
+    const url = ctx.parsedUrl
     const pathname = url.pathname
 
     /** 2. 首页 → 控制台 UI */
     if (pathname === '/' || pathname === '/index.html') {
       const indexPath = path.resolve(staticRoot, 'index.html')
       if (fs.existsSync(indexPath)) {
-        serveFile(res, indexPath, 'text/html; charset=utf-8')
+        serveFile(ctx, indexPath, 'text/html; charset=utf-8', securityHeaders)
       } else {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(controlUnavailableHtml())
+        writeResponse(ctx, 200, { 'Content-Type': 'text/html; charset=utf-8' }, controlUnavailableHtml())
       }
       return
     }
@@ -90,10 +164,9 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     if (pathname === '/sdk.js') {
       const sdkPath = path.resolve(staticRoot, 'sdk.js')
       if (fs.existsSync(sdkPath)) {
-        serveFile(res, sdkPath, 'application/javascript; charset=utf-8')
+        serveFile(ctx, sdkPath, 'application/javascript; charset=utf-8', securityHeaders)
       } else {
-        res.writeHead(404)
-        res.end('// sdk.js 未构建，请在 packages/sdk 执行构建')
+        writeResponse(ctx, 404, { 'Content-Type': 'text/plain; charset=utf-8' }, '// sdk.js 未构建，请在 packages/sdk 执行构建')
       }
       return
     }
@@ -102,8 +175,7 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     if (pathname === '/favicon.ico') {
       /** 32×32 蓝底白圆 PNG（有视觉内容，验证 Network 面板图片预览效果） */
       const faviconPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAXUlEQVR4nGOwbvpGU8QwasGoBTD0HwNQzQJMo0myBp8F+I0m0hqcFhBvOn47BsgCUk3HY8dAWECe6bjsGLVgZFow9PMBPYoKelhA8+KaSGsIah8EVSaFaNSCEWABAEdJY9GqZCFVAAAAAElFTkSuQmCC', 'base64')
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' })
-      res.end(faviconPng)
+      writeResponse(ctx, 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' }, faviconPng)
       return
     }
 
@@ -124,8 +196,8 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
       ].find(p => fs.existsSync(p))
       if (demoPagePath && fs.existsSync(demoPagePath)) {
         /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */
-        const demoHost = req.headers.host || `localhost:${port}`
-        const demoProto = req.headers['x-forwarded-proto'] || 'http'
+        const demoHost = ctx.headers['host'] || `localhost:${port}`
+        const demoProto = ctx.headers['x-forwarded-proto'] || 'http'
         const demoOrigin = `${demoProto}://${demoHost}`
         let html = fs.readFileSync(demoPagePath, 'utf8').replace(/https?:\/\/localhost:8080/g, demoOrigin)
         /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
@@ -148,8 +220,11 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
             )
           }
         }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
-        res.end(html)
+        writeResponse(ctx, 200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          ...securityHeaders,
+        }, html)
         return
       }
     }
@@ -157,28 +232,24 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     /** 5. /inject/* —— 多形态注入（iife / bookmarklet / userscript），让不方便改源码的线上站也能接入 */
     if (pathname === '/inject/iife' || pathname === '/inject/bookmarklet' || pathname === '/inject/userscript') {
       /** 根据请求 Host header 推断 origin，本地用 localhost:port，线上用实际域名 */
-      const injHost = req.headers.host || `localhost:${port}`
-      const injProto = req.headers['x-forwarded-proto'] || 'http'
+      const injHost = ctx.headers['host'] || `localhost:${port}`
+      const injProto = ctx.headers['x-forwarded-proto'] || 'http'
       const origin = `${injProto}://${injHost}`
       /** 可选：携带 project_id 查询参数，拼入 inject 代码（设备端不需要密钥） */
       const projectId = url.searchParams.get('project_id') ?? undefined
       if (pathname === '/inject/iife') {
-        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
-        res.end(injectScriptCode(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId))
       } else if (pathname === '/inject/bookmarklet') {
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
-        res.end(buildBookmarklet(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/plain; charset=utf-8' }, buildBookmarklet(origin, projectId))
       } else {
-        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
-        res.end(buildUserscript(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, buildUserscript(origin, projectId))
       }
       return
     }
 
     /** 6. /inject-test —— 不含 SDK 的干净页面（测试 bookmarklet/userscript 注入效果） */
     if (pathname === '/inject-test') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>inject 测试页</title></head><body><h1>空白测试页</h1><p>用于验证 bookmarklet/userscript 注入</p></body></html>`)
+      writeResponse(ctx, 200, { 'Content-Type': 'text/html; charset=utf-8' }, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>inject 测试页</title></head><body><h1>空白测试页</h1><p>用于验证 bookmarklet/userscript 注入</p></body></html>`)
       return
     }
 
@@ -186,13 +257,11 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     /** minified: function n(r){throw new Error(r)}n("source map 测试错误") —— 加载即抛错 */
     /** throw @ 1:14 → crash.ts:2:2，new Error @ 1:20 → crash.ts:2:8 */
     if (pathname === '/test-fixtures/crash.js') {
-      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' })
-      res.end('function n(r){throw new Error(r)}n("source map 测试错误")\n//# sourceMappingURL=crash.js.map')
+      writeResponse(ctx, 200, { 'Content-Type': 'application/javascript; charset=utf-8' }, 'function n(r){throw new Error(r)}n("source map 测试错误")\n//# sourceMappingURL=crash.js.map')
       return
     }
     if (pathname === '/test-fixtures/crash.js.map') {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-      res.end(JSON.stringify({
+      writeResponse(ctx, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({
         version: 3,
         sources: ['crash.ts'],
         mappings: 'AAAA,SAASA,EAAeC,EAAoB,CAC1C,MAAM,IAAI,MAAMA,CAAG,CACrB,CACAD,EAAe,qCAAiB',
@@ -209,11 +278,13 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
      * 注意：路径不能以 /api/ 开头，否则会被 handleApiRoute 的 404 兜底拦截。
      */
     if (pathname === '/sse-test') {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
+      if (ctx.responded || ctx.aborted) return
+      /** SSE 头先写，进入流式模式（writeStatus 后用 write 连续推送） */
+      ctx.res.cork(() => {
+        ctx.res.writeStatus('200 OK')
+        ctx.res.writeHeader('Content-Type', 'text/event-stream')
+        ctx.res.writeHeader('Cache-Control', 'no-cache')
+        ctx.res.writeHeader('Access-Control-Allow-Origin', '*')
       })
       const events = [
         { event: 'message', data: 'SSE 连接已建立' },
@@ -224,9 +295,13 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
       ]
       let idx = 0
       const timer = setInterval(() => {
+        if (ctx.aborted) {
+          clearInterval(timer)
+          return
+        }
         if (idx >= events.length) {
           clearInterval(timer)
-          res.end()
+          ctx.res.end()
           return
         }
         const { event, id, data } = events[idx++]
@@ -234,14 +309,17 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
         if (id) chunk += `id: ${id}\n`
         chunk += `event: ${event}\n`
         chunk += `data: ${data}\n\n`
-        res.write(chunk)
+        ctx.res.write(chunk)
       }, 500)
       /** 客户端断开时清理定时器 */
-      req.on('close', () => clearInterval(timer))
+      ctx.res.onAborted(() => {
+        ctx.aborted = true
+        clearInterval(timer)
+      })
       return
     }
 
-    /** 5. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
+    /** 8. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1))
     if (filePath.startsWith(staticRoot) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       /**
@@ -250,12 +328,12 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
        * 会被误判为无 hash → 降级 no-cache，导致长缓存失效。
        */
       const isHashed = pathname.includes('/assets/') && /-[a-zA-Z0-9_-]{8,}\.\w+$/.test(pathname)
-      serveFile(res, filePath, guessContentType(filePath), isHashed ? 'longCache' : 'noCache')
+      serveFile(ctx, filePath, guessContentType(filePath), securityHeaders, isHashed ? 'longCache' : 'noCache')
       return
     }
 
     /**
-     * 6. SPA 路由回退
+     * 9. SPA 路由回退
      *
      * Vue Router 的 history 模式下，/tools 等前端路由需要返回 index.html，
      * 由前端 JS 解析路径并渲染对应组件。排除 /api/、/ws/ 等已知后端前缀。
@@ -263,89 +341,38 @@ export function createServer(options: SilkPulseServerOptions = {}): http.Server 
     if (!pathname.startsWith('/api/') && !pathname.startsWith('/ws/') && !pathname.startsWith('/inject')) {
       const indexPath = path.resolve(staticRoot, 'index.html')
       if (fs.existsSync(indexPath)) {
-        serveFile(res, indexPath, 'text/html; charset=utf-8')
+        serveFile(ctx, indexPath, 'text/html; charset=utf-8', securityHeaders)
         return
       }
     }
 
-    res.writeHead(404)
-    res.end('Not found')
+    writeResponse(ctx, 404, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Not found')
   })
 
-  /**
-   * 挂载 WebSocket 服务（noServer 模式，手动处理 upgrade 以区分 device/console）
-   *
-   * perMessageDeflate：启用 WebSocket 原生 permessage-deflate 扩展。
-   * 浏览器（SDK 端）和 `ws` 库都原生支持，握手时自动协商，
-   * 应用层完全透明——所有 JSON 消息在传输层自动压缩/解压。
-   *
-   * 阈值策略：
-   * - threshold 256B：小于此长度的消息不压缩（压缩头开销 > 收益）
-   * - memLevel / level：默认压缩参数，平衡速度和压缩率
-   * - serverMaxWindowBits / clientMaxWindowBits：滑动窗口位数，默认值已够
-   * - zlibDeflateReset 间隔：定期复用 deflate 上下文避免内存泄漏
-   *
-   * 对 DOM 快照、日志批量上报等大 JSON 压缩率通常 70-90%。
-   */
-  const wss = new WebSocketServer({
-    noServer: true,
-    perMessageDeflate: {
-      threshold: 256,
-      /**
-       * zlib level=3：比默认 level=6 吞吐 +42%（本机基准 245 vs 172 MB/s，真实消息混合负载），
-       * 压缩率仅差 0.7pp（0.121 vs 0.114）。压缩是扇出路径的主要 CPU 成本，
-       * 换 level=9 压缩率只再好 0.8pp 但 CPU 3.6 倍——边际收益极差，不取。
-       */
-      zlibDeflateOptions: {
-        level: 3,
-      },
-    },
-  })
-  server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const pathname = url.pathname
-
-    if (pathname === '/ws/device' || pathname === '/ws/console') {
-      /** WebSocket 连接鉴权 */
-      const wsAuthCtx = auth.authorizeWsConnection(req, pathname)
-      if (wsAuthCtx.role === 'anonymous' && auth.isAuthEnabled()) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
-        socket.destroy()
-        return
+  /** 启动监听（uWS listen 异步，包成 promise 等端口就绪） */
+  await new Promise<void>((resolve, reject) => {
+    app.listen(port, (listenSocket) => {
+      if (listenSocket) {
+        console.log(`\n  silkpulse 服务已启动 → http://localhost:${port}`)
+        console.log(`  控制台：浏览器打开 http://localhost:${port}`)
+        console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
+        console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
+        if (auth.isAuthEnabled()) {
+          console.log(`  🔒 鉴权已启用（${auth.hasAdminKey() ? '超管密钥 + ' : ''}${projectStore.list().length} 个项目）`)
+        } else {
+          console.log(`  ⚠️  鉴权未启用（设置 SILKPULSE_ADMIN_KEY 环境变量来开启）`)
+        }
+        console.log('')
+        resolve()
+      } else {
+        reject(new Error(`端口 ${port} 监听失败`))
       }
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        /** 把鉴权上下文附在 ws 上，ws-relay 用来做项目隔离 */
-        ;(ws as unknown as { __authCtx?: AuthContext }).__authCtx = wsAuthCtx
-        wss.emit('connection', ws, req)
-      })
-    } else if (pathname === '/ws/test-ws') {
-      /** 测试用 echo WS：收到什么回什么，验证 SDK 的 WS 采集（连接/send/recv/close） */
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        ws.on('message', (data) => ws.send(data))
-      })
-    } else {
-      socket.destroy()
-    }
-  })
-  const { notifyDeviceListChanged } = setupWebSocket(wss, registry)
-
-  server.listen(port, () => {
-    console.log(`\n  silkpulse 服务已启动 → http://localhost:${port}`)
-    console.log(`  控制台：浏览器打开 http://localhost:${port}`)
-    console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
-    console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
-    if (auth.isAuthEnabled()) {
-      console.log(`  🔒 鉴权已启用（${auth.hasAdminKey() ? '超管密钥 + ' : ''}${projectStore.list().length} 个项目）`)
-    } else {
-      console.log(`  ⚠️  鉴权未启用（设置 SILKPULSE_ADMIN_KEY 环境变量来开启）`)
-    }
-    console.log('')
+    })
   })
 
-  return server
+  return app
 }
 
-/** 发送文件响应 */
 /**
  * 缓存策略
  *
@@ -363,9 +390,10 @@ function cacheHeaders(policy: CachePolicy): Record<string, string> {
 }
 
 function serveFile(
-  res: http.ServerResponse,
+  ctx: Ctx,
   filePath: string,
   contentType: string,
+  extraHeaders: Record<string, string> = {},
   cache: CachePolicy = 'noCache',
 ): void {
   try {
@@ -373,14 +401,14 @@ function serveFile(
     const headers: Record<string, string> = {
       'Content-Type': contentType,
       'Access-Control-Allow-Origin': '*',
+      ...extraHeaders,
       ...cacheHeaders(cache),
     }
     /** 带 ETag（文件 mtime+size），支持 304（no-cache 策略下省带宽） */
     const etag = `"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`
     headers['ETag'] = etag
-    if (res.req?.headers['if-none-match'] === etag) {
-      res.writeHead(304)
-      res.end()
+    if (ctx.headers['if-none-match'] === etag) {
+      sendNotModified(ctx, headers)
       return
     }
     /**
@@ -389,12 +417,10 @@ function serveFile(
      * 超过 GZIP_THRESHOLD 且客户端支持 gzip 时压缩传输。
      */
     const fileBuf = fs.readFileSync(filePath)
-    const { body, headers: gzipHeaders } = maybeGzipResponse(res.req!, fileBuf, headers)
-    res.writeHead(200, gzipHeaders)
-    res.end(body)
+    const { body, headers: gzipHeaders } = maybeGzipResponse({ headers: ctx.headers }, fileBuf, headers)
+    writeResponse(ctx, 200, gzipHeaders, body)
   } catch {
-    res.writeHead(500)
-    res.end('Internal error')
+    writeResponse(ctx, 500, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Internal error')
   }
 }
 

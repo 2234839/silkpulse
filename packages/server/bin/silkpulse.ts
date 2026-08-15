@@ -35,4 +35,5 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const staticRoot = path.resolve(__dirname, '../../public')
 
 const { port } = parseArgs(process.argv.slice(2))
-createServer({ port, staticRoot })
+/** createServer 返回 Promise（uWS listen 异步）：失败时让进程非零退出（let it crash） */
+await createServer({ port, staticRoot })

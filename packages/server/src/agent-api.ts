@@ -11,9 +11,10 @@
  * 所有路由复用 handleApiRoute 的鉴权上下文（Authorization 或 ?key=）。
  */
 
-import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
 import type { AuthContext } from './auth.js'
+import type { Ctx } from './uws/http-helpers.js'
+import { writeResponse } from './uws/http-helpers.js'
 import { execOnDevice, sendJson, sendText, readBody, buildElementTreeCode, buildElementFilterCode } from './api.js'
 import { sendSnapshot } from './snapshot-text.js'
 import { maybeGzipResponse } from './gzip.js'
@@ -23,23 +24,22 @@ import { maybeGzipResponse } from './gzip.js'
  * 返回 true 表示已处理，false 表示非 agent 路径
  */
 export async function handleAgentApiRoute(
-  req: IncomingMessage,
-  res: ServerResponse,
+  ctx: Ctx,
   registry: DeviceRegistry,
   authCtx: AuthContext,
 ): Promise<boolean> {
-  const url = new URL(req.url ?? '/', 'http://localhost')
+  const url = ctx.parsedUrl
   const pathname = url.pathname
   if (!pathname.startsWith('/api/agent')) return false
 
   /** 鉴权：匿名拒绝 */
   if (authCtx.role === 'anonymous') {
-    sendJson(res, { error: '未授权' }, 401)
+    sendJson(ctx, { error: '未授权' }, 401)
     return true
   }
 
   /** GET /api/agent/devices —— 精简设备列表（只返回 id/url/title/errorCount） */
-  if (pathname === '/api/agent/devices' && req.method === 'GET') {
+  if (pathname === '/api/agent/devices' && ctx.method === 'GET') {
     const projectId = authCtx.role === 'project' ? authCtx.projectId : undefined
     const devices = registry.listByProject(projectId).map((d) => ({
       id: d.id,
@@ -47,20 +47,20 @@ export async function handleAgentApiRoute(
       title: d.title,
       errors: d.errorCount,
     }))
-    sendJson(res, { devices })
+    sendJson(ctx, { devices })
     return true
   }
 
   /** 解析 /api/agent/devices/:id/xxx */
   const match = pathname.match(/^\/api\/agent\/devices\/([^/]+)(?:\/(.+))?$/)
   if (!match) {
-    sendJson(res, { error: 'Not found' }, 404)
+    sendJson(ctx, { error: 'Not found' }, 404)
     return true
   }
   const [, deviceId, action] = match
   const device = registry.get(deviceId)
   if (!device) {
-    sendText(res, `[错误] 设备 ${deviceId} 不在线。先 GET /api/agent/devices 查看在线设备列表。`, 404)
+    sendText(ctx, `[错误] 设备 ${deviceId} 不在线。先 GET /api/agent/devices 查看在线设备列表。`, 404)
     return true
   }
 
@@ -113,7 +113,7 @@ export async function handleAgentApiRoute(
       } else {
         parts.push(`## 页面快照: 获取失败 — ${snapshotResult.error}`)
       }
-      sendText(res, parts.join('\n'))
+      sendText(ctx, parts.join('\n'))
       return true
     }
 
@@ -123,10 +123,10 @@ export async function handleAgentApiRoute(
     case 'snapshot': {
       const result = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
       if (!result.success) {
-        sendText(res, `[快照失败] ${result.error}`, 500)
+        sendText(ctx, `[快照失败] ${result.error}`, 500)
         return true
       }
-      sendText(res, sendSnapshot(result.result))
+      sendText(ctx, sendSnapshot(result.result))
       return true
     }
 
@@ -150,28 +150,26 @@ export async function handleAgentApiRoute(
       const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendText(res, `[截图失败] ${result.error}`, 500)
+        sendText(ctx, `[截图失败] ${result.error}`, 500)
         return true
       }
       /** result.result 是 JSON.stringify 后的 dataURL（如 "data:image/jpeg;base64,..."） */
       const dataUrl = result.result ? JSON.parse(result.result) : ''
       if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-        sendText(res, `[截图失败] 返回数据格式异常`, 500)
+        sendText(ctx, `[截图失败] 返回数据格式异常`, 500)
         return true
       }
       const meta = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
       if (!meta) {
-        sendText(res, `[截图失败] dataURL 解析失败`, 500)
+        sendText(ctx, `[截图失败] dataURL 解析失败`, 500)
         return true
       }
       const mimeType = meta[1] === 'jpg' ? 'jpeg' : meta[1]
       const binary = Buffer.from(meta[2], 'base64')
-      res.writeHead(200, {
+      writeResponse(ctx, 200, {
         'Content-Type': `image/${mimeType}`,
-        'Content-Length': binary.length,
         'Cache-Control': 'no-cache',
-      })
-      res.end(binary)
+      }, binary)
       return true
     }
 
@@ -183,11 +181,11 @@ export async function handleAgentApiRoute(
     case 'logs': {
       const logs = device.logs.all().slice(-limitParam(20))
       if (logs.length === 0) {
-        sendText(res, '[无日志]')
+        sendText(ctx, '[无日志]')
         return true
       }
       const text = logs.map((l) => `[${l.type}] ${l.message}`).join('\n')
-      sendText(res, text)
+      sendText(ctx, text)
       return true
     }
 
@@ -197,14 +195,14 @@ export async function handleAgentApiRoute(
     case 'errors': {
       const errors = device.errors.all().slice(-limitParam(10))
       if (errors.length === 0) {
-        sendText(res, '[无错误]')
+        sendText(ctx, '[无错误]')
         return true
       }
       const text = errors.map((e) => {
         const source = e.mapped ? ` → ${e.mapped.source}:${e.mapped.line}` : (e.source ? ` (${e.source}:${e.line})` : '')
         return `${e.message}${source}`
       }).join('\n')
-      sendText(res, text)
+      sendText(ctx, text)
       return true
     }
 
@@ -214,14 +212,14 @@ export async function handleAgentApiRoute(
     case 'network': {
       const entries = device.network.all().slice(-limitParam(10))
       if (entries.length === 0) {
-        sendText(res, '[无网络请求]')
+        sendText(ctx, '[无网络请求]')
         return true
       }
       const text = entries.map((n) => {
         const status = n.status === 0 ? 'FAIL' : String(n.status)
         return `[${n.method}] ${n.url} → ${status} ${n.duration}ms`
       }).join('\n')
-      sendText(res, text)
+      sendText(ctx, text)
       return true
     }
 
@@ -232,22 +230,22 @@ export async function handleAgentApiRoute(
      * 返回 JSON：{ success, result, error, logs, snapshot? }
      */
     case 'exec': {
-      if (req.method !== 'POST') {
-        sendJson(res, { error: '需要 POST' }, 405)
+      if (ctx.method !== 'POST') {
+        sendJson(ctx, { error: '需要 POST' }, 405)
         return true
       }
       const wantSnapshot = url.searchParams.get('snapshot') !== '0'
-      const { body, oversize } = await readBody(req)
-      if (oversize) { sendJson(res, { error: 'body 超过 2MB 上限' }, 413); return true }
+      const { body, oversize } = await readBody(ctx)
+      if (oversize) { sendJson(ctx, { error: 'body 超过 2MB 上限' }, 413); return true }
       let parsed: { code?: string }
       try {
         parsed = JSON.parse(body)
       } catch {
-        sendJson(res, { error: 'body 必须是 JSON' }, 400)
+        sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
         return true
       }
       if (!parsed.code) {
-        sendJson(res, { error: '缺少 code 字段' }, 400)
+        sendJson(ctx, { error: '缺少 code 字段' }, 400)
         return true
       }
       const result = await execOnDevice(registry, deviceId, parsed.code)
@@ -267,7 +265,7 @@ export async function handleAgentApiRoute(
       if (wantSnapshot && result.success && result.snapshotText) {
         agentResult.snapshot = sendSnapshot(result.snapshotText)
       }
-      sendJson(res, agentResult)
+      sendJson(ctx, agentResult)
       return true
     }
 
@@ -285,20 +283,19 @@ export async function handleAgentApiRoute(
         : buildElementTreeCode(parentIdx ? Number(parentIdx) : null, shadow)
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendJson(res, { error: result.error }, 500)
+        sendJson(ctx, { error: result.error }, 500)
         return true
       }
-      const { body: respBody, headers } = maybeGzipResponse(req, result.result ?? '[]', {
+      const { body: respBody, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '[]', {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
       })
-      res.writeHead(200, headers)
-      res.end(respBody)
+      writeResponse(ctx, 200, headers, respBody)
       return true
     }
 
     default:
-      sendText(res, `[错误] 未知的 agent 操作: ${action}`, 404)
+      sendText(ctx, `[错误] 未知的 agent 操作: ${action}`, 404)
       return true
   }
 }

@@ -17,8 +17,9 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
+import { maybeGzipResponse } from './gzip.js'
+import type { Ctx } from './uws/http-helpers.js'
+
 
 // ─── 类型定义 ─────────────────────────────────────────────
 
@@ -259,17 +260,13 @@ export class ProjectStore {
 // ─── 鉴权中间件 ───────────────────────────────────────────
 
 /** 从请求中提取 Bearer token */
-function extractBearerToken(req: IncomingMessage): string | undefined {
-  const auth = req.headers.authorization
+function extractBearerToken(ctx: Ctx): string | undefined {
+  const auth = ctx.headers['authorization']
   if (auth && auth.startsWith('Bearer ')) {
     return auth.slice(7).trim()
   }
   /** 回退：?key= query 参数（skill 文档拉取等场景，方便 agent 直接 curl） */
-  const url = req.url
-  if (url) {
-    return extractQueryParam(url, 'key')
-  }
-  return undefined
+  return extractQueryParam(ctx.url, 'key')
 }
 
 /** 从 URL query 中提取参数 */
@@ -365,8 +362,8 @@ export class AuthManager {
    * 验证 HTTP 请求的鉴权
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
-  authorizeHttpRequest(req: IncomingMessage): AuthContext {
-    const token = extractBearerToken(req)
+  authorizeHttpRequest(ctx: Ctx): AuthContext {
+    const token = extractBearerToken(ctx)
 
     // 无 token：检查是否匿名可用（未启用鉴权时）
     if (!token) {
@@ -392,8 +389,7 @@ export class AuthManager {
    * 验证 WebSocket 连接鉴权
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
-  authorizeWsConnection(req: IncomingMessage, wsPath: string): AuthContext {
-    const url = req.url ?? ''
+  authorizeWsConnection(url: string, wsPath: string): AuthContext {
     const projectId = extractQueryParam(url, 'projectId')
 
     // 未启用鉴权：允许匿名
@@ -456,22 +452,35 @@ export class AuthManager {
 
 // ─── 项目管理 API 路由 ────────────────────────────────────
 
-/** 安全 HTTP 响应头 */
-function setSecurityHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('X-Frame-Options', 'DENY')
-  res.setHeader('Referrer-Policy', 'no-referrer')
+/** 安全响应头（注入 sendJson 的 headers） */
+function securityHeaders(): Record<string, string> {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+  }
 }
 
-/** JSON 响应（自动 gzip 压缩） */
-function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
-  setSecurityHeaders(res)
+/** JSON 响应（安全头 + gzip） */
+function jsonResponse(ctx: Ctx, status: number, body: unknown): void {
   const json = JSON.stringify(body)
-  const { body: respBody, headers } = maybeGzipResponse(res.req!, json, {
-    'Content-Type': 'application/json; charset=utf-8',
+  const { body: respBody, headers } = maybeGzipResponse(
+    { headers: ctx.headers },
+    json,
+    {
+      'Content-Type': 'application/json; charset=utf-8',
+      ...securityHeaders(),
+    },
+  )
+  if (ctx.responded || ctx.aborted) return
+  ctx.responded = true
+  ctx.res.cork(() => {
+    ctx.res.writeStatus(`${status} ${status === 204 ? 'No Content' : status === 200 ? 'OK' : status === 201 ? 'Created' : status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : status === 404 ? 'Not Found' : status === 400 ? 'Bad Request' : 'Unknown'}`)
+    for (const [k, v] of Object.entries(headers)) {
+      ctx.res.writeHeader(k, v)
+    }
+    ctx.res.end(respBody)
   })
-  res.writeHead(status, headers)
-  res.end(respBody)
 }
 
 /**
@@ -489,24 +498,29 @@ function jsonResponse(res: ServerResponse, status: number, body: unknown): void 
  * @returns true=已处理, false=不匹配
  */
 export function handleProjectApiRoute(
-  req: IncomingMessage,
-  res: ServerResponse,
+  ctx: Ctx,
   auth: AuthManager,
 ): boolean {
-  const url = req.url ?? ''
-  const method = req.method ?? 'GET'
+  const url = ctx.url.split('?')[0]
+  const method = ctx.method
 
   /** CORS 预检 */
   if (url.startsWith('/api/projects') && method === 'OPTIONS') {
-    setSecurityHeaders(res)
-    res.writeHead(204)
-    res.end()
+    if (ctx.responded) return true
+    ctx.responded = true
+    ctx.res.cork(() => {
+      ctx.res.writeStatus('204 No Content')
+      for (const [k, v] of Object.entries(securityHeaders())) {
+        ctx.res.writeHeader(k, v)
+      }
+      ctx.res.endWithoutBody()
+    })
     return true
   }
 
   /** 鉴权状态查询（公开） */
   if (url === '/api/auth/status' && method === 'GET') {
-    jsonResponse(res, 200, {
+    jsonResponse(ctx, 200, {
       authEnabled: auth.isAuthEnabled(),
       hasAdminKey: auth.hasAdminKey(),
       playgroundEnabled: auth.isPlaygroundEnabled(),
@@ -516,22 +530,22 @@ export function handleProjectApiRoute(
 
   /** 验证密钥并返回角色信息（前端登录后调用，拿 role + projectId） */
   if (url === '/api/auth/verify' && method === 'GET') {
-    const ctx = auth.authorizeHttpRequest(req)
-    if (ctx.role === 'anonymous') {
-      jsonResponse(res, 401, { error: '密钥无效' })
+    const verifyCtx = auth.authorizeHttpRequest(ctx)
+    if (verifyCtx.role === 'anonymous') {
+      jsonResponse(ctx, 401, { error: '密钥无效' })
       return true
     }
     /** 项目密钥：附带项目名称供前端展示 */
     let projectName: string | undefined
     let isPlayground = false
-    if (ctx.role === 'project' && ctx.projectId) {
-      const proj = auth.projects.get(ctx.projectId)
+    if (verifyCtx.role === 'project' && verifyCtx.projectId) {
+      const proj = auth.projects.get(verifyCtx.projectId)
       projectName = proj?.name
-      isPlayground = ctx.projectId === AuthManager.PLAYGROUND_PROJECT_ID
+      isPlayground = verifyCtx.projectId === AuthManager.PLAYGROUND_PROJECT_ID
     }
-    jsonResponse(res, 200, {
-      role: ctx.role,
-      projectId: ctx.projectId,
+    jsonResponse(ctx, 200, {
+      role: verifyCtx.role,
+      projectId: verifyCtx.projectId,
       projectName,
       isPlayground,
     })
@@ -544,12 +558,12 @@ export function handleProjectApiRoute(
    */
   if (url === '/api/auth/playground' && method === 'POST') {
     if (!auth.isPlaygroundEnabled()) {
-      jsonResponse(res, 403, { error: 'Playground 未开启' })
+      jsonResponse(ctx, 403, { error: 'Playground 未开启' })
       return true
     }
     const key = auth.playgroundKey!
     const pid = AuthManager.PLAYGROUND_PROJECT_ID
-    jsonResponse(res, 200, {
+    jsonResponse(ctx, 200, {
       role: 'project',
       projectId: pid,
       projectName: AuthManager.PLAYGROUND_PROJECT_NAME,
@@ -563,15 +577,15 @@ export function handleProjectApiRoute(
   // 项目管理路由需要超管权限
   if (!url.startsWith('/api/projects')) return false
 
-  const ctx = auth.authorizeHttpRequest(req)
-  if (ctx.role !== 'admin') {
-    jsonResponse(res, 403, { error: '需要超管权限' })
+  const authResult = auth.authorizeHttpRequest(ctx)
+  if (authResult.role !== 'admin') {
+    jsonResponse(ctx, 403, { error: '需要超管权限' })
     return true
   }
 
   /** 列出项目 */
   if (url === '/api/projects' && method === 'GET') {
-    jsonResponse(res, 200, { projects: auth.projects.list() })
+    jsonResponse(ctx, 200, { projects: auth.projects.list() })
     return true
   }
 
@@ -579,24 +593,24 @@ export function handleProjectApiRoute(
   if (url === '/api/projects' && method === 'POST') {
     let body: { name?: string; description?: string }
     try {
-      body = JSON.parse(readBodySync(req))
+      body = JSON.parse(readBodySync(ctx))
     } catch {
-      jsonResponse(res, 400, { error: '请求体格式错误' })
+      jsonResponse(ctx, 400, { error: '请求体格式错误' })
       return true
     }
     if (!body.name) {
-      jsonResponse(res, 400, { error: '项目名称必填' })
+      jsonResponse(ctx, 400, { error: '项目名称必填' })
       return true
     }
     const result = auth.projects.create(body.name, body.description)
-    jsonResponse(res, 201, result)
+    jsonResponse(ctx, 201, result)
     return true
   }
 
   /** 单项目操作 /api/projects/:id... */
   const match = url.match(/^\/api\/projects\/([^/]+)(\/.*)?$/)
   if (!match) {
-    jsonResponse(res, 404, { error: '路由不匹配' })
+    jsonResponse(ctx, 404, { error: '路由不匹配' })
     return true
   }
 
@@ -608,7 +622,7 @@ export function handleProjectApiRoute(
    */
   const isPlaygroundProject = projectId === AuthManager.PLAYGROUND_PROJECT_ID
   if (isPlaygroundProject && method !== 'GET') {
-    jsonResponse(res, 403, { error: 'Playground 项目由环境变量管理，不支持此操作' })
+    jsonResponse(ctx, 403, { error: 'Playground 项目由环境变量管理，不支持此操作' })
     return true
   }
 
@@ -616,10 +630,10 @@ export function handleProjectApiRoute(
   if (subPath === '/rotate' && method === 'POST') {
     const newKey = auth.projects.rotateKey(projectId)
     if (!newKey) {
-      jsonResponse(res, 404, { error: '项目不存在' })
+      jsonResponse(ctx, 404, { error: '项目不存在' })
       return true
     }
-    jsonResponse(res, 200, { apiKey: newKey })
+    jsonResponse(ctx, 200, { apiKey: newKey })
     return true
   }
 
@@ -627,10 +641,10 @@ export function handleProjectApiRoute(
   if (!subPath && method === 'GET') {
     const project = auth.projects.get(projectId)
     if (!project) {
-      jsonResponse(res, 404, { error: '项目不存在' })
+      jsonResponse(ctx, 404, { error: '项目不存在' })
       return true
     }
-    jsonResponse(res, 200, { project })
+    jsonResponse(ctx, 200, { project })
     return true
   }
 
@@ -638,17 +652,17 @@ export function handleProjectApiRoute(
   if (!subPath && method === 'PATCH') {
     let body: { name?: string; description?: string; enabled?: boolean }
     try {
-      body = JSON.parse(readBodySync(req))
+      body = JSON.parse(readBodySync(ctx))
     } catch {
-      jsonResponse(res, 400, { error: '请求体格式错误' })
+      jsonResponse(ctx, 400, { error: '请求体格式错误' })
       return true
     }
     const project = auth.projects.update(projectId, body)
     if (!project) {
-      jsonResponse(res, 404, { error: '项目不存在' })
+      jsonResponse(ctx, 404, { error: '项目不存在' })
       return true
     }
-    jsonResponse(res, 200, { project })
+    jsonResponse(ctx, 200, { project })
     return true
   }
 
@@ -656,60 +670,27 @@ export function handleProjectApiRoute(
   if (!subPath && method === 'DELETE') {
     const deleted = auth.projects.delete(projectId)
     if (!deleted) {
-      jsonResponse(res, 404, { error: '项目不存在' })
+      jsonResponse(ctx, 404, { error: '项目不存在' })
       return true
     }
-    jsonResponse(res, 200, { ok: true })
+    jsonResponse(ctx, 200, { ok: true })
     return true
   }
 
-  jsonResponse(res, 404, { error: '未知路由' })
+  jsonResponse(ctx, 404, { error: '未知路由' })
   return true
 }
 
 /**
- * 同步读取请求体（用于项目管理 API，body 小于 2MB）
- * 注意：这需要在路由分发时被调用，这里用 buffer 方式同步读取
+ * 同步读取请求体（项目管理 API 用，body 已由前置 readBody 缓存到 ctx.bodyBuf）
  */
-function readBodySync(req: IncomingMessage): string {
-  /** 从缓存中读取（readAndCacheBody 已提前读取并缓存） */
-  const buf = (req as unknown as { __bodyBuf?: Buffer }).__bodyBuf
-  if (buf) return buf.toString('utf-8')
-  return ''
-}
-
-/**
- * 异步读取请求体，缓存到 req 对象上
- * 在 HTTP server 主请求处理中提前调用，后续路由可直接读
- */
-export async function readAndCacheBody(req: IncomingMessage): Promise<void> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = []
-    let totalSize = 0
-    const MAX = 2 * 1024 * 1024
-
-    req.on('data', (chunk: Buffer) => {
-      totalSize += chunk.length
-      if (totalSize > MAX) {
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      const buf = Buffer.concat(chunks)
-      /** 支持 gzip 请求体（Content-Encoding: gzip） */
-      const decompressed = maybeGunzipRequest(req, buf)
-      ;(req as unknown as { __bodyBuf?: Buffer }).__bodyBuf = decompressed
-      resolve()
-    })
-    req.on('error', () => resolve())
-  })
+function readBodySync(ctx: Ctx): string {
+  return ctx.bodyBuf ? ctx.bodyBuf.toString('utf-8') : ''
 }
 
 /** 从缓存的请求体中读取 JSON */
-export function getCachedBody<T = unknown>(req: IncomingMessage): T | undefined {
-  const buf = (req as unknown as { __bodyBuf?: Buffer }).__bodyBuf
+export function getCachedBody<T = unknown>(ctx: Ctx): T | undefined {
+  const buf = ctx.bodyBuf
   if (!buf || buf.length === 0) return undefined
   try {
     return JSON.parse(buf.toString('utf-8')) as T

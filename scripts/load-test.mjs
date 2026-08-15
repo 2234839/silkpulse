@@ -19,11 +19,25 @@
  * 退出码：非 0 = 有阶段失败（供 CI 判定）。
  */
 
-import { createRequire } from 'node:module'
 
-/** ws 是 @silkpulse/server 的依赖，从它的 package.json 解析（根目录不直接依赖 ws） */
-const require = createRequire(new URL('../packages/server/package.json', import.meta.url))
-const WebSocket = require('ws')
+/** 内置 WebSocket 适配器：包一层 ws 库风格 API（on/once），压测脚本零改动 */
+class WsAdapter {
+  constructor(url) {
+    this.raw = new globalThis.WebSocket(url)
+    this.handlers = {}
+    const dispatch = (type, ...args) => (this.handlers[type] ?? []).forEach((fn) => fn(...args))
+    this.raw.addEventListener('open', () => dispatch('open'))
+    this.raw.addEventListener('message', (ev) => dispatch('message', Buffer.from(ev.data)))
+    this.raw.addEventListener('close', () => dispatch('close'))
+    this.raw.addEventListener('error', (ev) => dispatch('error', new Error(ev.message ?? 'ws error')))
+  }
+  on(type, fn) { (this.handlers[type] ??= []).push(fn); return this }
+  once(type, fn) { const g = (...a) => { this.off(type, g); fn(...a) }; return this.on(type, g) }
+  off(type, fn) { this.handlers[type] = (this.handlers[type] ?? []).filter((f) => f !== fn); return this }
+  send(text) { this.raw.send(text) }
+  close() { try { this.raw.close() } catch {} }
+}
+const WebSocket = WsAdapter
 
 const BASE = process.env.SILKPULSE_TEST_URL ?? 'http://localhost:8080'
 const ORIGIN = new URL(BASE).origin

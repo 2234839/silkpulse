@@ -5,23 +5,15 @@
  * exec 端点通过设备的 WS 下发指令并等待回传（内存 promise 模式）。
  */
 
-import type { IncomingMessage, ServerResponse } from 'http'
 import type { DeviceRegistry } from './device-registry.js'
 import type { AuthManager, AuthContext } from './auth.js'
+import type { Ctx } from './uws/http-helpers.js'
 import { sendSnapshot } from './snapshot-text.js'
 import { generateFeatureDetectScript } from '@silkpulse/feature-detect'
-import { maybeGzipResponse, maybeGunzipRequest } from './gzip.js'
+import { maybeGzipResponse } from './gzip.js'
 import { renderSkillPrompt } from '@silkpulse/shared'
 import { performance } from 'node:perf_hooks'
 import { fanoutStats } from './ws-relay.js'
-
-/**
- * POST body 最大字节数
- *
- * exec 诊断代码实际几 KB，2MB 上限给 AI 生成脚本留充足余量。
- * 超限直接 413 终止读取，防止超大/POST 撑爆 server 内存。
- */
-const MAX_BODY = 2 * 1024 * 1024
 
 /**
  * 事件循环利用率采样器（增量式单例）
@@ -42,64 +34,8 @@ function loopUtilization(): number {
   return u.utilization
 }
 
-/**
- * 读取 POST body，带大小上限 + 错误/中断保护
- *
- * 返回 { body, oversize }：
- * - oversize=true 表示超 MAX_BODY，调用方应回 413
- * - 客户端中断（aborted/error）时 resolve 空串，不让 promise 泄漏
- */
-export function readBody(req: IncomingMessage): Promise<{ body: string; oversize: boolean }> {
-  return new Promise((resolve) => {
-    /** Buffer 收集（兼容 gzip 二进制），超限保护基于累计字节数 */
-    const chunks: Buffer[] = []
-    let totalSize = 0
-    let oversized = false
-    req.on('data', (chunk: Buffer) => {
-      if (oversized) return
-      totalSize += chunk.length
-      if (totalSize > MAX_BODY) {
-        /** 超限：停止累加，resolve oversize 让调用方回 413。
-         * 不用 req.destroy()——它会 RST 连接导致客户端 fetch 报 ECONNRESET，
-         * 而是停止读取，让调用方正常 sendJson(413) 结束响应。 */
-        oversized = true
-        resolve({ body: '', oversize: true })
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      const buf = Buffer.concat(chunks)
-      /** 支持 gzip 请求体（Content-Encoding: gzip） */
-      const decompressed = maybeGunzipRequest(req, buf)
-      resolve({ body: decompressed.toString('utf-8'), oversize: false })
-    })
-    /** 客户端中断或连接错误：resolve 空串，避免 promise 永久挂起泄漏 */
-    req.on('aborted', () => resolve({ body: '', oversize: false }))
-    req.on('error', () => resolve({ body: '', oversize: false }))
-  })
-}
-
-/** 发送 JSON 响应（自动 gzip 压缩） */
-export function sendJson(res: ServerResponse, data: unknown, status = 200) {
-  const json = JSON.stringify(data)
-  const { body, headers } = maybeGzipResponse(res.req!, json, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-  })
-  res.writeHead(status, headers)
-  res.end(body)
-}
-
-/** 发送纯文本响应（自动 gzip 压缩） */
-export function sendText(res: ServerResponse, text: string, status = 200) {
-  const { body, headers } = maybeGzipResponse(res.req!, text, {
-    'Content-Type': 'text/plain; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-  })
-  res.writeHead(status, headers)
-  res.end(body)
-}
+export { readBody, sendJson, sendText } from './uws/http-helpers.js'
+import { readBody, sendJson, sendText, writeResponse } from './uws/http-helpers.js'
 
 /** exec 超时（ms） */
 const EXEC_TIMEOUT = 10000
@@ -110,8 +46,7 @@ const EXEC_TIMEOUT = 10000
  * onDeviceListChanged：修改 tags/note 后通知控制台刷新设备列表
  */
 export async function handleApiRoute(
-  req: IncomingMessage,
-  res: ServerResponse,
+  ctx: Ctx,
   registry: DeviceRegistry,
   onDeviceListChanged?: () => void,
   /** 鉴权管理器（可选，未传时不做项目过滤） */
@@ -120,9 +55,9 @@ export async function handleApiRoute(
   authCtx: AuthContext = { role: 'admin' },
 ): Promise<boolean> {
   /** /api/health —— 压测/监控探针（无需鉴权：只暴露进程级指标，无业务数据） */
-  if (req.url?.split('?')[0] === '/api/health') {
+  if (ctx.url.split('?')[0] === '/api/health') {
     const mu = process.memoryUsage()
-    sendJson(res, {
+    sendJson(ctx, {
       ok: true,
       rssMB: +(mu.rss / 1048576).toFixed(1),
       heapUsedMB: +(mu.heapUsed / 1048576).toFixed(1),
@@ -135,31 +70,30 @@ export async function handleApiRoute(
     })
     return true
   }
-  const url = new URL(req.url ?? '/', 'http://localhost')
+  const url = ctx.parsedUrl
   const pathname = url.pathname
   if (!pathname.startsWith('/api/')) return false
 
   /** CORS 预检 */
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
+  if (ctx.method === 'OPTIONS') {
+    writeResponse(ctx, 204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    })
-    res.end()
+    }, '')
     return true
   }
 
   /** /api/echo —— 回显端点（测试 POST body 采集，返回接收到的 body） */
   if (pathname === '/api/echo') {
-    const { body, oversize } = await readBody(req)
-    if (oversize) { sendJson(res, { error: 'body 超过 2MB 上限' }, 413); return true }
+    const { body, oversize } = await readBody(ctx)
+    if (oversize) { sendJson(ctx, { error: 'body 超过 2MB 上限' }, 413); return true }
     /** body 可能是任意格式（JSON / FormData multipart / 纯文本），非 JSON 时原样返回文本 */
     let received: unknown = body || null
     if (body) {
       try { received = JSON.parse(body) } catch { /** 非 JSON，保留原始文本 */ }
     }
-    sendJson(res, { ok: true, received, time: Date.now() })
+    sendJson(ctx, { ok: true, received, time: Date.now() })
     return true
   }
 
@@ -171,37 +105,36 @@ export async function handleApiRoute(
    * 支持 ?key= query 或 Authorization header 鉴权。
    */
   const skillMatch = pathname.match(/^\/api\/skill\/([^/]+)$/)
-  if (skillMatch && req.method === 'GET') {
+  if (skillMatch && ctx.method === 'GET') {
     const [, skillName] = skillMatch
     if (skillName !== 'silkpulse') {
-      sendJson(res, { error: `未知的 skill: ${skillName}` }, 404)
+      sendJson(ctx, { error: `未知的 skill: ${skillName}` }, 404)
       return true
     }
     /** 鉴权：匿名拒绝 */
     if (authCtx.role === 'anonymous') {
-      sendJson(res, { error: '未授权' }, 401)
+      sendJson(ctx, { error: '未授权' }, 401)
       return true
     }
     /** 从请求 Host 推断服务地址 */
-    const host = req.headers.host || ''
-    const proto = req.headers['x-forwarded-proto'] || 'http'
+    const host = ctx.headers['host'] || ''
+    const proto = ctx.headers['x-forwarded-proto'] || 'http'
     const serverUrl = `${proto}://${host}`
     /** 提取鉴权 token（header 或 query）作为 apiKey */
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const apiKey = url.searchParams.get('key') || req.headers.authorization?.replace('Bearer ', '').trim() || ''
-    sendText(res, renderSkillPrompt(serverUrl, apiKey))
+    const apiKey = ctx.parsedUrl.searchParams.get('key') || ctx.headers['authorization']?.replace('Bearer ', '').trim() || ''
+    sendText(ctx, renderSkillPrompt(serverUrl, apiKey))
     return true
   }
 
   /** /api/devices —— 列出所有在线设备 + 最近下线设备（供 AI 判断接入状态） */
-  if (pathname === '/api/devices' && req.method === 'GET') {
+  if (pathname === '/api/devices' && ctx.method === 'GET') {
     /** 鉴权：匿名拒绝，项目级只看自己项目的设备 */
     if (authCtx.role === 'anonymous') {
-      sendJson(res, { error: '未授权' }, 401)
+      sendJson(ctx, { error: '未授权' }, 401)
       return true
     }
     const projectId = authCtx.role === 'project' ? authCtx.projectId : undefined
-    sendJson(res, {
+    sendJson(ctx, {
       devices: registry.listByProject(projectId),
       recentlyOffline: registry.listOfflineByProject(projectId),
     })
@@ -211,30 +144,30 @@ export async function handleApiRoute(
   /** 解析 /api/devices/:id/xxx */
   const match = pathname.match(/^\/api\/devices\/([^/]+)(?:\/(.+))?$/)
   if (!match) {
-    sendJson(res, { error: 'Not found' }, 404)
+    sendJson(ctx, { error: 'Not found' }, 404)
     return true
   }
   const [, deviceId, action] = match
   const device = registry.get(deviceId)
   if (!device) {
-    sendJson(res, { error: `设备 ${deviceId} 不在线` }, 404)
+    sendJson(ctx, { error: `设备 ${deviceId} 不在线` }, 404)
     return true
   }
 
   /** 鉴权：检查是否有权限访问此设备（项目隔离） */
   if (authCtx.role === 'anonymous') {
-    sendJson(res, { error: '未授权' }, 401)
+    sendJson(ctx, { error: '未授权' }, 401)
     return true
   }
   if (!_auth?.canAccessDevice(authCtx, device.info.projectId)) {
-    sendJson(res, { error: '无权访问此设备' }, 403)
+    sendJson(ctx, { error: '无权访问此设备' }, 403)
     return true
   }
 
   switch (action) {
     /** 设备详情 */
     case undefined: {
-      sendJson(res, device.info)
+      sendJson(ctx, device.info)
       return true
     }
 
@@ -242,17 +175,17 @@ export async function handleApiRoute(
     case 'snapshot': {
       const result = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
       if (!result.success) {
-        sendText(res, `[快照失败] ${result.error}`, 500)
+        sendText(ctx, `[快照失败] ${result.error}`, 500)
         return true
       }
       /** ?format=json 返回原始 JSON（控制台预览模式用，含 rect 布局信息） */
       if (url.searchParams.get('format') === 'json') {
-        sendJson(res, result.result ? JSON.parse(result.result) : {})
+        sendJson(ctx, result.result ? JSON.parse(result.result) : {})
         return true
       }
       /** 默认：序列化为 compact 文本（AI 直接读） */
       const text = sendSnapshot(result.result)
-      sendText(res, text)
+      sendText(ctx, text)
       return true
     }
 
@@ -269,8 +202,8 @@ export async function handleApiRoute(
      * 截图失败时返回 500 + text/plain 错误信息。
      */
     case 'screenshot': {
-      if (req.method !== 'GET') {
-        sendText(res, '[错误] 需要 GET', 405)
+      if (ctx.method !== 'GET') {
+        sendText(ctx, '[错误] 需要 GET', 405)
         return true
       }
       const idx = url.searchParams.get('idx')
@@ -282,30 +215,28 @@ export async function handleApiRoute(
       const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendText(res, `[截图失败] ${result.error}`, 500)
+        sendText(ctx, `[截图失败] ${result.error}`, 500)
         return true
       }
       /** result.result 是 JSON.stringify 后的 dataURL（如 "data:image/jpeg;base64,..."） */
       const dataUrl = result.result ? JSON.parse(result.result) : ''
       if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-        sendText(res, `[截图失败] 返回数据格式异常`, 500)
+        sendText(ctx, `[截图失败] 返回数据格式异常`, 500)
         return true
       }
       /** dataURL → binary：提取 base64 部分，解码后返回原始图片 */
       const meta = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
       if (!meta) {
-        sendText(res, `[截图失败] dataURL 解析失败`, 500)
+        sendText(ctx, `[截图失败] dataURL 解析失败`, 500)
         return true
       }
       const mimeType = meta[1] === 'jpg' ? 'jpeg' : meta[1]
       const binary = Buffer.from(meta[2], 'base64')
-      res.writeHead(200, {
+      writeResponse(ctx, 200, {
         'Content-Type': `image/${mimeType}`,
-        'Content-Length': binary.length,
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache',
-      })
-      res.end(binary)
+      }, binary)
       return true
     }
 
@@ -318,15 +249,15 @@ export async function handleApiRoute(
     case 'feature-detect': {
       const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript())
       if (!result.success) {
-        sendJson(res, { error: result.error }, 500)
+        sendJson(ctx, { error: result.error }, 500)
         return true
       }
       /** result.result 是 JSON 字符串（检测项数组），解析后透传给前端 */
       if (!result.result) {
-        sendJson(res, { error: '检测结果为空' }, 500)
+        sendJson(ctx, { error: '检测结果为空' }, 500)
         return true
       }
-      sendJson(res, JSON.parse(result.result))
+      sendJson(ctx, JSON.parse(result.result))
       return true
     }
 
@@ -348,16 +279,15 @@ export async function handleApiRoute(
         : buildElementTreeCode(parentIdx ? Number(parentIdx) : null, shadow)
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendJson(res, { error: result.error }, 500)
+        sendJson(ctx, { error: result.error }, 500)
         return true
       }
       /** exec 的 result 是序列化后的 JSON 字符串，直接透传（gzip 压缩） */
-      const { body, headers } = maybeGzipResponse(req, result.result ?? '[]', {
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '[]', {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
       })
-      res.writeHead(200, headers)
-      res.end(body)
+      writeResponse(ctx, 200, headers, body)
       return true
     }
 
@@ -370,21 +300,20 @@ export async function handleApiRoute(
     case 'element/inspect': {
       const idx = url.searchParams.get('idx')
       if (!idx) {
-        sendJson(res, { error: '缺少 idx 参数' }, 400)
+        sendJson(ctx, { error: '缺少 idx 参数' }, 400)
         return true
       }
       const code = buildElementInspectCode(Number(idx))
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendJson(res, { error: result.error }, 500)
+        sendJson(ctx, { error: result.error }, 500)
         return true
       }
-      const { body, headers } = maybeGzipResponse(req, result.result ?? '{}', {
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '{}', {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
       })
-      res.writeHead(200, headers)
-      res.end(body)
+      writeResponse(ctx, 200, headers, body)
       return true
     }
 
@@ -398,21 +327,20 @@ export async function handleApiRoute(
     case 'element/styles': {
       const idx = url.searchParams.get('idx')
       if (!idx) {
-        sendJson(res, { error: '缺少 idx 参数' }, 400)
+        sendJson(ctx, { error: '缺少 idx 参数' }, 400)
         return true
       }
       const code = buildElementStylesCode(Number(idx))
       const result = await execOnDevice(registry, deviceId, code)
       if (!result.success) {
-        sendJson(res, { error: result.error }, 500)
+        sendJson(ctx, { error: result.error }, 500)
         return true
       }
-      const { body, headers } = maybeGzipResponse(req, result.result ?? '{}', {
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '{}', {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
       })
-      res.writeHead(200, headers)
-      res.end(body)
+      writeResponse(ctx, 200, headers, body)
       return true
     }
 
@@ -432,18 +360,18 @@ export async function handleApiRoute(
     case 'storage': {
       const type = url.searchParams.get('type') ?? 'local'
       if (type !== 'local' && type !== 'session' && type !== 'cookie' && type !== 'indexeddb') {
-        sendJson(res, { error: 'type 必须是 local/session/cookie/indexeddb' }, 400)
+        sendJson(ctx, { error: 'type 必须是 local/session/cookie/indexeddb' }, 400)
         return true
       }
 
-      if (req.method === 'GET') {
+      if (ctx.method === 'GET') {
         /** indexeddb 走专门的异步读代码，不走 buildStorageReadCode */
         const code = type === 'indexeddb'
           ? buildIndexedDBReadCode()
           : buildStorageReadCode(type as 'local' | 'session' | 'cookie')
         const result = await execOnDevice(registry, deviceId, code)
         if (!result.success) {
-          sendJson(res, { error: result.error }, 500)
+          sendJson(ctx, { error: result.error }, 500)
           return true
         }
         /**
@@ -455,38 +383,37 @@ export async function handleApiRoute(
         try {
           JSON.parse(raw)
         } catch {
-          sendJson(res, { error: 'Storage 数据过大，exec 结果被截断为不合法 JSON' }, 500)
+          sendJson(ctx, { error: 'Storage 数据过大，exec 结果被截断为不合法 JSON' }, 500)
           return true
         }
-        const { body, headers } = maybeGzipResponse(req, raw, {
+        const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, raw, {
           'Content-Type': 'application/json; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
         })
-        res.writeHead(200, headers)
-        res.end(body)
+        writeResponse(ctx, 200, headers, body)
         return true
       }
 
-      if (req.method === 'POST') {
-        const { body, oversize } = await readBody(req)
-        if (oversize) { sendJson(res, { error: 'storage body 超过 2MB 上限' }, 413); return true }
+      if (ctx.method === 'POST') {
+        const { body, oversize } = await readBody(ctx)
+        if (oversize) { sendJson(ctx, { error: 'storage body 超过 2MB 上限' }, 413); return true }
         let parsed: { action?: string; type?: string; key?: string; value?: string; path?: string; expires?: string; store?: string }
         try {
           parsed = JSON.parse(body)
         } catch {
-          sendJson(res, { error: 'body 必须是 JSON' }, 400)
+          sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
           return true
         }
         if (!parsed.action || !parsed.key || !parsed.type) {
-          sendJson(res, { error: '缺少 action/key/type 字段' }, 400)
+          sendJson(ctx, { error: '缺少 action/key/type 字段' }, 400)
           return true
         }
         if (parsed.action !== 'set' && parsed.action !== 'delete') {
-          sendJson(res, { error: 'action 必须是 set/delete' }, 400)
+          sendJson(ctx, { error: 'action 必须是 set/delete' }, 400)
           return true
         }
         if (parsed.action === 'set' && parsed.value === undefined) {
-          sendJson(res, { error: 'set 缺少 value 字段' }, 400)
+          sendJson(ctx, { error: 'set 缺少 value 字段' }, 400)
           return true
         }
         const code = parsed.type === 'indexeddb'
@@ -501,34 +428,34 @@ export async function handleApiRoute(
           )
         const result = await execOnDevice(registry, deviceId, code)
         if (!result.success) {
-          sendJson(res, { error: result.error }, 500)
+          sendJson(ctx, { error: result.error }, 500)
           return true
         }
-        sendJson(res, { ok: true })
+        sendJson(ctx, { ok: true })
         return true
       }
 
-      sendJson(res, { error: '需要 GET 或 POST' }, 405)
+      sendJson(ctx, { error: '需要 GET 或 POST' }, 405)
       return true
     }
 
     /** /api/devices/:id/exec —— 执行 JS */
     case 'exec': {
-      if (req.method !== 'POST') {
-        sendJson(res, { error: '需要 POST' }, 405)
+      if (ctx.method !== 'POST') {
+        sendJson(ctx, { error: '需要 POST' }, 405)
         return true
       }
-      const { body, oversize } = await readBody(req)
-      if (oversize) { sendJson(res, { error: 'exec body 超过 2MB 上限' }, 413); return true }
+      const { body, oversize } = await readBody(ctx)
+      if (oversize) { sendJson(ctx, { error: 'exec body 超过 2MB 上限' }, 413); return true }
       let parsed: { code?: string }
       try {
         parsed = JSON.parse(body)
       } catch {
-        sendJson(res, { error: 'body 必须是 JSON' }, 400)
+        sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
         return true
       }
       if (!parsed.code) {
-        sendJson(res, { error: '缺少 code 字段' }, 400)
+        sendJson(ctx, { error: '缺少 code 字段' }, 400)
         return true
       }
       const result = await execOnDevice(registry, deviceId, parsed.code)
@@ -536,44 +463,44 @@ export async function handleApiRoute(
       if (result.success && result.snapshotText) {
         result.snapshotText = sendSnapshot(result.snapshotText)
       }
-      sendJson(res, result)
+      sendJson(ctx, result)
       return true
     }
 
     /** /api/devices/:id/logs —— console 日志（支持 since 游标） */
     case 'logs': {
       const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(res, device.logs.since(since))
+      sendJson(ctx, device.logs.since(since))
       return true
     }
 
     /** /api/devices/:id/network —— network 记录（支持 since 游标） */
     case 'network': {
       const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(res, device.network.since(since))
+      sendJson(ctx, device.network.since(since))
       return true
     }
 
     /** /api/devices/:id/errors —— 错误记录（支持 since 游标，对齐 logs/network） */
     case 'errors': {
       const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(res, device.errors.since(since))
+      sendJson(ctx, device.errors.since(since))
       return true
     }
 
     /** /api/devices/:id/tags —— 修改标签/备注（控制台 & AI 都可调用） */
     case 'tags': {
-      if (req.method !== 'POST') {
-        sendJson(res, { error: '需要 POST' }, 405)
+      if (ctx.method !== 'POST') {
+        sendJson(ctx, { error: '需要 POST' }, 405)
         return true
       }
-      const { body, oversize } = await readBody(req)
-      if (oversize) { sendJson(res, { error: 'tags body 超过 2MB 上限' }, 413); return true }
+      const { body, oversize } = await readBody(ctx)
+      if (oversize) { sendJson(ctx, { error: 'tags body 超过 2MB 上限' }, 413); return true }
       let parsed: { tags?: string[]; note?: string }
       try {
         parsed = JSON.parse(body)
       } catch {
-        sendJson(res, { error: 'body 必须是 JSON' }, 400)
+        sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
         return true
       }
       /** tags 去重 + 去空白；note 允许清空（传空串或 undefined） */
@@ -583,12 +510,12 @@ export async function handleApiRoute(
       const note = parsed.note !== undefined ? String(parsed.note).trim() || undefined : device.info.note
       registry.updateInfo(deviceId, { tags, note })
       onDeviceListChanged?.()
-      sendJson(res, { ok: true, device: registry.get(deviceId)?.info })
+      sendJson(ctx, { ok: true, device: registry.get(deviceId)?.info })
       return true
     }
   }
 
-  sendJson(res, { error: 'Not found' }, 404)
+  sendJson(ctx, { error: 'Not found' }, 404)
   return true
 }
 

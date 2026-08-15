@@ -7,19 +7,23 @@
  * 请求压缩：客户端（如 SDK / AI agent）可手动 gzip 请求体并设置
  * Content-Encoding: gzip，服务端在此统一解压。
  *
- * 阈值：小于 GZIP_THRESHOLD 的消息不压缩（压缩头开销 > 收益）。
+ * 阈值：小于 GZIP_THRESHOLD 的消息不压缩（gzip 头 18B + 簿记开销，太小反而变大）。
  */
 
 import { gzipSync, gunzipSync } from 'node:zlib'
-import type { IncomingMessage } from 'node:http'
 
 /** 小于此大小不压缩（gzip 头 18B + 簿记开销，太小反而变大） */
 export const GZIP_THRESHOLD = 512
 
+/** 最小化的请求头视图（headers 已预读为 plain object） */
+export interface HeaderLike {
+  headers: Record<string, string>
+}
+
 /**
  * 判断请求是否接受 gzip 响应
  */
-export function acceptsGzip(req: IncomingMessage): boolean {
+export function acceptsGzip(req: HeaderLike): boolean {
   const enc = req.headers['accept-encoding'] ?? ''
   return enc.includes('gzip')
 }
@@ -27,17 +31,17 @@ export function acceptsGzip(req: IncomingMessage): boolean {
 /**
  * 判断请求体是否 gzip 编码
  */
-export function isGzipped(req: IncomingMessage): boolean {
+export function isGzipped(req: HeaderLike): boolean {
   return req.headers['content-encoding'] === 'gzip'
 }
 
 /**
  * 压缩响应体（如果客户端支持且数据足够大）
  *
- * 返回 { body, headers } —— 调用方合并 headers 后 writeHead + end
+ * 返回 { body, headers } —— 调用方合并 headers 后一次写入
  */
 export function maybeGzipResponse(
-  req: IncomingMessage,
+  req: HeaderLike,
   body: string | Buffer,
   extraHeaders: Record<string, string> = {},
 ): { body: string | Buffer; headers: Record<string, string> } {
@@ -62,7 +66,7 @@ export function maybeGzipResponse(
  * 解压 gzip 请求体（如果 Content-Encoding: gzip）
  */
 export function maybeGunzipRequest(
-  req: IncomingMessage,
+  req: HeaderLike,
   body: Buffer,
 ): Buffer {
   if (isGzipped(req)) {

@@ -18,7 +18,7 @@
   "dependencies": {
     "@silkpulse/feature-detect": "workspace:*",
     "@silkpulse/shared": "workspace:*",
-    "ws": "catalog:"
+    "uWebSockets.js": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
