@@ -39,7 +39,34 @@
 
 ## 决策记录
 
-- **不换通信层库**（Fastify/uWebSockets.js）：热点在 WS 扇出与压缩，不在 HTTP 路由（HTTP p99 ≤13.5ms）；换库零收益纯迁移风险。Fastify 实测对比已否决。
+- ~~**不换通信层库**（uWebSockets.js）~~ → **已实测推翻，见下方「uWS 实测决策（2026-08-15）」**。
 - **不做消息合并/裁剪**：合并（WS 本身 TCP 流式 + deflate 上下文跨帧共享）与裁剪（功能降级）都被否决。
 - **背压上限维持 1MB**：保护慢消费者场景验证有效。
 - 未来真撞 10k+ msg/s 或万级连接时，优先级：uWebSockets.js（连接密度）→ worker_threads 分片控制台 → 进程级水平扩展（registry 分片）。
+
+## uWS 实测决策（2026-08-15）
+
+同负载 A/B（`scripts/load-test.mjs` 同参数打真实 server 与 uWS PoC，uWS PoC 复刻压测路径全部语义：register/环形缓冲 500/扇出/背压 1MB/exec 10s 超时/health 同口径，`SHARED_COMPRESSOR` 压缩已协商验证）：
+
+| 指标（2000 设备 / 6k msg/s / 10 控制台 × 5 订阅） | ws（现役） | uWS PoC | 差异 |
+|---|---|---|---|
+| 进程总 CPU avg（外部 /proc 采样，含原生线程） | 80.2% | 14.3% | **-66pp** |
+| 事件循环利用率（洪峰段） | 75-92% | 8% | JS 线程让出 I/O 给 C++ |
+| 洪峰后 server RSS | 512-549MB | 245-279MB | **-50%** |
+| 广播送达率 | 30%（1338/4450，严重掉帧） | **100%**（4400/4400） | ws 已饱和丢消息 |
+| exec QPS（并发 10） | 2006 | 3332 | +66% |
+| exec p99 | 18.3ms | 10.8ms | -41% |
+| HTTP 轮询 p99 | 24.1ms | —（PoC 未实现该路由） | — |
+
+4000 设备 / 12k msg/s：uWS CPU avg=30.6%（45s 窗口）、ELU 17%、RSS 392MB、送达率 100%、exec 3236 QPS——**ws 在此规模已无法完成洪峰段**（OOM 边界）。
+
+**结论：uWS 优势确凿，值得迁移**。但迁移成本同样确凿：
+- `index.ts` HTTP 层 + upgrade 鉴权整体重写（uWS 的 res/req 生命周期与 node:http 完全不同：异步 handler 必须挂 onAborted、无流式 res、headers 写法不同）
+- `ws-relay.ts` 的 `ws.send`/`bufferedAmount`/ping-pong 心跳全部换 uWS API（getBufferedAmount/cork/drained 回调）
+- `api.ts`（1282 行）的路由层需适配（node:http ServerResponse → uWS HttpResponse）
+- Docker 增加平台特定二进制（uws_linux_x64_137.node 按 Node ABI 锁定，升级 Node 需重装）
+- 94 项回归需全量重验
+
+**迁移判定：性能收益已实证，但当前容量（实际使用 ≪ 2000 设备）远未触及 ws 瓶颈，ws 送达率 30% 的掉帧仅发生在超出产品容量的实验室负载。暂不迁移，保留 PoC（/tmp/uws-poc）与基线数据，触及 2000+ 设备规模或扇出掉帧真实出现时立即启动。**
+
+PoC 复刻件：`/tmp/uws-poc/server.mjs`（可独立运行复现全部数据）。
