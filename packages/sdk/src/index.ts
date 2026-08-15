@@ -208,21 +208,38 @@ async function collectPageIconDataUrl(): Promise<string | undefined> {
 }
 
 /**
- * 探测页面框架（DevTools 面板自动选插件用）
+ * 探测页面框架（DevTools 面板自动选插件 + 不支持提示用）
  *
- * 探测时机在 initWithDeviceId 里（Vue app 可能已挂载），特征：
- * - vue：__VUE_DEVTOOLS_GLOBAL_HOOK__ 的 apps 有实例（SDK 先建 hook，Vue 加载后自动注册）
- * - react：__REACT_DEVTOOLS_GLOBAL_HOOK__ 的 renderers 有值（react-devtools-bridge 挂载）
+ * 两个来源融合：
+ * 1. hook 注册（正常时序 + 后注入恢复补注册后）：
+ *    - vue：__VUE_DEVTOOLS_GLOBAL_HOOK__ 的 apps 有实例
+ *    - react：__REACT_DEVTOOLS_GLOBAL_HOOK__ 的 renderers 有值
+ * 2. DOM 锚点（恢复前的过渡态、5s 补扫间隙）：
+ *    - vue：根容器 __vue_app__（apiCreateApp.ts 无条件挂载，prod 也在）
+ *    - react：容器自有属性 __reactContainer$ 前缀（React 18+ 挂 FiberRoot）
  */
 function detectFrameworks(): string[] {
   const fw: string[] = []
   const vueHook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }).__VUE_DEVTOOLS_GLOBAL_HOOK__
-  if (vueHook?.apps?.length) fw.push('vue')
+  if (vueHook?.apps?.length) {
+    fw.push('vue')
+  } else {
+    for (const el of document.querySelectorAll('#app, #root, body *')) {
+      if ((el as unknown as { __vue_app__?: unknown }).__vue_app__) { fw.push('vue'); break }
+    }
+  }
   const reactHook = (window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: { renderers?: Map<string, unknown> | unknown[] } }).__REACT_DEVTOOLS_GLOBAL_HOOK__
+  let reactRegistered = false
   if (reactHook?.renderers) {
     const count = reactHook.renderers instanceof Map ? reactHook.renderers.size : (reactHook.renderers as unknown[]).length
-    if (count > 0) fw.push('react')
+    reactRegistered = count > 0
   }
+  if (!reactRegistered) {
+    for (const el of document.querySelectorAll('#root, #app, #__next, body *')) {
+      if (Object.getOwnPropertyNames(el).some((k) => k.startsWith('__reactContainer$'))) { reactRegistered = true; break }
+    }
+  }
+  if (reactRegistered) fw.push('react')
   return fw
 }
 

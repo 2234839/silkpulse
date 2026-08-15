@@ -43,6 +43,9 @@ interface ReactRendererInterface {
   getDisplayNameForElementID(id: number): string | null
   hasElementWithId(id: number): boolean
   overrideValueAtPath(type: 'hooks' | 'props' | 'state' | 'context', id: number, hookID: number | null, path: string[], value: unknown): void
+  /** react-dom inject 的 renderer 上存在（dev 构建有实现，prod 构建为 null） */
+  overrideHookState?: ((fiber: object, hookID: number, path: string[], value: unknown) => void) | null
+  overrideProps?: ((fiber: object, path: string[], value: unknown) => void) | null
 }
 
 /** React hook 上的 agent/rendererInterfaces 访问（真 hook 上才有） */
@@ -300,14 +303,22 @@ export function installDevToolsHelpers(): void {
     return { framework: 'react', tree }
   }
 
-  /** DOM 兜底找 React root（fiber root map 为空时） */
+  /** DOM 兑底找 React root（fiber root map 为空时）。
+   *  容器上挂的是 HostRoot fiber（tag=3）：stateNode 恒指向真实 FiberRoot
+   *  （不能用 stateNode.current === fiber 校验，double buffering 下恒 false），
+   *  缺失时才合成 { current: fiber } 包装 */
   function domBasedReactRoots(): object[] {
     const roots: object[] = []
     for (const el of document.querySelectorAll('#root, #app, [data-reactroot], body > div')) {
       const key = Object.getOwnPropertyNames(el).find((k) => k.startsWith('__reactContainer$') || k.startsWith('__reactFiber$'))
       if (key) {
         const container = (el as unknown as Record<string, object>)[key]
-        if (container) roots.push(container)
+        if (!container) continue
+        const fiber = container as { stateNode?: { current?: unknown } }
+        const fiberRoot = fiber.stateNode && typeof fiber.stateNode === 'object' && 'current' in fiber.stateNode
+          ? fiber.stateNode
+          : { current: container }
+        roots.push(fiberRoot as object)
       }
     }
     return roots
@@ -395,10 +406,17 @@ export function installDevToolsHelpers(): void {
 
     if (type === 'hooks') {
       if (!Number.isInteger(hookID)) return err('hooks 写入需要 hookID 参数（inspect 结果 hooks 数组的下标）')
+      if (typeof renderer!.overrideHookState !== 'function') {
+        return err('目标页 React 是生产构建（bundleType=0），react-dom 未提供 overrideHookState（仅 dev 构建可用），无法写 hooks')
+      }
       agent.overrideHookState({ id, hookID: hookID!, path, rendererID: rendererID!, value })
     } else {
-      if (type === 'props') agent.overrideProps({ id, path, rendererID: rendererID!, value })
-      else agent.overrideState({ id, path, rendererID: rendererID!, value })
+      if (type === 'props') {
+        if (typeof renderer!.overrideProps !== 'function') return err('目标页 React 是生产构建，无法写 props')
+        agent.overrideProps({ id, path, rendererID: rendererID!, value })
+      } else {
+        agent.overrideState({ id, path, rendererID: rendererID!, value })
+      }
     }
     return { success: true, framework: 'react', type, path, name: fiberDisplayName(compFiber) }
   }
@@ -482,7 +500,10 @@ export function installDevToolsHelpers(): void {
     return { framework: 'vue', tree: vueRootInstances().map((r) => vueInstanceNode(r, 0)) }
   }
 
-  /** DOM → 最近 Vue 组件实例（el.__vueParentComponent 向上） */
+  /** DOM → 最近 Vue 组件实例。
+   *  主路径：el.__vueParentComponent 向上——但这是 dev 构建专属标记，
+   *  生产构建不挂。兜底：从各 app 的 rootInstance 沿 subTree 的 el 链
+   *  下钻（DOM 包含关系 = 组件渲染范围），找到包含目标 el 的最深组件。 */
   function getVueComponentFromDOM(el: Element): { instance?: VueInstance; error?: string } {
     const rec = el as unknown as { __vueParentComponent?: VueInstance }
     if (rec.__vueParentComponent) return { instance: rec.__vueParentComponent }
@@ -492,6 +513,25 @@ export function installDevToolsHelpers(): void {
       if (p) return { instance: p }
       parent = parent.parentElement
     }
+    /** 生产构建兜底：subTree 下钻匹配（el 相等或 DOM 包含） */
+    let deepest: { ins: VueInstance; d: number } | null = null
+    const visit = (ins: VueInstance, d: number): void => {
+      const host = vueFirstHostEl(ins)
+      /** host 要么是 el 本人，要么是 el 的祖先（组件渲染范围覆盖 el） */
+      if (host === el || (host && el.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_CONTAINS)) {
+        if (!deepest || d > deepest.d) deepest = { ins, d }
+      }
+      /** 继续下钻子组件（与 vueInstanceNode 的 collect 同规则：组件即 recurse 自己的 subTree） */
+      const collect = (vnode: Record<string, unknown> | null | undefined, cd: number): void => {
+        if (!vnode || cd > 40) return
+        if (vnode.component) { visit(vnode.component as VueInstance, d + 1); return }
+        const kids = vnode.children
+        if (Array.isArray(kids)) for (const k of kids) collect(k as Record<string, unknown>, cd)
+      }
+      collect(ins.subTree, 0)
+    }
+    for (const root of vueRootInstances()) visit(root, 0)
+    if (deepest) return { instance: (deepest as { ins: VueInstance; d: number }).ins }
     return { error: '该元素不属于 Vue 渲染树' }
   }
 

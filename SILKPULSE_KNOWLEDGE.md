@@ -176,6 +176,20 @@ git add -A && git commit -m "feat(xxx): 描述"
 ### 陷阱 7：exec 序列化的字符串带引号
 `serializeResult` 用 `JSON.stringify`，所以**字符串结果会被加引号**。测试用 `includes()` 检查，不要用严格相等。
 
+### 陷阱 8：exec 代码含 `return` 时必须是「return 表达式」
+`handleExec` 检测 code 含 `\breturn\b` → 包成 `new Function('return (async () => { code })()')`。若写成 `(() => {...})()`（IIFE 作表达式语句、无外层 return）→ 返回 **undefined**。正确写法：`return (() => {...})()` 或 `return expr`。纯表达式（无 return）走间接 eval 自动返回值。
+
+### 陷阱 9：snap chromium 多 tab 下 puppeteer 观测通道不可靠
+矩阵测试 6 case 的 `page.evaluate` 偶发 `querySelector('#id')` 返回 null（同帧 `querySelectorAll('button')` 却正常）、`page.click` 报 `Cannot read properties of undefined (reading 'startsWith')` / `Runtime.callFunctionOn timed out`。**单 tab 完全正常**，多 tab / 长连跑下 snap chromium 150 的 CDP 上下文偶发漂移。对策：验证脚本对目标页的**读和写都走 device exec 通道**（WS，与 SDK 同上下文），puppeteer 只负责开页/导航/注入，不做断言观测。
+
+### 陷阱 10：React 后注入恢复的三个坑（react-devtools-bridge.ts）
+1. **`__reactContainer$` 挂的是 HostRoot fiber（tag=3）不是 FiberRoot**——取 `fiber.stateNode` 才是 FiberRoot（有 `containerInfo`/`current` 等字段）
+2. **不能用 `stateNode.current === container` 做身份校验**——commit 后 double buffering 使 `root.current` 切到 alternate fiber，容器标记仍是初始 fiber，恒 false。正确判据：`'current' in fiber.stateNode`（backend `recordMount` 按 `fiber.stateNode` 即真实 FiberRoot 做 `rootToFiberInstanceMap` 的 key）
+3. **hooks 重放需要 `currentDispatcherRef`**——backend bundle 自带 react 副本与页面 react-dom 的 internals 不同源，inspect hooks 时报 `#321 Invalid hook call`。合成 renderer 必须补 `currentDispatcherRef: reactGlobal internals 的 ReactCurrentDispatcher`（React 18 key：`__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED`；React 19：`__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE`）
+
+### 陷阱 11：React 生产构建 set 是官方级限制，如实报错
+react-dom prod 的 inject 对象 `overrideHookState/overrideProps/scheduleUpdate` 全为 `null`（源码证实，官方扩展同此限制）。`setReact` 检测 `typeof renderer.overrideHookState !== 'function'` 时返回明确 error「目标页 React 是生产构建（bundleType=0）…」，**不要假成功**。树/inspect（只读）/点击交互在 prod 全部正常。
+
 ---
 
 ## 7. compact 快照文本规则（测试匹配必读）
@@ -227,7 +241,7 @@ git add -A && git commit -m "feat(xxx): 描述"
 ## 10. 当前状态（截至 2026-08-15）
 
 - 分支：`master`，已迭代至 53+ 轮
-- 最近提交：**Vue/React DevTools 后注入桥接恢复**——官方扩展靠 document_start 时机在页面框架启动前装 hook，SDK 后注入错过 inject/app:init 事件。恢复锚点全在 DOM 上：Vue 扫全元素 `__vue_app__`（rootContainer 无条件挂载，prod 也在）手动 `hook.emit('app:init', app, version, 四 vnode type 符号)`，devtools-kit 的 `createAppRecord` 有 `app._container?._vnode?.component` 兜底专为 prod 无 `_instance` 设计，ComponentWalker 纯拉模式现场递归 subTree，补注册后树立即完整；React 扫元素自有属性 `__reactContainer$` 前缀收 FiberRoot（`{current: HostRootFiber}`），合成 renderer（version 探测 + findFiberByHostInstance 沿 hostInstance 的 `__reactFiber$` 正查）走 stub.inject 拿 rendererID，fiberRoots 收进 `stubFiberRoots[id]`，backend 激活后 `flushInitialOperations` 从 fiberRoots 全量建树，后续 `onCommitFiberRoot` 增量天然工作。Vue 侧每 5s 补扫动态 mount 的 app（事件驱动是主路径，补扫兜底）；React 恢复有守卫（已恢复 / pendingRenderers 非空则跳过）。`__silkpulse_devtools_available` 增加 DOM 锚点兜底（`__vue_app__` / `__reactContainer$`），恢复未触发也能正确报告框架能力
+- 最近提交：**Vue/React DevTools 后注入桥接恢复（矩阵 36/36 全绿）**——8 场景矩阵（Vue dev/prod × React prod × 先/后注入）全通过：available 探测、组件树、inspect state/hooks、set 写入（React prod 如实报能力受限）、恢复后交互。React 后注入修复三层 bug（HostRoot fiber 语义 → FiberRoot 身份 double buffering → hooks 重放 currentDispatcherRef 不同源 #321，详见陷阱 10/11）。console DevTools 面板新增「不支持框架」提示（探测结果 frameworks 为空或不含当前插件时显示 🚫 明确文案，不再无限「连接中…」，已浏览器实测三种场景）
 - 前一轮：inspect CLI WebSocket 连接独立段（WS 条目从失败/慢请求分析中分离，不再被 readyState=0 误判为失败）；WebSocket 采集（连接/send/recv/close 帧时间线）；连续重复日志聚合（repeat 计数）；network 详情 JSON body 格式化；__silkpulse_storage 查询 localStorage/sessionStorage/cookie；inspect 失败请求段附带响应体；__silkpulse_click 触发完整鼠标事件序列（覆盖 mousedown 自定义组件）；setValue 支持 checkbox/radio + 修复 radio 同组互斥；FormData body 采集 + echo 非 JSON 不崩溃；errors 复制全部按钮；pressKey + 截断阈值提升；source map fetch 超时；Tab 缩进；inspect 聚合；scroll/hover；exec 日志截断；setValue 支持 select；Request body 采集
 - 测试：无头测试 **94 项**全通过
 - network 面板支持 WebSocket：WS 连接作为 network 条目，点击展示 send/recv/event 帧时间线（对齐 DevTools WS Messages）

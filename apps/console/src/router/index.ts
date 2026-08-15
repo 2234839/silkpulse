@@ -21,6 +21,18 @@ export const router = createRouter({
       /** Web Debug 工具箱（不需要选中设备） */
       component: () => import('../components/ToolsPanel.vue'),
     },
+    {
+      path: '/blog',
+      name: 'blog',
+      /** blog 列表页（公开区域，帖子用 Vue SFC 编写） */
+      component: () => import('../blog/BlogList.vue'),
+    },
+    {
+      path: '/blog/:slug',
+      name: 'blog-post',
+      /** blog 详情页（按 slug 懒加载对应帖子组件） */
+      component: () => import('../blog/BlogPost.vue'),
+    },
     /** 兜底：未知路由重定向到控制台 */
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

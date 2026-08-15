@@ -291,6 +291,11 @@ onMounted(async () => {
           class="px-3 py-1.5 text-xs font-medium rounded bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1.5"
           title="Web Debug 工具箱（不需要选中设备）"
         >🔧 工具箱</router-link>
+        <router-link
+          to="/blog"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-orange-600 text-white hover:bg-orange-700 flex items-center gap-1.5"
+          title="silkpulse blog —— 项目动态与技术文章"
+        >📝 Blog</router-link>
         <button
           @click="openAgent"
           class="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
@@ -325,6 +330,8 @@ onMounted(async () => {
           <button @click="showInjectModal = true" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">➕ 接入新设备</button>
           <button v-if="isAdmin" @click="showProjectModal = true" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">📁 项目管理</button>
           <button v-if="selectedDevice" @click="openAiContext" :disabled="showAiModal" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 disabled:opacity-50">📋 诊断上下文</button>
+          <router-link to="/tools" @click="headerMenuOpen = false" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 block">🔧 工具箱</router-link>
+          <router-link to="/blog" @click="headerMenuOpen = false" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 block">📝 Blog</router-link>
           <button @click="openAgent" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">🤖 接入 Agent</button>
           <button v-if="authStatus?.authEnabled && apiKey" @click="logout" class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10">🚪 退出</button>
         </div>

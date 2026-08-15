@@ -79,12 +79,16 @@ watch(
 /**
  * 当前插件是否不被目标页支持
  *
- * 探测到明确框架列表且不含当前插件时为 true（如 React 页切到 Vue 插件）。
- * 探测结果未知（undefined）或为空时不禁用——宁可尝试连接，不误伤未上报的场景。
+ * 两种情况判定不支持（探测结果已上报的前提下）：
+ * 1. 框架列表不含当前插件（如 React 页切到 Vue 插件）
+ * 2. 框架列表为空数组——页面既没有 Vue 也没有 React（SDK 探测含 DOM 锚点兑底，
+ *    后注入恢复前也能报对），此时两个插件都提示不支持，不无限转圈
+ * frameworks 为 undefined（尚未上报）时不判定——保持尝试连接
  */
 const pluginUnsupported = computed(() => {
   const fws = props.frameworks
-  if (!fws || fws.length === 0) return false
+  if (!fws) return false
+  if (fws.length === 0) return true
   return !fws.includes(activePlugin.value)
 })
 
@@ -243,7 +247,8 @@ onBeforeUnmount(() => {
     >
       <div class="text-3xl">🚫</div>
       <div class="text-sm font-medium">当前页面不支持 {{ PLUGIN_LABEL[activePlugin] }} DevTools</div>
-      <div class="text-xs">目标页未检测到 {{ PLUGIN_LABEL[activePlugin] }} 应用（检测到：{{ detectedLabel }}）</div>
+      <div v-if="(frameworks ?? []).length > 0" class="text-xs">目标页是 {{ detectedLabel }} 应用，请切换到对应插件</div>
+      <div v-else class="text-xs">目标页未检测到 Vue / React 应用（纯静态页或未接入框架的页面无法使用 DevTools）</div>
     </div>
     <!-- devtools client：vue 官方 SPA / react 自建 frontend -->
     <iframe

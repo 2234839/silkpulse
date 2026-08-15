@@ -206,8 +206,10 @@ let backendLoadPromise: Promise<BackendModule> | null = null
  * hook.inject(internals) 并缓存 hook 引用——我们 stub 装晚了收不到
  * inject，pendingRenderers 为空，激活后 backend 无 renderer 可 attach。
  *
- * 恢复路径：React 18+ 在每个 root 容器上挂 `__reactContainer$<random>`
- * （值即 FiberRoot）。扫出来后合成 renderer 对象（backend 的
+ * 恢复路径：React 18+ 在每个 root 容器上挂 `__reactContainer$<random>`，
+ * **挂的是 HostRoot fiber 本身**（不是 FiberRoot！fiber.stateNode 才指向
+ * FiberRoot，官方 backend 的 getFiberRoots 存的是 FiberRoot——
+ * `{ current: HostRootFiber }`）。扫出来后合成 renderer 对象（backend 的
  * attachRenderer 只要求 version/bundleType + findFiberByHostInstance
  * 或 currentDispatcherRef 走 fiber 分支），激活时与真实 inject 一样
  * replay 进真 hook。fiberRoots 也一并注入，flushInitialOperations
@@ -232,15 +234,35 @@ function recoverReactRoots(): void {
     for (const key of Object.getOwnPropertyNames(el)) {
       if (!key.startsWith('__reactContainer$')) continue
       const container = (el as unknown as Record<string, unknown>)[key]
-      /** FiberRoot 形状：{ current: HostRootFiber, ... }；只收非空 root */
-      if (container && (container as { current?: unknown }).current) roots.add(container)
+      if (!container) continue
+      /** 容器上挂的是 HostRoot fiber（tag=3）：其 stateNode 恒指向真实 FiberRoot
+       *  （alternate fiber 克隆时 stateNode 一并复制，不受 double buffering 影响）。
+       *  注意不能用 `stateNode.current === fiber` 做身份校验——commit 后 root.current
+       *  切到 alternate，容器标记仍是初始 fiber，恒 false。backend 的 recordMount
+       *  按 fiber.stateNode 做 map key，必须注册真实 FiberRoot 而非合成包装 */
+      const fiber = container as { stateNode?: { current?: unknown } }
+      const fiberRoot = fiber.stateNode && typeof fiber.stateNode === 'object' && 'current' in fiber.stateNode
+        ? fiber.stateNode
+        : { current: container }
+      if ((fiberRoot as { current?: unknown }).current) roots.add(fiberRoot)
     }
   }
   if (roots.size === 0) return
 
   /** 探测 React 版本（页面全局可能有 React 挂载信息） */
-  const reactGlobal = (target.React ?? target.__REACT__) as { version?: string } | undefined
+  const reactGlobal = (target.React ?? target.__REACT__) as
+    (Record<string, unknown> & { version?: string }) | undefined
   const version = reactGlobal?.version ?? '18.0.0'
+
+  /** hooks 重放需要页面 react 的 ReactCurrentDispatcher：inspect 时 backend 会把
+   *  它的 H 换成 DispatcherProxy 后重放组件函数。拿不到时 backend 会退到
+   *  bundle 内置 react 副本的 internals——与页面 react-dom 不同源，重放时
+   *  useState 报 #321 Invalid hook call。
+   *  React 18 UMD: __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED；
+   *  React 19: __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE */
+  const internals = reactGlobal?.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    ?? reactGlobal?.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+  const dispatcherRef = (internals as { ReactCurrentDispatcher?: object } | undefined)?.ReactCurrentDispatcher
 
   const syntheticRenderer: RendererInternals = {
     version,
@@ -248,6 +270,8 @@ function recoverReactRoots(): void {
     /** 1 = development build（fiber 里有 _debugSource 等字段，backend 会展示源码定位） */
     bundleType: 1,
     rendererPackageName: 'react-dom',
+    /** 真实 inject 时 react-dom 会传这个字段；hooks 检查/改写全靠它 */
+    currentDispatcherRef: dispatcherRef,
     findFiberByHostInstance(instance: unknown) {
       /** hostInstance 上的 __reactFiber$ 属性即所属 fiber（React 17+ 恒有） */
       if (!instance || typeof instance !== 'object') return null
@@ -475,8 +499,11 @@ async function activateBackend(): Promise<void> {
 
     /** stub 从此委托给真 hook（window 上的 stub 对象引用不变） */
     realHook = hook
-  } catch {
+  } catch (e) {
     backendActivated = false
+    /** React devtools 是可选增强功能，激活失败不阻塞 SDK 其他能力；
+     *  打日志方便线上排查（catch 静默会让后注入问题难定位） */
+    console.error('[silkpulse] React backend 激活失败:', e)
   }
 }
 

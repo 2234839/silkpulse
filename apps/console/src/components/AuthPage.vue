@@ -85,7 +85,7 @@ async function handleGuestLogin() {
           AI 原生的<br class="hidden sm:block" />远程设备调试器
         </h1>
         <p class="text-gray-400 text-sm sm:text-base leading-relaxed mb-8">
-          用户报告「线上页面白屏」「手机上打不开」时，开发者无法用本地 DevTools 调试远程设备。
+          测试同学报「测试机上白屏」「手机上打不开」时，开发者无法用本地 DevTools 调试远在别处的设备。
           SilkPulse 让 AI 直接接入远程页面——看结构、读日志、执行诊断、操作元素，完成「远程诊断→操作→验证」闭环。
         </p>
 
@@ -114,7 +114,9 @@ async function handleGuestLogin() {
         </div>
 
         <!-- 底部链接 -->
-        <div class="flex items-center gap-4 text-xs text-gray-600">
+        <div class="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
+          <router-link to="/blog" class="text-orange-400/80 hover:text-orange-400 transition-colors flex items-center gap-1">📝 Blog</router-link>
+          <span class="text-gray-700">·</span>
           <span>Script 标签</span>
           <span class="text-gray-700">·</span>
           <span>Bookmarklet</span>
