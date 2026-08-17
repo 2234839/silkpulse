@@ -1,21 +1,54 @@
-# silkpulse
+<div align="center">
 
-**AI 原生的远程设备调试器** —— 让 AI 直接查看、诊断、操作远程页面（线上 H5、移动端、webview 等无法用本地 DevTools 调试的环境）。
+# 🩺 silkpulse
 
-定位 = PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。
+### 让 AI 亲手调试你看不见的页面
+
+线上 H5 · 移动端 webview · 用户现场 —— 任何打不开本地 DevTools 的远程页面
+
+[![CI](https://github.com/2234839/silkpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/2234839/silkpulse/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![在线体验](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-silkpulse-6366f1.svg)](https://silkpulse.heartstack.space)
+
+Vue / React 组件树 · console · network · errors · source map · exec · AI skill
+
+</div>
+
+---
+
+> 用户在千里之外的 iPhone 上说「页面白屏了」。
+> 你对 AI 说一句「看看怎么回事」——它展开组件树、读 console、查网络请求，
+> 定位到那行报错，执行代码验证，全程不需要用户装任何东西。
+>
+> **这就是 silkpulse 做的事。**
+
+<p align="center">
+  <img src="docs/vueDevTools.png" width="49.2%" alt="silkpulse 控制台：Vue 生产页组件树调试，选中组件 state/props 一目了然" title="Vue 生产页组件树调试">
+  <img src="docs/reactDevTools.png" width="49.2%" alt="silkpulse 控制台：React 生产页组件树调试，hooks/props/source 直接看" title="React 生产页组件树调试">
+</p>
+
+<p align="center"><sub>远程页面跑的是生产构建？没关系 —— 组件树、hooks、state、props、源码位置，一个 script 标签接入直接看</sub></p>
+
+## 核心亮点
+
+- 🔭 **远程组件树** —— 官方 vue-devtools / react-devtools 面板内嵌：树形浏览、hooks / props / 源码定位；Vue DOM 变化自动广播、React 按官方节奏轮询跟随，生产构建可用
+- 🤖 **AI-native 闭环** —— skill + HTTP API 双接入：AI 能看（快照 / 日志 / 网络 / 组件树）、能动（exec / click / type）、能闭环（诊断 → 操作 → 验证一气呵成）
+- 📦 **零门槛接入** —— script 标签 / bookmarklet / userscript 三选一，线上站不改一行源码也能接
+- 🛡 **生产级可靠** —— 断线重连（历史保留）、SDK 离线缓冲、自动 source map 解析、日志限流、错误风暴去重、WS 背压保护
 
 ## 在线体验
 
 - **控制台**：[https://silkpulse.heartstack.space](https://silkpulse.heartstack.space)（输入密钥或以访客身份登录）
 - **测试页**（已接入 SDK，可直接在控制台中看到）：[https://silkpulse.heartstack.space/test-page.html](https://silkpulse.heartstack.space/test-page.html)
 
-## 为什么用 silkpulse
+## 与同类工具对比
 
-用户报告"线上页面白屏""手机上打不开"时，开发者无法用本地 DevTools 调试远程设备。silkpulse 让 **AI agent 直接接入远程页面**——看页面结构、读 console/网络/错误、执行诊断代码、操作元素，完成"远程诊断→操作→验证"的完整闭环。
+> 一句话定位：PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。
 
 | | PageSpy | chii | vite-plugin-pilot | **silkpulse** |
 |---|---|---|---|---|
 | 远程设备调试 | ✅ | ✅ | ❌（仅本地 dev server） | ✅ |
+| 远程组件树（Vue/React） | ❌（DOM 树） | ❌（DOM 树） | ❌ | ✅ 官方 DevTools 面板内嵌 |
 | AI-native | ❌ | ❌ | ✅ | ✅ |
 | AI 接入方式 | 无 | 无 | MCP | **skill + HTTP API** |
 | 多设备并发 | ✅ | ✅ | ❌ | ✅ |
@@ -23,6 +56,16 @@
 | 前端依赖 | 自研控制台 | fork DevTools | 无控制台 | 自研轻量控制台 |
 
 ## 核心能力
+
+### ✨ 远程组件树调试（DevTools）
+
+线上页面是生产构建、没有本地 DevTools？**组件树照样看**：
+
+- **Vue 3**：组件树 + 选中组件的 state / props，**DOM 变化自动刷新**（MutationObserver 监听重渲染，生产构建无框架事件也能自动广播树 + 状态）
+- **React 18/19**：组件树 + 选中组件的 **hooks（State/Effect/Ref…）/ props / 源码定位**，选中后按官方 1s 轮询自动跟随更新
+- **后注入也能恢复**：SDK 后于页面加载注入时，自动扫描 FiberRoot / Vue 实例重建组件树（不要求 script 必须在框架之前）
+- **生产构建安全**：React 生产包不重放组件函数（hooks 直接读 fiber 内部链，杜绝 Invalid hook call #321）；无 `_debugSource` 时优雅降级
+- **官方面板内嵌**：vue-devtools / react-devtools 官方 frontend 走 iframe 隔离加载，树形浏览、搜索、展开、选中体验与本地 DevTools 一致
 
 ### 远程采集
 - **console 劫持**：info/warn/error/debug 全级别采集，安全序列化（限深限长防卡死），**日志限流**（滑动窗口 50 条/秒，防 log 爆炸打爆 WS/server；error 级不限流）
@@ -220,6 +263,7 @@ node tools/skill/scripts/silkpulse.mjs inject bookmarklet
 - **Network 面板**：主从布局，**时间戳列**（与 console 日志交叉对比时序），点击请求查看请求体/响应体详情，**一键复制为 cURL**（远程请求本地/AI 复现），URL/方法/状态码搜索过滤，**状态筛选**（全部/成功/失败，快速隔离 4xx/5xx 异常请求），**耗时排序**（点击"耗时"表头三态切换：时间序/降序/升序，慢请求 >500ms 橙色高亮，一眼定位性能瓶颈，与 inspect CLI 慢请求 Top 对齐）
 - **Errors 面板**：含堆栈展示（可折叠）+ source map 解析后的原始源码位置，message/堆栈/源码位置搜索过滤，**单条错误一键复制**（格式化 message + 源码位置 + stack，粘贴给 AI/同事），**复制全部错误**（一键聚合当前过滤后的所有错误为文本，对齐 inspect CLI 格式，AI 需完整错误现场时批量获取）
 - **Snapshot 面板**：compact 文本格式，**行级搜索过滤**（输入元素名/idx/状态 token 只显示匹配行，快速定位），**一键复制**（粘贴给 AI/存档），带刷新按钮
+- **DevTools 面板**：远程页面 **Vue / React 组件树**（官方 frontend 内嵌 iframe）——树形浏览 + 搜索，点选组件看 state / hooks / props / 源码位置，数据变化自动刷新（Vue MutationObserver 广播 / React 官方轮询），生产构建可用；⟳ 手动刷新（React 侧重载面板，树恒单份）
 - **Exec 面板**：直接执行诊断 JS（Ctrl+↵，**Tab 缩进 / Shift+Tab 反缩进**，支持多行选区批量缩进/反缩进），**执行结果分块展示**（返回值 + 执行期间日志分开，失败红色高亮），**执行后快照默认折叠**（点击展开，不挤占返回值视线），**执行历史侧栏**（点击回填，localStorage 持久化）
 - **✨ AI 诊断上下文**：一键聚合错误+快照+网络+日志为 markdown，复制给任意 AI agent
 - **🌙/☀️ 深色模式**：跟随系统偏好，localStorage 持久化
