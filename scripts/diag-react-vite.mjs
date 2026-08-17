@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 const SERVER = 'http://localhost:8080'
-const KEY = '9bc0af165928751a919613f607a2de17247c9237c0a18d24'
+const KEY = process.env.SILKPULSE_ADMIN_KEY
 
 async function execOn(devId, code) {
   const res = await fetch(`${SERVER}/api/devices/${devId}/exec`, {

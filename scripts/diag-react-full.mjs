@@ -3,7 +3,7 @@ import puppeteer from 'puppeteer-core'
 import { execSync } from 'node:child_process'
 
 const SERVER = 'http://localhost:8080'
-const ADMIN_KEY = '9bc0af165928751a919613f607a2de17247c9237c0a18d24'
+const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY
 
 let chrom = process.env.CHROMIUM_PATH
 if (!chrom) {

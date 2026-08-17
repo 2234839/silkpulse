@@ -18,7 +18,7 @@
  */
 
 const SERVER = process.env.SILKPULSE_SERVER ?? 'https://silkpulse.heartstack.space'
-const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY ?? '9bc0af165928751a919613f607a2de17247c9237c0a18d24'
+const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY
 
 const PASS = '\x1b[32m✓\x1b[0m'
 const FAIL = '\x1b[31m✗\x1b[0m'

@@ -48,7 +48,7 @@ const state = await p.evaluate(() => ({
 console.log('state:', JSON.stringify(state))
 
 const devs = await fetch('http://localhost:8080/api/devices', {
-  headers: { Authorization: 'Bearer 9bc0af165928751a919613f607a2de17247c9237c0a18d24' },
+  headers: { Authorization: `Bearer ${process.env.SILKPULSE_ADMIN_KEY}` },
 }).then((r) => r.json())
 console.log('devices:', JSON.stringify((devs.devices ?? []).map((d) => ({ id: d.id, title: d.title, url: (d.url ?? '').slice(-50) }))))
 await b.close()
