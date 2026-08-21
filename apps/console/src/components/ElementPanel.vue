@@ -767,6 +767,27 @@ async function refreshChangedNodes(changes: DomChangeData) {
             }, 1500);
           }
         }
+        /**
+         * 合并而非替换：变化的只有这一层，孙子节点的展开状态必须保留。
+         *
+         * 按 idx 建旧节点 Map，新 children 的每个节点若旧版存在，
+         * 沿用旧节点的展开状态 + 已加载的（孙）children/shadowChildren，
+         * 只更新 tag/attributes/text/childCount 等元信息。
+         * 旧实现整体替换数组，新对象全是 collapsed → 深层展开被重置。
+         */
+        const oldChildren = new Map((node.children ?? []).map((c) => [c.idx, c]));
+        for (const fc of freshChildren) {
+          const old = oldChildren.get(fc.idx);
+          if (!old) continue;
+          if (old.expanded) {
+            fc.expanded = true;
+            fc.children = old.children;
+          }
+          if (old.shadowExpanded) {
+            fc.shadowExpanded = true;
+            fc.shadowChildren = old.shadowChildren;
+          }
+        }
         node.children = freshChildren;
         rebuildIndex(elementTreeRoot.value);
       } catch {
@@ -774,11 +795,25 @@ async function refreshChangedNodes(changes: DomChangeData) {
       }
     }
 
-    /** shadow 子树也刷新 */
+    /** shadow 子树也刷新（同样按 idx 合并保留深层展开状态） */
     if (node.shadowExpanded && !refreshed.has(-parentIdx)) {
       refreshed.add(-parentIdx);
       try {
-        node.shadowChildren = await loadElementChildren(node, true);
+        const freshShadow = await loadElementChildren(node, true);
+        const oldShadow = new Map((node.shadowChildren ?? []).map((c) => [c.idx, c]));
+        for (const fc of freshShadow) {
+          const old = oldShadow.get(fc.idx);
+          if (!old) continue;
+          if (old.expanded) {
+            fc.expanded = true;
+            fc.children = old.children;
+          }
+          if (old.shadowExpanded) {
+            fc.shadowExpanded = true;
+            fc.shadowChildren = old.shadowChildren;
+          }
+        }
+        node.shadowChildren = freshShadow;
       } catch {
         /** 静默 */
       }
@@ -791,8 +826,22 @@ async function refreshChangedNodes(changes: DomChangeData) {
   );
   if (rootParents.length > 0 && !refreshed.has(-1)) {
     refreshed.add(-1);
-    /** 有变化但找不到具体节点 → 可能是 body 级变化，刷新根 */
-    elementTreeRoot.value = await loadElementChildren(null);
+    /** 有变化但找不到具体节点 → 可能是 body 级变化，刷新根（同样合并保留展开） */
+    const freshRoots = await loadElementChildren(null);
+    const oldRoots = new Map(elementTreeRoot.value.map((r) => [r.idx, r]));
+    for (const fr of freshRoots) {
+      const old = oldRoots.get(fr.idx);
+      if (!old) continue;
+      if (old.expanded) {
+        fr.expanded = true;
+        fr.children = old.children;
+      }
+      if (old.shadowExpanded) {
+        fr.shadowExpanded = true;
+        fr.shadowChildren = old.shadowChildren;
+      }
+    }
+    elementTreeRoot.value = freshRoots;
     rebuildIndex(elementTreeRoot.value);
   }
 }

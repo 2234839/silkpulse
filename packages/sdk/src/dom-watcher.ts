@@ -11,23 +11,54 @@
  * 控制台收到后按 parentIdxs 刷新对应已展开节点。
  */
 
-import type { DomChangeData } from '@silkpulse/shared'
+import type { DomChangeData } from "@silkpulse/shared";
 
 /** 上报回调（SDK index.ts 注入 ws send） */
-type Sink = (changes: DomChangeData) => void
+type Sink = (changes: DomChangeData) => void;
 
 /** debounce timer */
-let debounceTimer: ReturnType<typeof setTimeout> | undefined
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** 待上报的变化收集器（debounce 窗口内累积） */
-let pendingParentIdxs = new Set<number>()
-let pendingKinds = new Set<DomChangeData['kinds'][number]>()
+let pendingParentIdxs = new Set<number>();
+let pendingKinds = new Set<DomChangeData["kinds"][number]>();
 
 /** 已挂载的 observer 集合（断开时统一清理） */
-const observers: MutationObserver[] = []
+const observers: MutationObserver[] = [];
 
 /** 控制台是否订阅了 dom-change（由 server set-watchers 消息控制，默认不发减少开销） */
-let active = false
+let active = false;
+
+/**
+ * 采集器临时容器集合：snapdom 截图时会向 document 挂临时容器（克隆 DOM），
+ * 这些节点关联的 DOM 变化是采集器自产噪声，上报了会让控制台 DOM 树
+ * 被无关刷新（破坏展开状态）。
+ *
+ * 方案：跟踪临时容器节点（进入时记录），它自身及其内部的变化全部跳过；
+ * 临时容器移除后从集合清理。与之并发的真实页面变化照常上报，
+ * 不像旧的静默窗口那样把 3s 内的真实变化也丢掉。
+ */
+const ignoredTargets = new WeakSet<Node>();
+
+/** 标记采集器临时容器（截图前调用）：其关联变化不上报 */
+export function ignoreDomSubtree(node: Node): void {
+  ignoredTargets.add(node);
+}
+
+/** 临时容器已移除：解除标记 */
+export function unignoreDomSubtree(node: Node): void {
+  ignoredTargets.delete(node);
+}
+
+/** 节点是否在采集器临时容器内（沿 parent 链向上查） */
+function isIgnoredNode(node: Node | null): boolean {
+  let cur = node;
+  while (cur) {
+    if (ignoredTargets.has(cur)) return true;
+    cur = cur.parentNode;
+  }
+  return false;
+}
 
 /**
  * 尝试给元素打 idx 并收集
@@ -35,42 +66,42 @@ let active = false
  * 元素可能还未被 __silkpulse_ensureIdx 注册（新插入的节点），
  * 打 idx 失败时跳过（不在此处注册——避免树未展开时打太多无效 idx）。
  */
-function tryCollectIdx(el: Element | null, kind: DomChangeData['kinds'][number]): void {
-  if (!el) return
+function tryCollectIdx(el: Element | null, kind: DomChangeData["kinds"][number]): void {
+  if (!el) return;
   const w = window as unknown as {
-    __silkpulse_ensureIdx?: (el: Element) => number
-  }
-  const ensure = w.__silkpulse_ensureIdx
-  if (!ensure) return
-  const idx = ensure(el)
+    __silkpulse_ensureIdx?: (el: Element) => number;
+  };
+  const ensure = w.__silkpulse_ensureIdx;
+  if (!ensure) return;
+  const idx = ensure(el);
   if (idx >= 0) {
-    pendingParentIdxs.add(idx)
-    pendingKinds.add(kind)
+    pendingParentIdxs.add(idx);
+    pendingKinds.add(kind);
   }
 }
 
 /** flush：发送累积的变化 */
 function flush(sink: Sink): void {
   if (pendingParentIdxs.size === 0) {
-    pendingKinds.clear()
-    return
+    pendingKinds.clear();
+    return;
   }
   sink({
     parentIdxs: [...pendingParentIdxs],
     kinds: [...pendingKinds],
     timestamp: Date.now(),
-  })
-  pendingParentIdxs = new Set()
-  pendingKinds = new Set()
+  });
+  pendingParentIdxs = new Set();
+  pendingKinds = new Set();
 }
 
 /** 调度 flush（debounce 200ms，批量上报减少消息频率） */
 function scheduleFlush(sink: Sink): void {
-  if (debounceTimer) clearTimeout(debounceTimer)
+  if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
-    debounceTimer = undefined
-    flush(sink)
-  }, 200)
+    debounceTimer = undefined;
+    flush(sink);
+  }, 200);
 }
 
 /**
@@ -81,52 +112,54 @@ function scheduleFlush(sink: Sink): void {
  */
 function observeTarget(target: Node, sink: Sink): MutationObserver {
   const observer = new MutationObserver((mutations) => {
-    if (!active) return
+    if (!active) return;
 
     for (const mut of mutations) {
+      /** 变化目标在采集器临时容器内：噪声，跳过 */
+      if (isIgnoredNode(mut.target)) continue;
       switch (mut.type) {
-        case 'childList': {
+        case "childList": {
           /** 子元素增删 → 收集父元素（target 就是父节点） */
-          const parent = mut.target as Element
+          const parent = mut.target as Element;
           if (mut.addedNodes.length > 0) {
-            tryCollectIdx(parent, 'added')
+            tryCollectIdx(parent, "added");
             /** 新增的 shadow host → 自动挂载 observer */
             for (const node of mut.addedNodes) {
               if (node instanceof Element && node.shadowRoot) {
-                observeTarget(node.shadowRoot, sink)
+                observeTarget(node.shadowRoot, sink);
               }
             }
           }
           if (mut.removedNodes.length > 0) {
-            tryCollectIdx(parent, 'removed')
+            tryCollectIdx(parent, "removed");
           }
-          break
+          break;
         }
-        case 'attributes': {
+        case "attributes": {
           /** 属性变化 → 收集目标元素自身 */
-          tryCollectIdx(mut.target as Element, 'attributes')
-          break
+          tryCollectIdx(mut.target as Element, "attributes");
+          break;
         }
-        case 'characterData': {
+        case "characterData": {
           /** 文本变化 → 收集父元素（文本节点本身没有 idx） */
-          const parent = (mut.target as Text).parentElement
-          tryCollectIdx(parent, 'text')
-          break
+          const parent = (mut.target as Text).parentElement;
+          tryCollectIdx(parent, "text");
+          break;
         }
       }
     }
-    scheduleFlush(sink)
-  })
+    scheduleFlush(sink);
+  });
 
   observer.observe(target, {
     childList: true,
     attributes: true,
     characterData: true,
-    subtree: target === document.body, /** body 用 subtree，shadow root 各自管自己的子树 */
-  })
+    subtree: target === document.body /** body 用 subtree，shadow root 各自管自己的子树 */,
+  });
 
-  observers.push(observer)
-  return observer
+  observers.push(observer);
+  return observer;
 }
 
 /**
@@ -135,11 +168,11 @@ function observeTarget(target: Node, sink: Sink): MutationObserver {
  * 页面可能在 SDK 加载前就有 shadow DOM，扫描一遍把已有的 shadow root 也纳入观察。
  */
 function scanExistingShadowRoots(root: ParentNode, sink: Sink): void {
-  const all = root.querySelectorAll('*')
+  const all = root.querySelectorAll("*");
   for (const el of all) {
     if (el.shadowRoot) {
-      observeTarget(el.shadowRoot, sink)
-      scanExistingShadowRoots(el.shadowRoot, sink)
+      observeTarget(el.shadowRoot, sink);
+      scanExistingShadowRoots(el.shadowRoot, sink);
     }
   }
 }
@@ -148,36 +181,36 @@ function scanExistingShadowRoots(root: ParentNode, sink: Sink): void {
 export function installDomWatcher(sink: Sink): void {
   if (!document.body) {
     /** body 还没准备好，等 DOMContentLoaded */
-    document.addEventListener('DOMContentLoaded', () => installDomWatcher(sink), { once: true })
-    return
+    document.addEventListener("DOMContentLoaded", () => installDomWatcher(sink), { once: true });
+    return;
   }
 
   /** 观察 body 整棵树 */
-  observeTarget(document.body, sink)
+  observeTarget(document.body, sink);
 
   /** 扫描已有 shadow root */
-  scanExistingShadowRoots(document, sink)
+  scanExistingShadowRoots(document, sink);
 }
 
 /** 暂停/恢复上报（控制台未打开 Element 面板时可暂停减少开销） */
 export function setDomWatcherActive(value: boolean): void {
-  active = value
+  active = value;
   if (!value && debounceTimer) {
-    clearTimeout(debounceTimer)
-    debounceTimer = undefined
-    pendingParentIdxs.clear()
-    pendingKinds.clear()
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    pendingParentIdxs.clear();
+    pendingKinds.clear();
   }
 }
 
 /** 断开所有 observer（页面卸载时调用） */
 export function disconnectDomWatcher(): void {
-  for (const obs of observers) obs.disconnect()
-  observers.length = 0
+  for (const obs of observers) obs.disconnect();
+  observers.length = 0;
   if (debounceTimer) {
-    clearTimeout(debounceTimer)
-    debounceTimer = undefined
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
   }
-  pendingParentIdxs.clear()
-  pendingKinds.clear()
+  pendingParentIdxs.clear();
+  pendingKinds.clear();
 }
