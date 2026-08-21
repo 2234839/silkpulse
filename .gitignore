@@ -42,4 +42,9 @@ packages/server/public/react-vite-*.html
 
 # AI agent worktrees
 .claude/worktrees/
+
+# devtools 插件第三方构建产物（pnpm build:plugins 增量生成，不入库）
+plugins/vue-devtools/assets/
+plugins/vue-devtools/index.html
+plugins/react-devtools/assets/
 packages/server/public/plugins/
