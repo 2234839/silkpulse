@@ -497,27 +497,28 @@ function onChildUpdate(childKey: string, newChildValue: unknown) {
 
 /* ==================== 类型配色 ==================== */
 
+/** 类型 → CSS 变量（跟随亮/暗主题，亮色下饱和度更高更醒目） */
 function typeColor(type: string): string {
   const colors: Record<string, string> = {
-    string: '#ce9178',
-    number: '#b5cea8',
-    boolean: '#569cd6',
-    null: '#569cd6',
-    undefined: '#569cd6',
-    bigint: '#b5cea8',
-    function: '#dcdcaa',
-    array: '#4ec9b0',
-    object: '#4ec9b0',
-    date: '#dcdcaa',
-    regexp: '#d16969',
-    error: '#f44747',
-    map: '#4ec9b0',
-    set: '#4ec9b0',
-    promise: '#4ec9b0',
-    element: '#d7ba7d',
-    event: '#d7ba7d',
+    string: 'var(--cs-oi-string)',
+    number: 'var(--cs-oi-number)',
+    boolean: 'var(--cs-oi-boolean)',
+    null: 'var(--cs-oi-boolean)',
+    undefined: 'var(--cs-oi-boolean)',
+    bigint: 'var(--cs-oi-number)',
+    function: 'var(--cs-oi-function)',
+    array: 'var(--cs-oi-type)',
+    object: 'var(--cs-oi-type)',
+    date: 'var(--cs-oi-function)',
+    regexp: 'var(--cs-oi-regexp)',
+    error: 'var(--cs-oi-error)',
+    map: 'var(--cs-oi-type)',
+    set: 'var(--cs-oi-type)',
+    promise: 'var(--cs-oi-type)',
+    element: 'var(--cs-oi-element)',
+    event: 'var(--cs-oi-element)',
   }
-  return colors[type] || '#d4d4d4'
+  return colors[type] || 'var(--cs-oi-default)'
 }
 
 function typeBadge(type: string): string {
@@ -675,18 +676,19 @@ function handleChildContextMenu(ctx: MenuContext) {
   gap: 4px;
   cursor: default;
   white-space: nowrap;
-  padding: 0;
+  padding: 0 2px;
+  border-radius: 3px;
 }
 
 .oi-row:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--cs-oi-row-hover);
 }
 
 .oi-arrow {
   display: inline-block;
   width: 12px;
   font-size: 9px;
-  color: #888;
+  color: var(--cs-oi-arrow);
   transition: transform 0.1s;
   flex-shrink: 0;
   cursor: pointer;
@@ -701,7 +703,7 @@ function handleChildContextMenu(ctx: MenuContext) {
 }
 
 .oi-key {
-  color: #9cdcfe;
+  color: var(--cs-oi-key);
   flex-shrink: 0;
 }
 
@@ -722,16 +724,16 @@ function handleChildContextMenu(ctx: MenuContext) {
 }
 
 .oi-clickable:hover {
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--cs-oi-edit-hover);
 }
 
 .oi-edit-input {
   font-family: inherit;
   font-size: inherit;
   padding: 0 2px;
-  border: 1px solid #4ec9b0;
+  border: 1px solid var(--cs-oi-edit-border);
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--cs-oi-edit-bg);
   color: inherit;
   outline: none;
   width: 160px;
@@ -753,18 +755,18 @@ function handleChildContextMenu(ctx: MenuContext) {
 }
 
 .oi-collapsed-hint {
-  color: #666;
+  color: var(--cs-oi-hint);
   font-size: 11px;
 }
 
 .oi-children {
   margin-left: 16px;
-  border-left: 1px solid rgba(127, 127, 127, 0.12);
+  border-left: 1px solid var(--cs-oi-children-border);
   padding-left: 4px;
 }
 
 .oi-more {
-  color: #666;
+  color: var(--cs-oi-hint);
   font-style: italic;
   padding-left: 16px;
   font-size: 11px;
@@ -777,8 +779,8 @@ function handleChildContextMenu(ctx: MenuContext) {
   position: fixed;
   z-index: 100000;
   min-width: 180px;
-  background: #252526;
-  border: 1px solid #454545;
+  background: var(--cs-elevated, #252526);
+  border: 1px solid var(--cs-border, #454545);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   padding: 4px 0;
@@ -795,7 +797,7 @@ function handleChildContextMenu(ctx: MenuContext) {
   padding: 6px 14px;
   background: none;
   border: none;
-  color: #cccccc;
+  color: var(--cs-text, #cccccc);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -817,7 +819,7 @@ function handleChildContextMenu(ctx: MenuContext) {
 
 .oi-menu-sep {
   height: 1px;
-  background: #454545;
+  background: var(--cs-border, #454545);
   margin: 4px 0;
 }
 

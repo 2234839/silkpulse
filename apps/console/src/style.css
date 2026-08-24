@@ -42,8 +42,8 @@
   --cs-oi-error: #b91c1c;       /** 错误（红） */
   --cs-oi-element: #8b5cf6;     /** DOM/Event（紫） */
   --cs-oi-hint: #6b7280;        /** 折叠提示文字（灰） */
-  --cs-oi-row-hover: rgba(0, 0, 0, 0.06);   /** 行 hover 背景 */
-  --cs-oi-edit-hover: rgba(0, 0, 0, 0.1);   /** 可编辑叶子 hover 背景 */
+  --cs-oi-row-hover: rgba(0, 0, 0, 0.08);   /** 行 hover 背景 */
+  --cs-oi-edit-hover: rgba(0, 0, 0, 0.12);  /** 可编辑叶子 hover 背景 */
   --cs-oi-children-border: rgba(0, 0, 0, 0.1); /** 子节点竖线 */
   --cs-oi-edit-border: #098a6e;  /** 编辑框边框 */
   --cs-oi-edit-bg: #f9fafb;     /** 编辑框背景 */
@@ -92,8 +92,8 @@
   --cs-oi-error: #f44747;
   --cs-oi-element: #d7ba7d;
   --cs-oi-hint: #666;
-  --cs-oi-row-hover: rgba(127, 127, 127, 0.08);
-  --cs-oi-edit-hover: rgba(127, 127, 127, 0.12);
+  --cs-oi-row-hover: rgba(127, 127, 127, 0.18);
+  --cs-oi-edit-hover: rgba(127, 127, 127, 0.25);
   --cs-oi-children-border: rgba(127, 127, 127, 0.12);
   --cs-oi-edit-border: #4ec9b0;
   --cs-oi-edit-bg: rgba(0, 0, 0, 0.3);
