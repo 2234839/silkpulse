@@ -80,17 +80,17 @@
   --cs-red-text: #fca5a5;
 
   /** ObjectInspector 类型配色（暗色：VS Code Dark+ 风格） */
-  --cs-oi-default: #e8e8e8;
-  --cs-oi-key: #8dd3ff;
-  --cs-oi-arrow: #999;
-  --cs-oi-string: #f0a56e;
-  --cs-oi-number: #cde6a8;
-  --cs-oi-boolean: #6cb6ff;
-  --cs-oi-function: #eee8aa;
-  --cs-oi-type: #5fdccb;
-  --cs-oi-regexp: #f08080;
-  --cs-oi-error: #ff6b6b;
-  --cs-oi-element: #e8c98a;
+  --cs-oi-default: #f5f5f5;
+  --cs-oi-key: #7dd3fc;
+  --cs-oi-arrow: #aaa;
+  --cs-oi-string: #fbbf72;
+  --cs-oi-number: #bef264;
+  --cs-oi-boolean: #60a5fa;
+  --cs-oi-function: #fef08a;
+  --cs-oi-type: #5eead4;
+  --cs-oi-regexp: #f87171;
+  --cs-oi-error: #ff5252;
+  --cs-oi-element: #fbbf24;
   --cs-oi-hint: #666;
   --cs-oi-row-hover: rgba(127, 127, 127, 0.18);
   --cs-oi-edit-hover: rgba(127, 127, 127, 0.25);
