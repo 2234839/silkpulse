@@ -622,7 +622,10 @@ function handleChildContextMenu(ctx: MenuContext) {
           {{ typeBadge(node.type) }}
         </span>
         <span :style="{ color: typeColor(node.type) }">{{ node.preview }}</span>
-        <span v-if="!expanded" class="oi-collapsed-hint">
+        <span v-if="!expanded && node.type === 'function'" class="oi-collapsed-hint">
+          ({{ (node.value || '').split('\n').length }} lines)
+        </span>
+        <span v-else-if="!expanded && node.type !== 'function'" class="oi-collapsed-hint">
           ({{ children.length }} {{ node.type === 'array' ? 'items' : 'props' }})
         </span>
       </span>
@@ -630,20 +633,27 @@ function handleChildContextMenu(ctx: MenuContext) {
 
     <!-- 子节点（展开时） -->
     <div v-if="expanded && hasChildren" class="oi-children">
-      <ObjectInspector
-        v-for="(child, idx) in children.slice(0, 50)"
-        :key="idx"
-        :value="child.value"
-        :key-name="child.key"
-        :depth="depth + 1"
-        :child-index="idx"
-        :editable="editable"
-        @update:model-value="onChildUpdate(child.key, $event)"
-        @context-menu="handleChildContextMenu"
-      />
-      <div v-if="children.length > 50" class="oi-more">
-        … {{ children.length - 50 }} more
-      </div>
+      <!-- 函数类型：展开显示源码 -->
+      <template v-if="node.type === 'function' && node.value">
+        <pre class="oi-fn-src">{{ node.value }}</pre>
+      </template>
+      <!-- 普通对象/数组：递归子节点 -->
+      <template v-else>
+        <ObjectInspector
+          v-for="(child, idx) in children.slice(0, 50)"
+          :key="idx"
+          :value="child.value"
+          :key-name="child.key"
+          :depth="depth + 1"
+          :child-index="idx"
+          :editable="editable"
+          @update:model-value="onChildUpdate(child.key, $event)"
+          @context-menu="handleChildContextMenu"
+        />
+        <div v-if="children.length > 50" class="oi-more">
+          … {{ children.length - 50 }} more
+        </div>
+      </template>
     </div>
 
     <!-- 右键上下文菜单（仅根实例渲染） -->
@@ -791,6 +801,18 @@ function handleChildContextMenu(ctx: MenuContext) {
   font-style: italic;
   padding-left: 16px;
   font-size: 11px;
+}
+
+/** 函数展开时显示的源码块 */
+.oi-fn-src {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--cs-oi-function);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  padding: 2px 0 2px 16px;
+  line-height: 1.5;
 }
 </style>
 
