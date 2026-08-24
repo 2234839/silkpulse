@@ -17,8 +17,12 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useResizable } from '../composables/useResizable'
+import { useTheme } from '../composables/useTheme'
 import { diffLines, diffText, type TextDiffSegment } from '@silkpulse/renderer'
 import ObjectInspector from './ObjectInspector.vue'
+
+/** 主题切换 */
+const { theme, toggleTheme } = useTheme()
 
 /** 工具页左右分栏宽度可拖拽 */
 const { width: toolLeftWidth, onDragStart: onToolLeftResize } = useResizable({
@@ -735,13 +739,18 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col overflow-hidden">
+  <div class="h-screen flex flex-col overflow-hidden bg-base">
     <!-- 顶部栏 -->
-    <header class="bg-gray-900 text-white px-4 py-2.5 flex items-center gap-4 flex-shrink-0">
-      <h1 class="text-base font-semibold">🔧 SilkPulse Tools</h1>
-      <span class="text-xs text-gray-400">Web Debug 工具箱 · 纯前端 · 数据不出域</span>
+    <header class="bg-elevated border-b border-base px-4 py-2.5 flex items-center gap-4 flex-shrink-0">
+      <h1 class="text-base font-semibold text-primary">🔧 SilkPulse Tools</h1>
+      <span class="text-xs text-muted">Web Debug 工具箱 · 纯前端 · 数据不出域</span>
       <div class="ml-auto flex items-center gap-3">
-        <router-link to="/" class="text-xs text-blue-400 hover:text-blue-300">← 控制台</router-link>
+        <button
+          @click="toggleTheme"
+          class="text-xs px-2 py-1 rounded border border-base text-muted hover:text-primary"
+          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+        >{{ theme === 'dark' ? '☀️' : '🌙' }}</button>
+        <router-link to="/" class="text-xs text-blue-500 hover:text-blue-400">← 控制台</router-link>
       </div>
     </header>
 
