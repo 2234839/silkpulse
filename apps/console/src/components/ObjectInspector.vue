@@ -747,7 +747,6 @@ function handleChildContextMenu(ctx: MenuContext) {
 
 .oi-badge {
   font-size: 10px;
-  opacity: 0.7;
   padding: 0 2px;
   border: 1px solid currentColor;
   border-radius: 2px;
