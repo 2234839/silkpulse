@@ -124,6 +124,11 @@ function rawToSerialized(val: unknown, depth = 0): SerializedValue {
   if (t === 'boolean') return { type: 'boolean', preview: String(val), value: val }
   if (t === 'bigint') return { type: 'bigint', preview: `${val}n`, value: String(val) }
 
+  if (t === 'function') return { type: 'function', preview: `ƒ ${(val as { name?: string }).name || ''}()` }
+  if (t === 'symbol') return { type: 'symbol', preview: String(val) }
+  if (val instanceof RegExp) return { type: 'regexp', preview: String(val) }
+  if (val instanceof Date) return { type: 'date', preview: isNaN(val.getTime()) ? 'Invalid Date' : val.toISOString() }
+
   if (Array.isArray(val)) {
     if (depth >= 8) return { type: 'array', preview: `[${val.length}]`, length: val.length }
     return {
@@ -151,7 +156,6 @@ function rawToSerialized(val: unknown, depth = 0): SerializedValue {
     }
   }
 
-  if (t === 'function') return { type: 'function', preview: `ƒ ${(val as { name?: string }).name || ''}()` }
   return { type: 'unknown', preview: String(val) }
 }
 
@@ -163,6 +167,9 @@ function previewOne(val: unknown): string {
   if (t === 'string') return `"${truncate(val as string, 30)}"`
   if (t === 'number' || t === 'boolean' || t === 'bigint') return String(val)
   if (t === 'function') return `ƒ ${(val as { name?: string }).name || ''}()`
+  if (t === 'symbol') return String(val)
+  if (val instanceof RegExp) return String(val)
+  if (val instanceof Date) return isNaN(val.getTime()) ? 'Invalid Date' : val.toISOString()
   if (Array.isArray(val)) return `Array(${val.length})`
   if (t === 'object') {
     const ctorName = (val as { constructor?: { name?: string } }).constructor?.name
@@ -512,6 +519,7 @@ function typeColor(type: string): string {
     date: 'var(--cs-oi-function)',
     regexp: 'var(--cs-oi-regexp)',
     error: 'var(--cs-oi-error)',
+    symbol: 'var(--cs-oi-regexp)',
     map: 'var(--cs-oi-type)',
     set: 'var(--cs-oi-type)',
     promise: 'var(--cs-oi-type)',

@@ -72,8 +72,8 @@ watch(activeTool, (val) => {
 const jsonInput = ref('')
 const jsonJqFilter = ref('')
 
-/** 解析模式：JSON（标准）/ JSONC（带注释+尾逗号）/ JSON5（更宽松） */
-const jsonParseMode = ref<'json' | 'jsonc' | 'json5'>('json')
+/** 解析模式：JSON（标准）/ JSONC（带注释+尾逗号）/ JSON5（更宽松）/ JS（任意 JS 表达式） */
+const jsonParseMode = ref<'json' | 'jsonc' | 'json5' | 'js'>('json')
 
 /**
  * 去除 JSONC 注释（不破坏字符串内的内容）
@@ -202,6 +202,14 @@ function parseByMode(text: string): unknown {
       return JSON.parse(stripTrailingCommas(stripComments(text)))
     case 'json5':
       return JSON.parse(json5ToStandardJson(text))
+    case 'js':
+      /**
+       * JS 模式：eval 任意 JS 表达式（对象字面量、函数、undefined、Symbol 等）
+       *
+       * 外层包括号确保对象字面量 { ... } 被解析为表达式而非语句块。
+       * 用户输入若是 { a: 1 }，直接 eval 会当语句块报错，包括号后变表达式。
+       */
+      return (0, eval)(`(${text})`)
   }
 }
 
@@ -213,6 +221,9 @@ const jsonPlaceholder = computed(() => {
   if (jsonParseMode.value === 'json5') {
     return "// JSON5\n{\n  name: 'silkpulse',\n  items: [1, 2, 3,]\n}"
   }
+  if (jsonParseMode.value === 'js') {
+    return "// JS 表达式\n{ fn: (x) => x + 1, re: /test/g, undef: undefined, sym: Symbol('s') }"
+  }
   return '{"name":"silkpulse","items":[{"id":1,"msg":"hello"}]}'
 })
 
@@ -220,6 +231,7 @@ const jsonPlaceholder = computed(() => {
 const jsonModeHint = computed(() => {
   if (jsonParseMode.value === 'jsonc') return 'JSONC：支持单行/多行注释、尾逗号'
   if (jsonParseMode.value === 'json5') return 'JSON5：支持注释、单引号、无引号 key、尾逗号、十六进制'
+  if (jsonParseMode.value === 'js') return 'JS：任意 JS 表达式（对象/数组/函数/RegExp/Symbol/BigInt 等）'
   return '语法：.key 取字段，.arr[] 遍历数组，.a.b 嵌套路径'
 })
 
@@ -249,7 +261,8 @@ const jsonParsed = computed(() => {
   try {
     let parsed: unknown = parseByMode(jsonInput.value)
     const jq = jsonJqFilter.value.trim()
-    if (jq && jq.startsWith('.')) {
+    /** JS 模式下含函数/Symbol 等不可序列化值，跳过 JQ 路径过滤（会崩溃且意义不大） */
+    if (jq && jq.startsWith('.') && jsonParseMode.value !== 'js') {
       parsed = applyJq(parsed, jq)
     }
     return { ok: true as const, data: parsed }
@@ -779,9 +792,10 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
                   { id: 'json', label: 'JSON' },
                   { id: 'jsonc', label: 'JSONC' },
                   { id: 'json5', label: 'JSON5' },
+                  { id: 'js', label: 'JS' },
                 ]"
                 :key="m.id"
-                @click="jsonParseMode = m.id as 'json' | 'jsonc' | 'json5'"
+                @click="jsonParseMode = m.id as 'json' | 'jsonc' | 'json5' | 'js'"
                 class="px-2 py-0.5 text-xs rounded border transition-colors"
                 :class="jsonParseMode === m.id
                   ? 'border-blue-500 text-blue-500 bg-blue-500/10'
@@ -801,8 +815,9 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
               v-model="jsonJqFilter"
               type="text"
               spellcheck="false"
-              class="flex-1 bg-input border border-base rounded px-2 py-1.5 text-xs font-mono text-primary focus:outline-none focus:border-blue-500"
-              placeholder="JQ 过滤（如 .items[].msg）"
+              :disabled="jsonParseMode === 'js'"
+              class="flex-1 bg-input border border-base rounded px-2 py-1.5 text-xs font-mono text-primary focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              :placeholder="jsonParseMode === 'js' ? 'JS 模式下不可用（对象含函数/Symbol 无法序列化）' : 'JQ 过滤（如 .items[].msg）'"
             />
           </div>
           <p class="text-xs text-faint">{{ jsonModeHint }}</p>
