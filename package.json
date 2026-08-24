@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm run build:plugins && vp run --filter '!silkpulse' build && pnpm run copy:assets",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:skip-build": "bash scripts/deploy.sh --skip-build",
     "build:plugins": "node scripts/build-plugins.mjs",
     "copy:assets": "mkdir -p packages/server/public && cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js && cp -r apps/console/dist/* packages/server/public/ && mkdir -p packages/server/public/plugins && cp -r plugins/vue-devtools packages/server/public/plugins/ && cp -r plugins/react-devtools packages/server/public/plugins/",
     "dev:server": "vp run @silkpulse/server#dev",

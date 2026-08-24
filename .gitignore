@@ -27,6 +27,7 @@ packages/server/public/react-vite-*.html
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 
 # Editor directories and files
 .vscode/*
