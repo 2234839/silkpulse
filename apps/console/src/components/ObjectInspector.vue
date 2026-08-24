@@ -124,7 +124,11 @@ function rawToSerialized(val: unknown, depth = 0): SerializedValue {
   if (t === 'boolean') return { type: 'boolean', preview: String(val), value: val }
   if (t === 'bigint') return { type: 'bigint', preview: `${val}n`, value: String(val) }
 
-  if (t === 'function') return { type: 'function', preview: `ƒ ${(val as { name?: string }).name || ''}()` }
+  if (t === 'function') {
+    const fn = val as { name?: string; toString(): string }
+    const src = fn.toString()
+    return { type: 'function', preview: `ƒ ${fn.name || ''}()`, value: src }
+  }
   if (t === 'symbol') return { type: 'symbol', preview: String(val) }
   if (val instanceof RegExp) return { type: 'regexp', preview: String(val) }
   if (val instanceof Date) return { type: 'date', preview: isNaN(val.getTime()) ? 'Invalid Date' : val.toISOString() }
@@ -196,6 +200,8 @@ const node = computed(() => normalizeToSerialized({
 /** 是否有子节点可展开 */
 const hasChildren = computed(() => {
   const v = node.value
+  /** 函数节点：有源码可展开 */
+  if (v.type === 'function' && v.value) return true
   return ((v.type === 'object' || v.type === 'array') &&
     ((v.properties?.length ?? 0) > 0 || (v.elements?.length ?? 0) > 0))
 })
@@ -337,7 +343,8 @@ function serializedToJson(val: SerializedValue): unknown {
     case 'undefined':
       return undefined
     case 'bigint':
-      return val.value ?? null
+      /** bigint 保留 n 后缀，复制后可直接粘贴到 JS 环境 */
+      return val.value ? `${val.value}n` : '0n'
     case 'array':
       return (val.elements ?? []).map(serializedToJson)
     case 'object':
@@ -355,7 +362,11 @@ function serializedToJson(val: SerializedValue): unknown {
     case 'regexp':
       return val.preview
     case 'function':
-      return `[function ${val.preview}]`
+      /** 函数复制返回完整源码（value 字段存的是 toString() 结果） */
+      return val.value ?? `[function ${val.preview}]`
+    case 'symbol':
+      /** Symbol 保留类型标记（Symbol("desc") 形式） */
+      return val.preview
     default:
       return val.preview
   }
@@ -371,7 +382,10 @@ async function copyJson() {
 
 async function copyValue() {
   if (!menuTargetNode.value) return
-  const text = menuTargetNode.value.preview
+  /** 函数类型：value 存的是完整源码，优先复制源码；其他类型复制 preview */
+  const text = menuTargetNode.value.type === 'function' && menuTargetNode.value.value
+    ? String(menuTargetNode.value.value)
+    : menuTargetNode.value.preview
   await doCopy(text)
 }
 
