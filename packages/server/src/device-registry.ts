@@ -22,6 +22,19 @@ const MAX_LOGS = 500
 const MAX_NETWORK = 300
 const MAX_ERRORS = 100
 
+/** register 上报字段的长度/取值硬限制：恶意或异常 SDK 不能塞任意体积进设备表 */
+const DEVICE_FIELD_LIMITS = {
+  id: 80,
+  url: 2048,
+  title: 512,
+  icon: 1024 * 512,
+  userAgent: 512,
+  note: 256,
+  maxTags: 20,
+  tagLen: 64,
+  maxFrameworks: 10,
+} as const
+
 /**
  * 环形缓冲区：固定容量，写满后覆盖最旧条目
  * 支持 since 游标查询（返回序号 > since 的所有条目）
@@ -180,7 +193,9 @@ export class DeviceRegistry {
    * 返回 null = 检测到复制标签页冲突：deviceId 已被另一个页面（不同 sessionToken）
    * 持有，调用方应告知设备换 id 重新注册（Web Locks 不可用环境的 server 端仲裁）。
    */
-  register(info: DeviceInfo, ws: SilkWs, sessionToken = ''): Device | null {
+  register(rawInfo: DeviceInfo, ws: SilkWs, sessionToken = ''): Device | null {
+    const info = sanitizeDeviceInfo(rawInfo)
+    if (!info) return null
     const existing = this.devices.get(info.id)
     if (existing && sessionToken) {
       /** 同 id 下已有不同 token 的活连接 → 复制标签页（sessionStorage 快照被复制）
@@ -382,13 +397,65 @@ export class DeviceRegistry {
   updateInfo(deviceId: string, patch: Partial<DeviceInfo>) {
     const device = this.devices.get(deviceId)
     if (!device) return
-    /** 过滤 undefined 值（SDK 分多条 update-info 上报不同字段，未带的字段不应覆盖已有值） */
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined) {
-        ;(device.info as unknown as Record<string, unknown>)[key] = value
-      }
+    /** 与 register 同款的清洗：update-info 的字段同样来自不可信的注入页面 */
+    const clean = sanitizeDeviceInfo({ ...device.info, ...patch })
+    if (!clean) return
+    /** 只应用 patch 里出现的字段（保留「未带的字段不覆盖」语义） */
+    for (const key of Object.keys(patch) as (keyof DeviceInfo)[]) {
+      if (patch[key] === undefined) continue
+      ;(device.info as unknown as Record<string, unknown>)[key] = clean[key]
     }
   }
+}
+
+/**
+ * 清洗 SDK 上报的设备信息：长度截断 + 类型收敛 + 必填兜底
+ *
+ * register/update-info 的字段来自任意注入页面（可能被恶意构造），直接入库会：
+ * - 把任意体积的字符串塞进 devices 表并在每次设备列表广播时放大
+ * - 用非预期类型（对象/数字伪装）破坏控制台渲染与 API JSON 序列化
+ * 返回 null 表示上报整体不可用（缺 id 或 id 非法），调用方应拒绝注册。
+ */
+function sanitizeDeviceInfo(info: DeviceInfo): DeviceInfo | null {
+  const limit = DEVICE_FIELD_LIMITS
+  /** id 是唯一必填项：非空字符串且不超长；其余字段全部类型收敛/截断/兜底 */
+  if (typeof info.id !== 'string' || info.id.length === 0 || info.id.length > limit.id) {
+    return null
+  }
+  if (!Array.isArray(info.tags)) info.tags = []
+  if (info.tags.length > limit.maxTags) info.tags = info.tags.slice(0, limit.maxTags)
+  info.tags = info.tags.map((t) => (typeof t === 'string' ? t.slice(0, limit.tagLen) : String(t).slice(0, limit.tagLen)))
+
+  if (typeof info.url !== 'string') info.url = ''
+  else if (info.url.length > limit.url) info.url = info.url.slice(0, limit.url)
+
+  if (typeof info.title !== 'string') info.title = ''
+  else if (info.title.length > limit.title) info.title = info.title.slice(0, limit.title)
+
+  if (typeof info.icon === 'string' && info.icon.length > limit.icon) {
+    info.icon = info.icon.slice(0, limit.icon)
+  }
+
+  if (typeof info.userAgent !== 'string') info.userAgent = ''
+  else if (info.userAgent.length > limit.userAgent) info.userAgent = info.userAgent.slice(0, limit.userAgent)
+
+  if (typeof info.note === 'string' && info.note.length > limit.note) {
+    info.note = info.note.slice(0, limit.note)
+  }
+
+  if (info.deviceType !== 'mobile' && info.deviceType !== 'tablet' && info.deviceType !== 'desktop') {
+    info.deviceType = 'desktop'
+  }
+  if (typeof info.viewportWidth !== 'number' || !Number.isFinite(info.viewportWidth)) info.viewportWidth = 0
+  if (typeof info.viewportHeight !== 'number' || !Number.isFinite(info.viewportHeight)) info.viewportHeight = 0
+  if (typeof info.errorCount !== 'number' || !Number.isFinite(info.errorCount)) info.errorCount = 0
+
+  if (info.frameworks !== undefined) {
+    if (!Array.isArray(info.frameworks)) info.frameworks = []
+    if (info.frameworks.length > limit.maxFrameworks) info.frameworks = info.frameworks.slice(0, limit.maxFrameworks)
+    info.frameworks = info.frameworks.map((f) => (typeof f === 'string' ? f.slice(0, limit.tagLen) : String(f).slice(0, limit.tagLen)))
+  }
+  return info
 }
 
 /** 设备上下线事件 */
