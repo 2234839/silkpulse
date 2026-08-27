@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./skill-template": "./src/skill-template.ts",
+    "./build-info-plugin": "./src/build-info-plugin.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

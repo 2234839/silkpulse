@@ -3,6 +3,7 @@ import path from "node:path";
 import { defineConfig } from "vite-plus";
 /** rolldown 类型经 vite-plus-core re-export（rolldown 本体未直接暴露给项目） */
 import type { Plugin } from "@voidzero-dev/vite-plus-core/rolldown";
+import { buildInfoPlugin } from "@silkpulse/shared/build-info-plugin";
 
 /**
  * uWS 原生二进制自包含插件
@@ -60,7 +61,7 @@ export default defineConfig({
       alwaysBundle: ['@silkpulse/feature-detect', '@silkpulse/shared', 'uWebSockets.js'],
     },
     /** uWS 的 import 被上面的插件替换为同目录 .node 加载，且二进制随产物 emit */
-    plugins: [uwsNativePlugin()],
+    plugins: [uwsNativePlugin(), buildInfoPlugin(path.resolve(import.meta.dirname, "../.."))],
   },
   lint: {
     options: {

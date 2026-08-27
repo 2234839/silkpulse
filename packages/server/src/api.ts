@@ -14,6 +14,7 @@ import { maybeGzipResponse } from './gzip.js'
 import { renderSkillPrompt } from '@silkpulse/shared'
 import { performance } from 'node:perf_hooks'
 import { fanoutStats } from './ws-relay.js'
+import { getBuildInfo } from './build-info.js'
 
 /**
  * 事件循环利用率采样器（增量式单例）
@@ -57,8 +58,11 @@ export async function handleApiRoute(
   /** /api/health —— 压测/监控探针（无需鉴权：只暴露进程级指标，无业务数据） */
   if (ctx.url.split('?')[0] === '/api/health') {
     const mu = process.memoryUsage()
+    const bi = getBuildInfo()
     sendJson(ctx, {
       ok: true,
+      version: `${(bi.branch || 'detached').slice(0, 20)}@${bi.commit.slice(0, 7)}${bi.dirty ? '+dirty' : ''}`,
+      buildAt: bi.buildAt,
       rssMB: +(mu.rss / 1048576).toFixed(1),
       heapUsedMB: +(mu.heapUsed / 1048576).toFixed(1),
       eventLoopUtilPct: +(loopUtilization() * 100).toFixed(1),

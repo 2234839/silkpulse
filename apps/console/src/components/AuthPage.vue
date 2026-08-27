@@ -5,11 +5,15 @@
  * 输入超管密钥或项目密钥，验证通过后进入控制台。
  */
 import { ref } from "vue";
+import { getBuildInfo } from "../utils/buildInfo";
 
 const emit = defineEmits<{
   /** 验证成功 */
   success: [];
 }>();
+
+/** 构建信息（git 哈希/分支/构建时间，构建期注入） */
+const buildInfo = getBuildInfo();
 
 /** 密钥输入 */
 const authKeyInput = ref("");
@@ -212,6 +216,12 @@ async function handleGuestLogin() {
             <span class="text-yellow-600">建议私有化部署以保护隐私</span>
           </p>
         </div>
+
+        <!-- 版本信息行：构建期注入的 git 哈希 + 时间，用于核对线上部署版本 -->
+        <p class="pt-2 text-[11px] text-gray-700 text-center select-text font-mono">
+          v-{{ buildInfo.commit.slice(0, 7) }}{{ buildInfo.dirty ? "+dirty" : "" }} ·
+          {{ new Date(buildInfo.buildAt).toLocaleString() }}
+        </p>
       </div>
     </div>
   </div>

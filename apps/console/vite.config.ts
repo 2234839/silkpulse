@@ -1,9 +1,10 @@
 import { defineConfig, lazyPlugins } from "vite-plus";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
+import { buildInfoPlugin } from "@silkpulse/shared/build-info-plugin";
 
 export default defineConfig({
-  plugins: lazyPlugins(() => [vue(), tailwindcss()]),
+  plugins: lazyPlugins(() => [vue(), tailwindcss(), buildInfoPlugin(import.meta.dirname)]),
   /** 控制台 UI 构建到 server 的 public 目录，被 server 静态 serve */
   build: {
     outDir: "../../packages/server/public",

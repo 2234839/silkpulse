@@ -25,6 +25,7 @@ import { AuthManager, ProjectStore, handleProjectApiRoute, type AuthContext } fr
 import { maybeGzipResponse } from './gzip.js'
 import { createCtx, onAborted, readBody, writeResponse, sendNotModified, type Ctx } from './uws/http-helpers.js'
 import { SilkWs, type WsUserData } from './uws/ws-socket.js'
+import { getBuildInfo } from './build-info.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -364,7 +365,9 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
   await new Promise<void>((resolve, reject) => {
     app.listen(port, (listenSocket) => {
       if (listenSocket) {
+        const bi = getBuildInfo()
         console.log(`\n  silkpulse 服务已启动 → http://localhost:${port}`)
+        console.log(`  版本：${bi.branch || '(detached)'}@${bi.commit.slice(0, 7)}${bi.dirty ? ' (dirty)' : ''} · 构建于 ${bi.buildAt}`)
         console.log(`  控制台：浏览器打开 http://localhost:${port}`)
         console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
         console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
