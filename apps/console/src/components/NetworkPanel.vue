@@ -576,6 +576,33 @@ const filteredNetwork = computed(() => {
   return result;
 });
 
+/** 每次扩窗加载的条数 */
+const RENDER_WINDOW_STEP = 1000;
+/** 当前渲染窗口大小（滚到顶部时逐步扩大，不自动缩小） */
+const renderWindow = ref(RENDER_WINDOW_STEP);
+/**
+ * 实际渲染的请求列表：尾部窗口化
+ *
+ * Network 条目会携带 ≤512KB 的 body 文本，全量 v-for 在长会话下（缓冲上限 1 万条）
+ * DOM 与响应式开销都很重；窗口化后恒定 ≤1k 行，历史按需扩展。
+ */
+const renderedNetwork = computed(() => {
+  const all = filteredNetwork.value;
+  if (all.length > renderWindow.value) {
+    return all.slice(all.length - renderWindow.value);
+  }
+  return all;
+});
+/** 窗口外仍被折叠的条数 */
+const hiddenCount = computed(() => Math.max(0, filteredNetwork.value.length - renderWindow.value));
+
+/** 「加载更早」按钮/滚到顶部时扩大渲染窗口 */
+function expandRenderWindow() {
+  if (renderWindow.value < filteredNetwork.value.length) {
+    renderWindow.value += RENDER_WINDOW_STEP;
+  }
+}
+
 /**
  * ─── 重新请求（仅 resource 类型）───
  *
@@ -819,8 +846,19 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             </tr>
           </thead>
           <tbody>
+            <!-- 渲染窗口占位：窗口外仍有更早请求时展示，点击加载更多 -->
+            <tr v-if="hiddenCount > 0">
+              <td :colspan="6" class="py-1.5 text-center">
+                <button
+                  @click="expandRenderWindow"
+                  class="w-full text-xs text-center rounded bg-elevated text-secondary hover:bg-elevated-hover py-1"
+                >
+                  ↑ 加载更早请求（还有 {{ hiddenCount }} 条未渲染）
+                </button>
+              </td>
+            </tr>
             <tr
-              v-for="(n, i) in filteredNetwork"
+              v-for="(n, i) in renderedNetwork"
               :key="i"
               @click="selectedSeq = n.seq"
               class="border-b border-light cursor-pointer hover:bg-blue-soft"

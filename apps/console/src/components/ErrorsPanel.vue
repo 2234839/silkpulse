@@ -35,6 +35,32 @@ const filteredErrors = computed(() => {
   });
 });
 
+/** 每次扩窗加载的条数 */
+const RENDER_WINDOW_STEP = 500;
+/** 当前渲染窗口大小（滚到顶部时逐步扩大，不自动缩小） */
+const renderWindow = ref(RENDER_WINDOW_STEP);
+/**
+ * 实际渲染的错误列表：尾部窗口化
+ *
+ * 错误卡片含完整堆栈 pre，几百条就明显卡顿；窗口化后恒定 ≤500 张卡片，
+ * 历史按需扩展（copyAllErrors 仍用 filteredErrors 全量，不受窗口影响）。
+ */
+const renderedErrors = computed(() => {
+  const all = filteredErrors.value;
+  if (all.length > renderWindow.value) {
+    return all.slice(all.length - renderWindow.value);
+  }
+  return all;
+});
+/** 窗口外仍被折叠的条数 */
+const hiddenCount = computed(() => Math.max(0, filteredErrors.value.length - renderWindow.value));
+
+function expandRenderWindow() {
+  if (renderWindow.value < filteredErrors.value.length) {
+    renderWindow.value += RENDER_WINDOW_STEP;
+  }
+}
+
 /**
  * 把单条错误格式化为可粘贴的文本（message + 时间 + 源码位置 + stack）
  *
@@ -105,8 +131,16 @@ async function copyAllErrors() {
     </div>
     <!-- 错误列表 -->
     <div class="flex-1 overflow-y-auto p-4 space-y-3">
+      <!-- 渲染窗口占位：窗口外仍有更早错误时展示 -->
+      <button
+        v-if="hiddenCount > 0"
+        @click="expandRenderWindow"
+        class="w-full py-1.5 text-xs text-center rounded bg-elevated text-secondary hover:bg-elevated-hover"
+      >
+        ↑ 加载更早错误（还有 {{ hiddenCount }} 条未渲染）
+      </button>
       <div
-        v-for="(e, i) in filteredErrors"
+        v-for="(e, i) in renderedErrors"
         :key="i"
         class="bg-red-soft border border-red-soft rounded p-3"
       >
