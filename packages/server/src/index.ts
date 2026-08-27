@@ -141,7 +141,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
     const authCtx = auth.authorizeHttpRequest(ctx)
 
     /** 1.5 先交给 agent API 路由（/api/agent/*） */
-    if (await handleAgentApiRoute(ctx, registry, authCtx)) return
+    if (await handleAgentApiRoute(ctx, registry, authCtx, auth)) return
 
     /** 1.6 再交给内部 API 路由（/api/devices/* 等） */
     if (await handleApiRoute(ctx, registry, notifyDeviceListChanged, auth, authCtx)) return
@@ -200,18 +200,23 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
         const demoProto = ctx.headers['x-forwarded-proto'] || 'http'
         const demoOrigin = `${demoProto}://${demoHost}`
         let html = fs.readFileSync(demoPagePath, 'utf8').replace(/https?:\/\/localhost:8080/g, demoOrigin)
-        /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
-        if (auth.isAuthEnabled()) {
+        /**
+         * demo 页永不注入任何服务端持有的密钥
+         *
+         * 曾经的设计是「鉴权启用时自动注入超管密钥方便本机测试」——这是把
+         * 安全边界押在部署环境上，必然出事：服务对外暴露后 /demo 任何人可达，
+         * HTML 源码里的密钥等于公开；走反代/容器部署时连接来源还是 127.0.0.1，
+         * 连「仅限回环注入」这类判断都会被穿透。
+         * 需要带密钥测试时显式用 ?apiKey=xxx&projectId=yyy 查询参数（调用方自己持有密钥），
+         * 服务端绝不代发。
+         */
+        {
           /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
           const qApiKey = url.searchParams.get('apiKey')
           const qProjectId = url.searchParams.get('projectId')
-          /** 默认用超管密钥（demo 页面是 server 本地测试页，用超管密钥直连） */
-          const envAdminKey = process.env.SILKPULSE_ADMIN_KEY
           const injectAttrs = qApiKey && qProjectId
             ? `data-api-key="${qApiKey}" data-project-id="${qProjectId}"`
-            : envAdminKey
-              ? `data-api-key="${envAdminKey}"`
-              : ''
+            : ''
           if (injectAttrs) {
             /** 兼容两种写法：带 data-server 的完整形态 + 相对路径 /sdk.js 简写形态 */
             html = html.replace(

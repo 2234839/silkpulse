@@ -477,6 +477,20 @@ export function setupWebSocket(
 
     /** ---------- 控制台消息 ---------- */
     if (pathname === '/ws/console') {
+      /**
+       * 设备归属校验：项目级控制台只能对自己项目的设备发指令
+       *
+       * subscribe/set-watchers/start-screen-share/get-network-body/devtools-relay
+       * 全部经此入口；未通过时静默忽略（不回报，避免给越权探测者反馈设备存在性）。
+       * admin 角色与未启用鉴权时放行（与 broadcast 的项目过滤同规则）。
+       */
+      const canAccess = (deviceId: string): boolean => {
+        const ctx = silk.authCtx
+        if (!ctx || ctx.role === 'admin') return true
+        if (ctx.role !== 'project') return false
+        const target = registry.get(deviceId)
+        return target ? ctx.projectId === target.info.projectId : false
+      }
       {
         let msg: ConsoleMessage
         try {
@@ -487,6 +501,7 @@ export function setupWebSocket(
         const ws = silk
         switch (msg.type) {
           case 'subscribe': {
+            if (!canAccess(msg.deviceId)) break
             const subs = consoleSubscriptions.get(ws)!
             subs.add(msg.deviceId)
             let watchers = deviceWatchers.get(msg.deviceId)
@@ -506,6 +521,7 @@ export function setupWebSocket(
             break
           }
           case 'set-watchers': {
+            if (!canAccess(msg.deviceId)) break
             /** 控制台通知当前打开的面板，server 汇总所有控制台的 watcher 后下发合并结果 */
             consoleWatcherPrefs.set(ws, { deviceId: msg.deviceId, watchers: new Set(msg.watchers) })
             /** 重新计算该设备的 watcher 并集 */
@@ -526,6 +542,7 @@ export function setupWebSocket(
           }
           case 'start-screen-share': {
             /** 控制台请求设备开始屏幕共享（用户侧弹出授权弹窗） */
+            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -535,6 +552,7 @@ export function setupWebSocket(
           }
           case 'stop-screen-share': {
             /** 控制台请求设备停止屏幕共享 */
+            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -544,6 +562,7 @@ export function setupWebSocket(
           }
           case 'get-network-body': {
             /** 控制台请求完整 body（懒加载），转发给设备 */
+            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -553,6 +572,7 @@ export function setupWebSocket(
           }
           case 'devtools-relay': {
             /** 控制台 devtools client 的 RPC 消息，透传给对应设备（发 latestSocket：指令类消息单点送达） */
+            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {

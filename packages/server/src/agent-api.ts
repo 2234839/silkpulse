@@ -12,7 +12,7 @@
  */
 
 import type { DeviceRegistry } from './device-registry.js'
-import type { AuthContext } from './auth.js'
+import type { AuthManager, AuthContext } from './auth.js'
 import type { Ctx } from './uws/http-helpers.js'
 import { writeResponse } from './uws/http-helpers.js'
 import { execOnDevice, sendJson, sendText, readBody, buildElementTreeCode, buildElementFilterCode } from './api.js'
@@ -27,6 +27,8 @@ export async function handleAgentApiRoute(
   ctx: Ctx,
   registry: DeviceRegistry,
   authCtx: AuthContext,
+  /** 鉴权管理器（项目隔离校验用；未传时仅拒绝匿名，不做项目隔离） */
+  auth?: AuthManager,
 ): Promise<boolean> {
   const url = ctx.parsedUrl
   const pathname = url.pathname
@@ -61,6 +63,12 @@ export async function handleAgentApiRoute(
   const device = registry.get(deviceId)
   if (!device) {
     sendText(ctx, `[错误] 设备 ${deviceId} 不在线。先 GET /api/agent/devices 查看在线设备列表。`, 404)
+    return true
+  }
+
+  /** 项目隔离：项目级密钥只能操作自己项目的设备（与 /api/devices/* 同规则） */
+  if (auth && !auth.canAccessDevice(authCtx, device.info.projectId)) {
+    sendText(ctx, `[错误] 无权访问设备 ${deviceId}（项目隔离）`, 403)
     return true
   }
 
