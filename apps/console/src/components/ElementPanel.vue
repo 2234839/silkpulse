@@ -145,11 +145,13 @@ const snapshotOffset = ref({ x: 0, y: 0 });
 const snapshotDragging = ref(false);
 
 /**
- * 锚点不动的数学约束。img 变换为 p = O + t + s·(q − O)，其中 O 是图片布局
- * 中心（flex 居中 → 恰为容器中心），t 是平移偏移，q 为锚点屏幕位置。
- * 要求缩放前后 p(q) 不变：
- *   O + t' + s'·(q − O) = O + t + s·(q − O)
- * 解得 t' = t + (s − s')·(q − O)，即只需按新旧缩放差乘以「锚点相对容器中心」。
+ * 锚点不动的数学约束。img 的 transform 为 translate(t) scale(s)，
+ * 图像上内容点 c（相对布局中心）的屏幕位置 p = Oc + t + s·c。
+ * 锚定屏幕点 q ⇒ 该处内容坐标 c = ((q − Oc) − t)/s；换到新缩放 s' 后
+ * 仍要让同一 c 落在 q：t' = (1 − s'/s)·(q − Oc) + (s'/s)·t。
+ * 注意旧偏移 t 必须按 r = s'/s 缩放——它参与定义 c，不能原样保留；
+ * 之前只保留旧 t 的公式在「已有偏移 + 换锚点」时必然漂移（放大起步
+ * 时 t≈0 掩盖了这个错误，缩小或拖后再缩放就暴露）。
  */
 function applyZoom(next: number, ax?: number, ay?: number) {
   const area = screenAreaRef.value;
@@ -157,9 +159,11 @@ function applyZoom(next: number, ax?: number, ay?: number) {
   const rect = area.getBoundingClientRect();
   const qxAbs = ax ?? rect.width / 2;
   const qyAbs = ay ?? rect.height / 2;
+  const prev = snapshotScale.value;
+  const ratio = next / prev;
   snapshotOffset.value = {
-    x: snapshotOffset.value.x + (snapshotScale.value - next) * (qxAbs - rect.width / 2),
-    y: snapshotOffset.value.y + (snapshotScale.value - next) * (qyAbs - rect.height / 2),
+    x: (1 - ratio) * (qxAbs - rect.width / 2) + ratio * snapshotOffset.value.x,
+    y: (1 - ratio) * (qyAbs - rect.height / 2) + ratio * snapshotOffset.value.y,
   };
   snapshotScale.value = next;
 }
@@ -1604,9 +1608,14 @@ onMounted(() => {
           </div>
 
           <!-- 画面显示区 -->
+          <!-- 画面显示区：滚轮缩放 + 拖拽事件挂在整个容器（图片外也能拖/缩） -->
           <div
-            class="flex-1 overflow-auto flex items-center justify-center bg-gray-900/5 dark:bg-black/20 relative"
+            class="flex-1 overflow-hidden flex items-center justify-center bg-gray-900/5 dark:bg-black/20 relative"
+            :class="snapshotScale > 1 && snapshotUrl ? 'cursor-grab active:cursor-grabbing' : ''"
             ref="screenAreaRef"
+            @wheel.prevent="onSnapshotWheel"
+            @mousedown="onSnapshotDragStart"
+            @dblclick="resetSnapshotView"
           >
             <!-- 远端鼠标虚拟光标 -->
             <div
@@ -1639,20 +1648,16 @@ onMounted(() => {
               class="max-w-full max-h-full shadow-lg rounded"
               :style="{ objectFit: 'contain' }"
             ></canvas>
-            <!-- 有快照时显示：滚轮缩放 + 拖拽 + 双击复位 -->
+            <!-- 有快照时显示：缩放/拖拽事件由容器统一接管（见上） -->
             <img
               v-else-if="snapshotUrl"
               :src="snapshotUrl"
-              class="max-w-full max-h-full shadow-lg rounded select-none"
-              :class="snapshotScale > 1 ? 'cursor-grab' : 'cursor-zoom-in'"
+              class="max-w-full max-h-full shadow-lg rounded select-none pointer-events-none"
               :style="{
                 transform: `translate(${snapshotOffset.x}px, ${snapshotOffset.y}px) scale(${snapshotScale})`,
                 transition: snapshotDragging ? 'none' : 'transform 0.15s ease-out',
               }"
               :draggable="false"
-              @wheel.prevent="onSnapshotWheel"
-              @mousedown="onSnapshotDragStart"
-              @dblclick="resetSnapshotView"
               alt="页面快照"
             />
             <!-- 空状态 -->
