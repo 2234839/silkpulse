@@ -24,6 +24,7 @@ source "$ENV_FILE"
 : "${DEPLOY_REMOTE_COMPOSE_DIR:?DEPLOY_REMOTE_COMPOSE_DIR 未配置}"
 : "${DEPLOY_HEALTH_URL:?DEPLOY_HEALTH_URL 未配置}"
 : "${DEPLOY_TOOLS_URL:?DEPLOY_TOOLS_URL 未配置}"
+: "${DEPLOY_SITE_URL:=$DEPLOY_TOOLS_URL%/tools}"
 
 SKIP_BUILD=0
 for arg in "$@"; do
@@ -49,8 +50,12 @@ echo "▶ [2/4] 校验构建产物完整性…"
 [[ -f packages/server/dist/bin/silkpulse.mjs ]] || { echo "✗ dist/bin/silkpulse.mjs 缺失" >&2; exit 1; }
 [[ -f packages/server/public/index.html ]] || { echo "✗ public/index.html 缺失" >&2; exit 1; }
 LOCAL_HASH=$(grep -o 'index-[^"]*\.js' packages/server/public/index.html | head -1)
-echo "  本地 index hash: $LOCAL_HASH"
-
+echo "  本地 index hash: $LOCAL_HASH"# 产物自洽校验：index.html 引用的入口 js/css 必须真实存在于 assets 目录。
+# 缺这步会部署出「新 html + 旧资产」混杂套，线上全部 /assets/* 回退 text/html → SPA 白屏（见 deploy-workflow.md 2026-08-27 教训）
+for ref in $(grep -o 'assets/[^"]*\.[jt]s' packages/server/public/index.html | head -1) $(grep -o 'assets/[^"]*\.css' packages/server/public/index.html | head -1); do
+  [[ -f "packages/server/public/$ref" ]] || { echo "✗ public/$ref（index.html 引用）不存在——html 与 assets 不同套！" >&2; exit 1; }
+done
+echo "  产物自洽 ✓"
 echo "▶ [3/4] rsync 双路径同步 + 重启容器…"
 rsync -az --delete packages/server/dist/ "$DEPLOY_SSH_HOST:$DEPLOY_REMOTE_CODE_DIR/dist/"
 rsync -az --delete packages/server/public/ "$DEPLOY_SSH_HOST:$DEPLOY_REMOTE_CODE_DIR/public/"
@@ -71,4 +76,16 @@ else
   exit 1
 fi
 
+# 资产 MIME 校验：状态码会骗人——SPA 回退把 /assets/* 响应成 200 的 text/html，
+# 只有 Content-Type 能识别这种「看起来正常实则白屏」的错位（见 deploy-workflow.md 2026-08-27 教训）
+for ext in js css; do
+  ASSET_URL="$DEPLOY_SITE_URL/assets/${LOCAL_HASH%.js}.$ext"
+  MIME=$(curl -sI "$ASSET_URL" | grep -i '^content-type:' | tail -1)
+  case "$ext:$MIME" in
+    js:*javascript*) ;;
+    css:*text/css*) ;;
+    *) echo "✗ 线上资产 MIME 异常: $ASSET_URL → ${MIME:-无响应}（期望 .${ext} 类型，疑似静态资源回退 text/html）" >&2; exit 1 ;;
+  esac
+done
+echo "  资产 MIME 校验: js/css ✓"
 echo "✓ 部署完成: $DEPLOY_TOOLS_URL"
