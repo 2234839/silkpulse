@@ -5,7 +5,7 @@
  * 功能：搜索、设备卡片（标题/URL/标签/备注/OS/项目徽章）、
  * 内联标签编辑。
  */
-import { ref, computed } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import type { DeviceInfo } from "@silkpulse/shared";
 import { apiFetch } from "../utils/api";
 
@@ -140,9 +140,10 @@ function deviceTypeIcon(t: string): string {
 
 /** 相对时间 */
 const now = ref(Date.now());
-setInterval(() => {
+const relativeTimeTimer = setInterval(() => {
   now.value = Date.now();
 }, 30000);
+onUnmounted(() => clearInterval(relativeTimeTimer));
 
 function relativeTime(ts: number): string {
   const elapsed = Math.max(0, now.value - ts);

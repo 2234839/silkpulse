@@ -214,7 +214,7 @@ function json5ToStandardJson(text: string): string {
   s = s.replace(/(^|[^\w.])\.(\d)/g, "$10.$2");
 
   /** + 开头正数 → 去掉 + */
-  s = s.replace(/([:{,\[\s])\+(\d)/g, "$1$2");
+  s = s.replace(/([:{,[\s])\+(\d)/g, "$1$2");
 
   /** Infinity / -Infinity / NaN → null（JSON 不支持） */
   s = s.replace(/(^|[^\w])Infinity/g, "$1null").replace(/(^|[^\w])-Infinity/g, "$1null");

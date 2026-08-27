@@ -230,7 +230,8 @@ export function useConsoleSocket() {
         apiFetch(`/api/devices/${id}/logs`),
         apiFetch(`/api/devices/${id}/network`),
         apiFetch(`/api/devices/${id}/errors`),
-      ]);
+      ]); /** 竞态守卫：HTTP 往返期间用户可能已切到别的设备，过期响应不得覆盖新选中设备的状态 */
+      if (selectedDeviceId.value !== id) return;
       logs.value = await logsRes.json();
       network.value = await netRes.json();
       errors.value = await errRes.json();

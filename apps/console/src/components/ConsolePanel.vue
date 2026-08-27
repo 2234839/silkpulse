@@ -102,7 +102,6 @@ function clearLogs() {
   clearedBeforeTs.value = Date.now();
 }
 
-/** 筛选后的日志（级别 + 关键词 + 清空阈值） */
 const filteredLogs = computed(() => {
   let result = props.logs;
   /** 清空阈值：隐藏"清空"之前的日志（前端视图层，server 缓冲不变） */
@@ -153,8 +152,42 @@ const displayLogs = computed<DisplayLog[]>(() => {
       depth++;
     }
   }
+  /**
+   * 渲染窗口：只尾部渲染 windowSize 条，其余折叠进「加载更早日志」占位。
+   * 全量渲染在日志风暴下（缓冲上限 5 万条）会挂载同等量级 DOM 导致页面卡死；
+   * 窗口化后 DOM 恒定 ≤2k，历史按需向上扩展。
+   */
+  const windowSize = renderWindow.value;
+  renderedTotal.value = result.length;
+  if (result.length > windowSize) {
+    return result.slice(result.length - windowSize);
+  }
   return result;
 });
+
+/** 每次扩窗加载的条数 */
+const RENDER_WINDOW_STEP = 2000;
+/** 当前渲染窗口大小（滚到顶部时逐步扩大，不自动缩小——保持已展开的历史） */
+const renderWindow = ref(RENDER_WINDOW_STEP);
+/** 过滤后总数（供 hiddenCount 计算） */
+const renderedTotal = ref(0);
+/** 窗口外仍被折叠的条数（「加载更早」提示展示用） */
+const hiddenCount = computed(() => Math.max(0, renderedTotal.value - renderWindow.value));
+
+/** 滚动容器回卷到顶端时扩大渲染窗口 */
+function expandRenderWindow() {
+  if (renderWindow.value < renderedTotal.value) {
+    renderWindow.value += RENDER_WINDOW_STEP;
+  }
+}
+
+/** 滚到距顶 <120px 自动扩窗（不等用户点按钮） */
+function onLogListScroll() {
+  const el = logListEl.value;
+  if (el && el.scrollTop < 120 && hiddenCount.value > 0) {
+    expandRenderWindow();
+  }
+}
 
 /** console 面板日志列表 DOM 引用（自动滚动用） */
 const logListEl = useTemplateRef<HTMLDivElement>("logListEl");
@@ -492,7 +525,19 @@ function clearExecResults() {
       </button>
     </div>
     <!-- 日志列表 -->
-    <div ref="logListEl" class="flex-1 overflow-y-auto p-4 font-mono text-sm">
+    <div
+      ref="logListEl"
+      class="flex-1 overflow-y-auto p-4 font-mono text-sm"
+      @scroll="onLogListScroll"
+    >
+      <!-- 渲染窗口占位：窗口外仍有更早日志时展示，点击加载更多 -->
+      <button
+        v-if="hiddenCount > 0"
+        @click="expandRenderWindow"
+        class="w-full py-1.5 mb-2 text-xs text-center rounded bg-elevated text-secondary hover:bg-elevated-hover"
+      >
+        ↑ 加载更早日志（还有 {{ hiddenCount }} 条未渲染）
+      </button>
       <div
         v-for="(log, i) in displayLogs"
         :key="i"
