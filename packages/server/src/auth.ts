@@ -14,7 +14,7 @@
  * - 定时密钥比较（timingSafeEqual 防时序攻击）
  */
 
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { maybeGzipResponse } from './gzip.js'
@@ -83,10 +83,15 @@ function verifyApiKey(plainKey: string, hash: string, salt: string): boolean {
 
 /** 定时安全比较超管密钥 */
 function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a)
-  const bufB = Buffer.from(b)
-  if (bufA.length !== bufB.length) return false
-  return timingSafeEqual(bufA, bufB)
+  /**
+   * 双方先过一遍 SHA256 再 timingSafeEqual
+   *
+   * 直接比较会因长度早退泄露 adminKey 长度；SHA256 把任意输入归一成等长摘要，
+   * 既隐藏真实长度，又保持恒定时间比较特性。
+   */
+  const da = createHash('sha256').update(a).digest()
+  const db = createHash('sha256').update(b).digest()
+  return timingSafeEqual(da, db)
 }
 
 // ─── 项目存储（JSON 文件持久化） ──────────────────────────
@@ -97,11 +102,28 @@ function safeEqual(a: string, b: string): boolean {
  * 数据存储为 JSON 文件（~/.silkpulse/projects.json 或指定路径）。
  * 适合个人/小团队场景，无需数据库依赖。
  */
+/** 密钥验证成功缓存的容量上限：防恶意海量不同假 key 撑内存 */
+const VERIFY_CACHE_MAX = 512
+
 export class ProjectStore {
   private projects: Map<string, Project> = new Map()
   private filePath: string
-  /** apiKey 前缀 → projectId 的反查索引（加速密钥验证） */
-  private keyPrefixIndex: Map<string, string> = new Map()
+  /**
+   * 数据版本号：任何写操作递增
+   *
+   * 供密钥验证缓存做失效判断 —— 缓存记住取值时的版本号，
+   * 读到的版本号不同即说明密钥可能已变（rotate/delete/disable），需重新 scrypt 验证。
+   */
+  private dataVersion = 0
+  /**
+   * 密钥验证成功缓存：明文密钥 → { projectId, 缓存时的数据版本号 }
+   *
+   * verifyKey 是全表 scrypt 扫描（每项目一次 ~32MB 同步计算），在 HTTP 热路径上
+   * 每请求都要跑一遍，是最容易被打爆的 CPU 放大器。首次 scrypt 验证成功后缓存结果，
+   * 后续同密钥请求直接查 Map（O(1)），项目数据变更时靠 dataVersion 失效。
+   * 容量上限防恶意海量不同假 key 撑内存（命中不了缓存照旧走 scrypt，无额外风险）。
+   */
+  private verifyCache = new Map<string, { projectId: string; version: number }>()
 
   constructor(filePath: string) {
     this.filePath = filePath
@@ -116,21 +138,19 @@ export class ProjectStore {
       const arr: Project[] = JSON.parse(raw)
       for (const p of arr) {
         this.projects.set(p.id, p)
-        // 用 apiKey 前 16 字符做索引加速验证（不用完整 key，安全）
-        // 注意：存储中没有明文 key，索引基于 hash 前缀
-        this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), p.id)
       }
     } catch {
       /** 文件损坏时从空开始 */
     }
   }
 
-  /** 保存到 JSON 文件 */
+  /** 保存到 JSON 文件（版本号随写入递增，作为缓存失效信号） */
   private save(): void {
     const dir = dirname(this.filePath)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const arr = Array.from(this.projects.values())
     writeFileSync(this.filePath, JSON.stringify(arr, null, 2), 'utf-8')
+    this.dataVersion++
   }
 
   /**
@@ -153,7 +173,6 @@ export class ProjectStore {
       enabled: true,
     }
     this.projects.set(id, project)
-    this.keyPrefixIndex.set(hash.slice(0, 16), id)
     this.save()
     const { apiKeyHash, apiKeySalt, ...publicInfo } = project
     return { project: publicInfo, apiKey }
@@ -183,7 +202,6 @@ export class ProjectStore {
   /** 直接写入项目原始数据（供 Playground 项目初始化使用） */
   setRaw(projectId: string, project: Project): void {
     this.projects.set(projectId, project)
-    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId)
     this.save()
   }
 
@@ -191,20 +209,15 @@ export class ProjectStore {
   updateRaw(projectId: string, patch: { apiKeyHash: string; apiKeySalt: string }): void {
     const p = this.projects.get(projectId)
     if (!p) return
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
     p.apiKeyHash = patch.apiKeyHash
     p.apiKeySalt = patch.apiKeySalt
     p.updatedAt = new Date().toISOString()
-    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId)
     this.save()
   }
 
   /** 删除项目 */
   delete(projectId: string): boolean {
-    const p = this.projects.get(projectId)
-    if (!p) return false
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
-    this.projects.delete(projectId)
+    if (!this.projects.delete(projectId)) return false
     this.save()
     return true
   }
@@ -229,13 +242,11 @@ export class ProjectStore {
   rotateKey(projectId: string): string | undefined {
     const p = this.projects.get(projectId)
     if (!p) return undefined
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
     const newKey = generateApiKey()
     const { hash, salt } = hashApiKey(newKey)
     p.apiKeyHash = hash
     p.apiKeySalt = salt
     p.updatedAt = new Date().toISOString()
-    this.keyPrefixIndex.set(hash.slice(0, 16), projectId)
     this.save()
     return newKey
   }
@@ -245,11 +256,25 @@ export class ProjectStore {
    * @returns 项目 ID（验证成功）或 undefined（失败）
    */
   verifyKey(plainKey: string): string | undefined {
+    /** 先查缓存：版本号一致直接返回，避免热路径上的同步 scrypt 计算 */
+    const cached = this.verifyCache.get(plainKey)
+    if (cached && cached.version === this.dataVersion) {
+      const p = this.projects.get(cached.projectId)
+      if (p?.enabled) return cached.projectId
+      this.verifyCache.delete(plainKey)
+      return undefined
+    }
     // 遍历所有项目尝试验证（因为密钥是哈希的，不能直接反查）
-    // 对于少量项目（通常 <100）性能可接受
+    // 有缓存兜底后，只有冷启动/数据变更后的首次请求才走到这里
     for (const [id, p] of this.projects) {
       if (!p.enabled) continue
       if (verifyApiKey(plainKey, p.apiKeyHash, p.apiKeySalt)) {
+        /** FIFO 淘汰：Map 保序，删最老的一条控制总量 */
+        if (this.verifyCache.size >= VERIFY_CACHE_MAX) {
+          const oldest = this.verifyCache.keys().next().value
+          if (oldest !== undefined) this.verifyCache.delete(oldest)
+        }
+        this.verifyCache.set(plainKey, { projectId: id, version: this.dataVersion })
         return id
       }
     }
