@@ -14,61 +14,67 @@
 
 /** DOM 属性 */
 interface DomAttr {
-  name: string
-  value: string
+  name: string;
+  value: string;
 }
 
 interface ElementNode {
-  idx: number
-  tag: string
+  idx: number;
+  tag: string;
   /** 完整属性列表（server 从 el.attributes 收集） */
-  attributes?: DomAttr[]
-  childCount: number
+  attributes?: DomAttr[];
+  childCount: number;
   /** 叶子节点的文本内容 */
-  text?: string
-  hasShadow?: boolean
-  shadowChildCount?: number
-  expanded?: boolean
-  loading?: boolean
-  children?: ElementNode[]
-  shadowChildren?: ElementNode[]
-  shadowExpanded?: boolean
+  text?: string;
+  hasShadow?: boolean;
+  shadowChildCount?: number;
+  expanded?: boolean;
+  loading?: boolean;
+  children?: ElementNode[];
+  shadowChildren?: ElementNode[];
+  shadowExpanded?: boolean;
   /** DOM 变化高亮标记 */
-  flash?: boolean
+  flash?: boolean;
 }
 
 defineProps<{
   /** 当前节点 */
-  node: ElementNode
+  node: ElementNode;
   /** 嵌套深度（用于缩进） */
-  depth: number
+  depth: number;
   /** 当前选中的元素 idx（高亮用） */
-  selectedIdx: number | null
-}>()
+  selectedIdx: number | null;
+}>();
 
 const emit = defineEmits<{
   /** 点箭头：展开/收起（普通子节点或 shadow 子树） */
-  toggle: [node: ElementNode]
+  toggle: [node: ElementNode];
   /** 点节点本身：选中（右侧诊断卡） */
-  select: [idx: number]
-}>()
+  select: [idx: number];
+}>();
 
 /** 是否展开（普通 children 或 shadow） */
 function isExpanded(n: ElementNode): boolean {
-  return (n.childCount > 0 && !!n.expanded) || (!!n.hasShadow && !!n.shadowExpanded)
+  return (n.childCount > 0 && !!n.expanded) || (!!n.hasShadow && !!n.shadowExpanded);
 }
 
 /** 是否有可展开内容 */
 function hasExpandable(n: ElementNode): boolean {
-  return n.childCount > 0 || !!n.hasShadow
+  return n.childCount > 0 || !!n.hasShadow;
 }
 
 /** 长 style/data 属性值截断显示 */
 function shortValue(name: string, value: string): string {
-  if ((name === 'style' || name.startsWith('data-')) && value.length > 20) {
-    return value.slice(0, 20) + '…'
+  if ((name === "style" || name.startsWith("data-")) && value.length > 20) {
+    return value.slice(0, 20) + "…";
   }
-  return value
+  return value;
+}
+
+/** 内联文本压缩：多行文本压成单行并截断（script 等长文本的 DevTools 同款展示） */
+function inlineText(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 120 ? flat.slice(0, 120) + "…" : flat;
 }
 </script>
 
@@ -84,9 +90,13 @@ function shortValue(name: string, value: string): string {
       <!-- 展开/收起箭头 -->
       <span
         class="etn-arrow"
-        :class="{ 'etn-arrow-expanded': isExpanded(node), 'etn-arrow-hidden': !hasExpandable(node) }"
+        :class="{
+          'etn-arrow-expanded': isExpanded(node),
+          'etn-arrow-hidden': !hasExpandable(node),
+        }"
         @click.stop="hasExpandable(node) && emit('toggle', node)"
-      >{{ node.loading ? '⏳' : '▶' }}</span>
+        >{{ node.loading ? "⏳" : "▶" }}</span
+      >
 
       <!-- shadow host 标记 -->
       <span v-if="node.hasShadow" class="etn-shadow-icon" title="Shadow Host">🕶️</span>
@@ -95,20 +105,19 @@ function shortValue(name: string, value: string): string {
       <span class="etn-bracket">&lt;</span><span class="etn-tag-name">{{ node.tag }}</span>
 
       <!-- 属性列表（v-for 遍历，Vue 自行渲染） -->
-      <span
-        v-for="attr in node.attributes"
-        :key="attr.name"
-        class="etn-attr"
-      >
-        <span class="etn-attr-name">{{ attr.name }}</span>=<span class="etn-attr-value">"{{ shortValue(attr.name, attr.value) }}"</span>
+      <span v-for="attr in node.attributes" :key="attr.name" class="etn-attr">
+        <span class="etn-attr-name">{{ attr.name }}</span
+        >=<span class="etn-attr-value">"{{ shortValue(attr.name, attr.value) }}"</span>
       </span>
       <span class="etn-bracket">&gt;</span>
 
       <!-- 收起状态：显示文本或子元素数量 -->
       <template v-if="!isExpanded(node)">
-        <span v-if="node.text" class="etn-text-inline"> {{ node.text }} </span>
+        <span v-if="node.text" class="etn-text-inline"> {{ inlineText(node.text) }} </span>
         <span v-else-if="node.childCount > 0" class="etn-child-hint">…{{ node.childCount }}</span>
-        <span v-if="node.shadowChildCount" class="etn-shadow-hint">🕶️{{ node.shadowChildCount }}</span>
+        <span v-if="node.shadowChildCount" class="etn-shadow-hint"
+          >🕶️{{ node.shadowChildCount }}</span
+        >
       </template>
     </div>
 
@@ -151,46 +160,47 @@ function shortValue(name: string, value: string): string {
       @click="emit('select', node.idx)"
     >
       <span class="etn-arrow etn-arrow-hidden">▶</span>
-      <span class="etn-bracket">&lt;/</span><span class="etn-tag-name">{{ node.tag }}</span><span class="etn-bracket">&gt;</span>
+      <span class="etn-bracket">&lt;/</span><span class="etn-tag-name">{{ node.tag }}</span
+      ><span class="etn-bracket">&gt;</span>
     </div>
   </div>
 </template>
 
 <style scoped>
 .etn-node {
-  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Menlo', monospace;
+  font-family: "SF Mono", "Monaco", "Cascadia Code", "Menlo", monospace;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.7;
   user-select: text;
 }
 
+/** 单行不折行：长内容水平溢出，由外层树容器统一横向滚动（DevTools 同款行为） */
 .etn-row {
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-all;
+  display: flex;
+  align-items: baseline;
+  white-space: pre;
   padding: 1px 4px;
-  border-radius: 2px;
+  border-radius: 3px;
   cursor: pointer;
   transition: background-color 0.1s;
 }
 
 .etn-row:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--cs-etn-hover);
 }
 
 .etn-selected {
-  background: rgba(86, 156, 214, 0.15);
+  background: var(--cs-etn-selected);
 }
 
 .etn-arrow {
-  display: inline-block;
+  flex: none;
   width: 14px;
   font-size: 9px;
   text-align: center;
-  color: #888;
+  color: var(--cs-etn-arrow);
   transition: transform 0.1s;
   cursor: pointer;
-  vertical-align: baseline;
 }
 
 .etn-arrow-expanded {
@@ -202,67 +212,88 @@ function shortValue(name: string, value: string): string {
 }
 
 .etn-shadow-icon {
+  flex: none;
   font-size: 10px;
   margin-right: 2px;
 }
 
 /** 尖括号 —— 灰色（DevTools 风格） */
 .etn-bracket {
-  color: #808080;
+  flex: none;
+  color: var(--cs-etn-bracket);
 }
 
 /** 标签名 —— 蓝色 */
 .etn-tag-name {
-  color: #569cd6;
+  flex: none;
+  font-weight: 500;
+  color: var(--cs-etn-tag);
 }
 
-/** 属性 —— 整体浅色 */
+/** 属性 —— 整体间隔 */
 .etn-attr {
-  margin-left: 4px;
+  flex: none;
+  margin-left: 6px;
 }
 
-/** 属性名 —— 浅蓝 */
+/** 属性名 —— 蓝 */
 .etn-attr-name {
-  color: #9cdcfe;
+  color: var(--cs-etn-attr-name);
 }
 
-/** 属性值 —— 橙色 */
+/** 属性值 —— 橙红 */
 .etn-attr-value {
-  color: #ce9178;
+  color: var(--cs-etn-attr-value);
 }
 
 .etn-child-hint {
-  color: #6a9955;
-  margin-left: 4px;
+  flex: none;
+  color: var(--cs-etn-hint);
+  margin-left: 6px;
 }
 
 .etn-shadow-hint {
-  color: #c586c0;
-  margin-left: 2px;
-}
-
-/** 内联文本 —— 浅黄 */
-.etn-text-inline {
-  color: #dcdcaa;
+  flex: none;
+  color: var(--cs-etn-shadow);
   margin-left: 4px;
 }
 
+/** 内联文本 —— 暗金 */
+.etn-text-inline {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--cs-etn-text);
+  margin-left: 4px;
+}
+
+/** 展开的子节点容器：左侧辅助竖线指示层级范围 */
+.etn-children {
+  border-left: 1px solid var(--cs-etn-hover);
+  margin-left: 10px;
+}
+
 .etn-shadow-root {
-  border-left: 2px dashed #7c3aed;
+  border-left: 2px dashed var(--cs-etn-shadow);
   padding-left: 8px;
   margin-bottom: 2px;
 }
 
 .etn-shadow-label {
-  color: #c586c0;
+  color: var(--cs-etn-shadow);
   font-size: 10px;
   padding: 2px 0;
 }
 
 /** DOM 变化高亮闪烁 */
 @keyframes flash {
-  0% { background: rgba(255, 213, 79, 0.5); }
-  100% { background: transparent; }
+  0% {
+    background: var(--cs-etn-flash);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 .etn-flash {

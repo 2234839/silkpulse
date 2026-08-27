@@ -16,24 +16,24 @@ export async function copyText(text: string): Promise<boolean> {
   /** 优先走标准 Clipboard API（需要 secure context） */
   if (navigator.clipboard && window.isSecureContext) {
     try {
-      await navigator.clipboard.writeText(text)
-      return true
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch {
       /** 权限拒绝或 API 不可用，走降级 */
     }
   }
   /** 降级：临时 textarea + execCommand('copy') */
   try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
   } catch {
-    return false
+    return false;
   }
 }

@@ -960,8 +960,8 @@ onMounted(() => {
               class="w-full text-xs px-2 py-1 bg-base border border-base rounded text-primary placeholder:text-faint focus:outline-none focus:border-primary"
             />
           </div>
-          <!-- 树 / 搜索结果 -->
-          <div class="flex-1 overflow-y-auto p-2 font-mono text-xs">
+          <!-- 树 / 搜索结果（单行不折行，长内容横向滚动） -->
+          <div class="flex-1 overflow-auto p-2 font-mono text-xs">
             <!-- filter 搜索模式 -->
             <template v-if="isFiltering">
               <div v-if="filterLoading" class="text-faint text-center py-4">搜索中...</div>

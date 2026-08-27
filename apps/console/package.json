@@ -9,6 +9,11 @@
     "preview": "vp preview",
     "check": "vp check"
   },
+  "dependencies": {
+    "@silkpulse/renderer": "workspace:*",
+    "@silkpulse/shared": "workspace:*",
+    "vue-router": "catalog:"
+  },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
@@ -16,10 +21,5 @@
     "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vue": "catalog:"
-  },
-  "dependencies": {
-    "@silkpulse/renderer": "workspace:*",
-    "@silkpulse/shared": "workspace:*",
-    "vue-router": "catalog:"
   }
 }

@@ -392,6 +392,8 @@ export interface SerializedProperty {
   isGetter?: boolean
   /** 是否是 Symbol key */
   isSymbol?: boolean
+  /** 是否来自原型链（非实例自有属性）。展示层据此把继承属性折叠进 [[Prototype]] 分组 */
+  inherited?: boolean
 }
 
 /** exec 在远程设备执行 JS 的结果 */

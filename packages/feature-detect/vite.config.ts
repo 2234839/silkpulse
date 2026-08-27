@@ -2,9 +2,8 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   pack: {
-    dts: {
-      tsgo: true,
-    },
+    /** 不用 tsgo：WSL2 下 spawn 偶发 EBUSY，走进程内 TS API 更稳 */
+    dts: {},
     exports: false,
   },
   lint: {

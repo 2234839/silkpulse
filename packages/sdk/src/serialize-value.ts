@@ -247,15 +247,15 @@ function serializeObject(
   const ctorName = (val as { constructor?: { name?: string } }).constructor?.name
   const isPlain = !ctorName || ctorName === 'Object'
 
-  /** 收集自身 + 原型链第一层属性名 */
-  const allKeys: { key: string; isSymbol: boolean }[] = []
+  /** 收集自身 + 原型链属性名（带 inherited 标记，展示层据此折叠原型链分组） */
+  const allKeys: { key: string; isSymbol: boolean; inherited: boolean }[] = []
   const seenKeys = new Set<string>()
 
   /** 自身可枚举属性 */
   for (const k of Object.keys(val as Record<string, unknown>)) {
     if (!seenKeys.has(k)) {
       seenKeys.add(k)
-      allKeys.push({ key: k, isSymbol: false })
+      allKeys.push({ key: k, isSymbol: false, inherited: false })
     }
   }
 
@@ -263,7 +263,7 @@ function serializeObject(
   for (const k of Object.getOwnPropertyNames(val)) {
     if (!seenKeys.has(k)) {
       seenKeys.add(k)
-      allKeys.push({ key: k, isSymbol: false })
+      allKeys.push({ key: k, isSymbol: false, inherited: false })
     }
   }
 
@@ -281,7 +281,7 @@ function serializeObject(
         if (k === 'constructor') continue
         if (!seenKeys.has(k)) {
           seenKeys.add(k)
-          allKeys.push({ key: k, isSymbol: false })
+          allKeys.push({ key: k, isSymbol: false, inherited: true })
         }
       }
     } catch { /** 安全降级 */ }
@@ -295,13 +295,13 @@ function serializeObject(
     const key = s.toString()
     if (!seenKeys.has(key)) {
       seenKeys.add(key)
-      allKeys.push({ key: s.description || key, isSymbol: true })
+      allKeys.push({ key: s.description || key, isSymbol: true, inherited: false })
     }
   }
 
   /** 取属性值 + 检测 getter */
   const props: SerializedProperty[] = []
-  for (const { key, isSymbol } of allKeys) {
+  for (const { key, isSymbol, inherited } of allKeys) {
     /** 安全阀触发后不再递归 */
     if (ctx.nodeCount > MAX_NODES) break
     try {
@@ -313,10 +313,11 @@ function serializeObject(
         value: serialize(rawVal, ctx),
         isGetter,
         isSymbol,
+        inherited,
       })
     } catch {
       /** getter 抛错时跳过 */
-      props.push({ key, value: { type: 'unknown', preview: '[getter throws]' }, isGetter: true, isSymbol })
+      props.push({ key, value: { type: 'unknown', preview: '[getter throws]' }, isGetter: true, isSymbol, inherited })
     }
   }
 

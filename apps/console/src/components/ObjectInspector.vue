@@ -22,9 +22,9 @@
  * - StoragePanel localStorage 编辑（可编辑 JSON / 文本）
  * - StoragePanel IndexedDB 记录（只读）
  */
-import { ref, computed, watch, provide, inject } from 'vue'
-import type { Ref } from 'vue'
-import type { SerializedValue } from '@silkpulse/shared'
+import { ref, computed, watch, provide, inject } from "vue";
+import type { Ref } from "vue";
+import type { SerializedValue } from "@silkpulse/shared";
 
 /* ==================== 右键菜单：展开控制广播通道 ==================== */
 
@@ -38,48 +38,55 @@ import type { SerializedValue } from '@silkpulse/shared'
  * 用响应式 ref 实现——即使子节点尚未渲染，一旦渲染就会立即读取到 override 值，
  * 实现"逐层自动展开"效果（Vue 的响应式更新 + nextTick 递进）。
  */
-type ExpandOverride = { targetPath: number[]; value: boolean; /** 版本号，每次操作递增以触发 watch */ version: number } | null
+type ExpandOverride = {
+  targetPath: number[];
+  value: boolean;
+  /** 版本号，每次操作递增以触发 watch */ version: number;
+} | null;
 
 /** 右键菜单上下文 */
 interface MenuContext {
   /** 触发菜单的节点 path */
-  path: number[]
+  path: number[];
   /** 该节点的 SerializedValue */
-  node: SerializedValue
+  node: SerializedValue;
   /** 鼠标坐标 */
-  x: number
-  y: number
+  x: number;
+  y: number;
   /** 是否有子节点 */
-  hasChildren: boolean
+  hasChildren: boolean;
 }
 
-const props = withDefaults(defineProps<{
-  /** 结构化序列化值（优先使用，来自远程 exec） */
-  value?: SerializedValue
-  /** 普通 JS 对象/基本类型（自动适配） */
-  raw?: unknown
-  /** JSON 字符串（自动 parse，非 JSON 降级纯文本） */
-  json?: string
-  /** 属性键名（子节点才有） */
-  keyName?: string
-  /** 嵌套深度（根为 0，自动控制默认展开层级） */
-  depth?: number
-  /** 是否可编辑 */
-  editable?: boolean
-  /** 子节点索引（用于构建唯一 path，右键菜单展开控制用） */
-  childIndex?: number
-}>(), {
-  depth: 0,
-  editable: false,
-  childIndex: 0,
-})
+const props = withDefaults(
+  defineProps<{
+    /** 结构化序列化值（优先使用，来自远程 exec） */
+    value?: SerializedValue;
+    /** 普通 JS 对象/基本类型（自动适配） */
+    raw?: unknown;
+    /** JSON 字符串（自动 parse，非 JSON 降级纯文本） */
+    json?: string;
+    /** 属性键名（子节点才有） */
+    keyName?: string;
+    /** 嵌套深度（根为 0，自动控制默认展开层级） */
+    depth?: number;
+    /** 是否可编辑 */
+    editable?: boolean;
+    /** 子节点索引（用于构建唯一 path，右键菜单展开控制用） */
+    childIndex?: number;
+  }>(),
+  {
+    depth: 0,
+    editable: false,
+    childIndex: 0,
+  },
+);
 
 const emit = defineEmits<{
   /** 值被修改时触发（editable 模式），传递新值 */
-  'update:modelValue': [value: unknown]
+  "update:modelValue": [value: unknown];
   /** 右键菜单事件冒泡（子→父→根） */
-  'context-menu': [ctx: MenuContext]
-}>()
+  "context-menu": [ctx: MenuContext];
+}>();
 
 /* ==================== 数据归一化：三入口 → SerializedValue ==================== */
 
@@ -89,25 +96,25 @@ const emit = defineEmits<{
  * SerializedValue 直接透传；unknown 手动构建；JSON 字符串先 parse。
  */
 function normalizeToSerialized(input: {
-  value?: SerializedValue
-  raw?: unknown
-  json?: string
+  value?: SerializedValue;
+  raw?: unknown;
+  json?: string;
 }): SerializedValue {
   /** 优先级：value > raw > json */
-  if (input.value) return input.value
-  if (input.raw !== undefined) return rawToSerialized(input.raw)
+  if (input.value) return input.value;
+  if (input.raw !== undefined) return rawToSerialized(input.raw);
   if (input.json !== undefined) {
-    const trimmed = input.json.trim()
-    if (!trimmed) return { type: 'string', preview: '""', value: '' }
+    const trimmed = input.json.trim();
+    if (!trimmed) return { type: "string", preview: '""', value: "" };
     try {
-      const parsed = JSON.parse(trimmed)
-      return rawToSerialized(parsed)
+      const parsed = JSON.parse(trimmed);
+      return rawToSerialized(parsed);
     } catch {
       /** 非 JSON：作为纯字符串展示 */
-      return { type: 'string', preview: `"${truncate(input.json, 200)}"`, value: input.json }
+      return { type: "string", preview: `"${truncate(input.json, 200)}"`, value: input.json };
     }
   }
-  return { type: 'undefined', preview: 'undefined' }
+  return { type: "undefined", preview: "undefined" };
 }
 
 /**
@@ -116,161 +123,185 @@ function normalizeToSerialized(input: {
  * 只覆盖 object/array/基本类型——足够本地数据（storage/network）使用。
  */
 function rawToSerialized(val: unknown, depth = 0): SerializedValue {
-  if (val === null) return { type: 'null', preview: 'null' }
-  if (val === undefined) return { type: 'undefined', preview: 'undefined' }
-  const t = typeof val
-  if (t === 'string') return { type: 'string', preview: `"${truncate(val, 100)}"`, value: val }
-  if (t === 'number') return { type: 'number', preview: String(val), value: val }
-  if (t === 'boolean') return { type: 'boolean', preview: String(val), value: val }
-  if (t === 'bigint') return { type: 'bigint', preview: `${val}n`, value: String(val) }
+  if (val === null) return { type: "null", preview: "null" };
+  if (val === undefined) return { type: "undefined", preview: "undefined" };
+  const t = typeof val;
+  if (t === "string") return { type: "string", preview: `"${truncate(val, 100)}"`, value: val };
+  if (t === "number") return { type: "number", preview: String(val), value: val };
+  if (t === "boolean") return { type: "boolean", preview: String(val), value: val };
+  if (t === "bigint") return { type: "bigint", preview: `${val}n`, value: String(val) };
 
-  if (t === 'function') {
-    const fn = val as { name?: string; toString(): string }
-    const src = fn.toString()
-    return { type: 'function', preview: `ƒ ${fn.name || ''}()`, value: src }
+  if (t === "function") {
+    const fn = val as { name?: string; toString(): string };
+    const src = fn.toString();
+    return { type: "function", preview: `ƒ ${fn.name || ""}()`, value: src };
   }
-  if (t === 'symbol') return { type: 'symbol', preview: String(val) }
-  if (val instanceof RegExp) return { type: 'regexp', preview: String(val) }
-  if (val instanceof Date) return { type: 'date', preview: isNaN(val.getTime()) ? 'Invalid Date' : val.toISOString() }
+  if (t === "symbol") return { type: "symbol", preview: String(val) };
+  if (val instanceof RegExp) return { type: "regexp", preview: String(val) };
+  if (val instanceof Date)
+    return { type: "date", preview: isNaN(val.getTime()) ? "Invalid Date" : val.toISOString() };
 
   if (Array.isArray(val)) {
-    if (depth >= 8) return { type: 'array', preview: `[${val.length}]`, length: val.length }
+    if (depth >= 8) return { type: "array", preview: `[${val.length}]`, length: val.length };
     return {
-      type: 'array',
-      preview: `Array(${val.length}) [${val.slice(0, 3).map(previewOne).join(', ')}${val.length > 3 ? ', …' : ''}]`,
+      type: "array",
+      preview: `Array(${val.length}) [${val.slice(0, 3).map(previewOne).join(", ")}${val.length > 3 ? ", …" : ""}]`,
       elements: val.map((v) => rawToSerialized(v, depth + 1)),
       length: val.length,
-    }
+    };
   }
 
-  if (t === 'object') {
-    const keys = Object.keys(val as Record<string, unknown>)
-    const ctorName = (val as { constructor?: { name?: string } }).constructor?.name
+  if (t === "object") {
+    const keys = Object.keys(val as Record<string, unknown>);
+    const ctorName = (val as { constructor?: { name?: string } }).constructor?.name;
     if (depth >= 8) {
-      return { type: 'object', preview: `${ctorName || 'Object'} {…}`, constructorName: ctorName }
+      return { type: "object", preview: `${ctorName || "Object"} {…}`, constructorName: ctorName };
     }
     return {
-      type: 'object',
-      preview: `${ctorName && ctorName !== 'Object' ? ctorName + ' ' : ''}{${keys.slice(0, 3).map((k) => `${k}: ${previewOne((val as Record<string, unknown>)[k])}`).join(', ')}${keys.length > 3 ? ', …' : ''}}`,
+      type: "object",
+      preview: `${ctorName && ctorName !== "Object" ? ctorName + " " : ""}{${keys
+        .slice(0, 3)
+        .map((k) => `${k}: ${previewOne((val as Record<string, unknown>)[k])}`)
+        .join(", ")}${keys.length > 3 ? ", …" : ""}}`,
       properties: keys.map((k) => ({
         key: k,
         value: rawToSerialized((val as Record<string, unknown>)[k], depth + 1),
       })),
       constructorName: ctorName,
-    }
+    };
   }
 
-  return { type: 'unknown', preview: String(val) }
+  return { type: "unknown", preview: String(val) };
 }
 
 /** 辅助：单值预览（用于父对象 summary） */
 function previewOne(val: unknown): string {
-  if (val === null) return 'null'
-  if (val === undefined) return 'undefined'
-  const t = typeof val
-  if (t === 'string') return `"${truncate(val as string, 30)}"`
-  if (t === 'number' || t === 'boolean' || t === 'bigint') return String(val)
-  if (t === 'function') return `ƒ ${(val as { name?: string }).name || ''}()`
-  if (t === 'symbol') return String(val)
-  if (val instanceof RegExp) return String(val)
-  if (val instanceof Date) return isNaN(val.getTime()) ? 'Invalid Date' : val.toISOString()
-  if (Array.isArray(val)) return `Array(${val.length})`
-  if (t === 'object') {
-    const ctorName = (val as { constructor?: { name?: string } }).constructor?.name
-    if (ctorName && ctorName !== 'Object') return ctorName
-    return '{…}'
+  if (val === null) return "null";
+  if (val === undefined) return "undefined";
+  const t = typeof val;
+  if (t === "string") return `"${truncate(val as string, 30)}"`;
+  if (t === "number" || t === "boolean" || t === "bigint") return String(val);
+  if (t === "function") return `ƒ ${(val as { name?: string }).name || ""}()`;
+  if (t === "symbol") return String(val);
+  if (val instanceof RegExp) return String(val);
+  if (val instanceof Date) return isNaN(val.getTime()) ? "Invalid Date" : val.toISOString();
+  if (Array.isArray(val)) return `Array(${val.length})`;
+  if (t === "object") {
+    const ctorName = (val as { constructor?: { name?: string } }).constructor?.name;
+    if (ctorName && ctorName !== "Object") return ctorName;
+    return "{…}";
   }
-  return String(val)
+  return String(val);
 }
 
 /** 辅助：截断字符串 */
 function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) + '…' : s
+  return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
 /** 当前节点的归一化值（响应式：props 变化重新计算） */
-const node = computed(() => normalizeToSerialized({
-  value: props.value,
-  raw: props.raw,
-  json: props.json,
-}))
+const node = computed(() =>
+  normalizeToSerialized({
+    value: props.value,
+    raw: props.raw,
+    json: props.json,
+  }),
+);
 
 /* ==================== 展开/折叠 ==================== */
 
 /** 是否有子节点可展开 */
 const hasChildren = computed(() => {
-  const v = node.value
+  const v = node.value;
   /** 函数节点：有源码可展开 */
-  if (v.type === 'function' && v.value) return true
-  return ((v.type === 'object' || v.type === 'array') &&
-    ((v.properties?.length ?? 0) > 0 || (v.elements?.length ?? 0) > 0))
-})
+  if (v.type === "function" && v.value) return true;
+  return (
+    (v.type === "object" || v.type === "array") &&
+    ((v.properties?.length ?? 0) > 0 || (v.elements?.length ?? 0) > 0)
+  );
+});
 
 /** 子项列表（object→properties, array→elements 映射为 properties 格式） */
 const children = computed(() => {
-  const v = node.value
+  const v = node.value;
   if (v.elements) {
-    return v.elements.map((e, i) => ({ key: String(i), value: e }))
+    return v.elements.map((e, i) => ({ key: String(i), value: e }));
   }
-  return v.properties ?? []
-})
+  return (v.properties ?? []).filter((p) => !p.inherited);
+});
 
-watch(() => [props.value, props.raw, props.json], () => {
-  /** 外部数据变化时重置展开状态 + 清除 override */
-  manualExpanded.value = props.depth < 1
-  if (isRoot) expandOverride.value = null
-})
+/**
+ * 继承属性（来自原型链，inherited 标记）分组
+ *
+ * 自有属性直接平铺；继承属性折叠进单个 [[Prototype]] 节点（DevTools 同款体验），
+ * 避免原型方法（hasOwnProperty/toString/…）淹没自有字段。
+ */
+const protoChildren = computed(() => (node.value.properties ?? []).filter((p) => p.inherited));
+
+/** [[Prototype]] 分组是否展开（独立于 expandOverride 通道，保持简单） */
+const protoExpanded = ref(false);
+
+watch(
+  () => [props.value, props.raw, props.json],
+  () => {
+    /** 外部数据变化时重置展开状态 + 清除 override */
+    manualExpanded.value = props.depth < 1;
+    if (isRoot) expandOverride.value = null;
+  },
+);
 
 /** 展开/折叠切换（清除 override，让手动状态接管） */
 function toggle() {
-  if (!hasChildren.value) return
+  if (!hasChildren.value) return;
   /** 如果有 override，先清除再 toggle */
   if (expandOverride.value) {
-    expandOverride.value = null
+    expandOverride.value = null;
   }
-  manualExpanded.value = !manualExpanded.value
+  manualExpanded.value = !manualExpanded.value;
 }
 
 /* ==================== 右键菜单：展开控制通道实现 ==================== */
 
 /** 是否为根实例 */
-const isRoot = props.depth === 0
+const isRoot = props.depth === 0;
 
 /** 从 inject 拿到父级 path */
-const parentPath = inject<number[]>('oi-path', [])
+const parentPath = inject<number[]>("oi-path", []);
 
 /** 当前节点的 path = 父 path + 自己的 childIndex */
-const nodePath = computed(() => [...parentPath, props.childIndex])
+const nodePath = computed(() => [...parentPath, props.childIndex]);
 
 /** 根实例创建响应式的 expandOverride 并 provide；非根 inject 已有的 */
 const expandOverride = isRoot
   ? ref<ExpandOverride>(null)
-  : inject<Ref<ExpandOverride>>('oi-expand-override', ref<ExpandOverride>(null))
+  : inject<Ref<ExpandOverride>>("oi-expand-override", ref<ExpandOverride>(null));
 
 /** provide 给子组件 */
-provide('oi-path', nodePath.value)
-provide('oi-expand-override', expandOverride as Ref<ExpandOverride>)
+provide("oi-path", nodePath.value);
+provide("oi-expand-override", expandOverride as Ref<ExpandOverride>);
 
 /** 判断 path A 是否为 path B 的子孙（或自身） */
 function isDescendantOrSelf(maybeChild: number[], ancestor: number[]): boolean {
-  if (maybeChild.length < ancestor.length) return false
-  return ancestor.every((seg, i) => maybeChild[i] === seg)
+  if (maybeChild.length < ancestor.length) return false;
+  return ancestor.every((seg, i) => maybeChild[i] === seg);
 }
 
 /** 用户手动 toggle 的展开状态（优先级低于 expandOverride） */
-const manualExpanded = ref(props.depth < 1)
+const manualExpanded = ref(props.depth < 1);
 
 /** 当前展开状态：expandOverride 覆盖 > 手动 toggle */
 const expanded = computed({
   get: () => {
-    const ov = expandOverride.value
+    const ov = expandOverride.value;
     if (ov && isDescendantOrSelf(nodePath.value, ov.targetPath)) {
-      return ov.value
+      return ov.value;
     }
-    return manualExpanded.value
+    return manualExpanded.value;
   },
-  set: (v: boolean) => { manualExpanded.value = v },
-})
+  set: (v: boolean) => {
+    manualExpanded.value = v;
+  },
+});
 
 /**
  * 监听 override 变化，同步 manualExpanded
@@ -278,29 +309,33 @@ const expanded = computed({
  * 这样当 override 被清除后，manualExpanded 已记录了 override 设置的值，
  * 节点不会回退到旧状态。
  */
-watch(expandOverride, (ov) => {
-  if (ov && isDescendantOrSelf(nodePath.value, ov.targetPath) && hasChildren.value) {
-    manualExpanded.value = ov.value
-  }
-}, { deep: true })
+watch(
+  expandOverride,
+  (ov) => {
+    if (ov && isDescendantOrSelf(nodePath.value, ov.targetPath) && hasChildren.value) {
+      manualExpanded.value = ov.value;
+    }
+  },
+  { deep: true },
+);
 
 /** 右键菜单状态（仅根实例持有） */
-const menuVisible = ref(false)
-const menuX = ref(0)
-const menuY = ref(0)
+const menuVisible = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
 /** 菜单操作目标的 path */
-const menuTargetPath = ref<number[]>([])
+const menuTargetPath = ref<number[]>([]);
 /** 菜单操作目标的 SerializedValue */
-const menuTargetNode = ref<SerializedValue | null>(null)
+const menuTargetNode = ref<SerializedValue | null>(null);
 /** 菜单目标是否有子节点 */
-const menuTargetHasChildren = ref(false)
+const menuTargetHasChildren = ref(false);
 /** 复制成功提示 */
-const copyToast = ref('')
+const copyToast = ref("");
 
 /** 右键事件 */
 function onContextMenu(e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
+  e.preventDefault();
+  e.stopPropagation();
 
   const ctx: MenuContext = {
     path: nodePath.value,
@@ -308,100 +343,104 @@ function onContextMenu(e: MouseEvent) {
     x: e.clientX,
     y: e.clientY,
     hasChildren: hasChildren.value,
-  }
+  };
 
   if (isRoot) {
-    onChildContextMenu(ctx)
+    onChildContextMenu(ctx);
   } else {
     /** 非根：冒泡给父级 */
-    emit('context-menu', ctx)
+    emit("context-menu", ctx);
   }
 }
 
 /** 子节点右键冒泡到根 */
 function onChildContextMenu(ctx: MenuContext) {
-  if (!isRoot) return
-  menuTargetPath.value = ctx.path
-  menuTargetNode.value = ctx.node
-  menuTargetHasChildren.value = ctx.hasChildren
+  if (!isRoot) return;
+  menuTargetPath.value = ctx.path;
+  menuTargetNode.value = ctx.node;
+  menuTargetHasChildren.value = ctx.hasChildren;
   /** 边界检测：靠近右/下边缘时偏移 */
-  const menuW = 200, menuH = 160
-  menuX.value = ctx.x + menuW > window.innerWidth ? ctx.x - menuW : ctx.x
-  menuY.value = ctx.y + menuH > window.innerHeight ? ctx.y - menuH : ctx.y
-  menuVisible.value = true
+  const menuW = 200,
+    menuH = 160;
+  menuX.value = ctx.x + menuW > window.innerWidth ? ctx.x - menuW : ctx.x;
+  menuY.value = ctx.y + menuH > window.innerHeight ? ctx.y - menuH : ctx.y;
+  menuVisible.value = true;
 }
 
 /** 从 SerializedValue 重建可 JSON 序列化的 JS 值 */
 function serializedToJson(val: SerializedValue): unknown {
   switch (val.type) {
-    case 'string':
-    case 'number':
-    case 'boolean':
-      return val.value ?? null
-    case 'null':
-      return null
-    case 'undefined':
-      return undefined
-    case 'bigint':
+    case "string":
+    case "number":
+    case "boolean":
+      return val.value ?? null;
+    case "null":
+      return null;
+    case "undefined":
+      return undefined;
+    case "bigint":
       /** bigint 保留 n 后缀，复制后可直接粘贴到 JS 环境 */
-      return val.value ? `${val.value}n` : '0n'
-    case 'array':
-      return (val.elements ?? []).map(serializedToJson)
-    case 'object':
-    case 'map':
-    case 'set': {
-      const props = val.properties ?? []
-      const obj: Record<string, unknown> = {}
+      return val.value ? `${val.value}n` : "0n";
+    case "array":
+      return (val.elements ?? []).map(serializedToJson);
+    case "object":
+    case "map":
+    case "set": {
+      const props = val.properties ?? [];
+      const obj: Record<string, unknown> = {};
       for (const p of props) {
-        obj[p.key] = serializedToJson(p.value)
+        obj[p.key] = serializedToJson(p.value);
       }
-      return obj
+      return obj;
     }
-    case 'date':
-      return val.preview
-    case 'regexp':
-      return val.preview
-    case 'function':
+    case "date":
+      return val.preview;
+    case "regexp":
+      return val.preview;
+    case "function":
       /** 函数复制返回完整源码（value 字段存的是 toString() 结果） */
-      return val.value ?? `[function ${val.preview}]`
-    case 'symbol':
+      return val.value ?? `[function ${val.preview}]`;
+    case "symbol":
       /** Symbol 保留类型标记（Symbol("desc") 形式） */
-      return val.preview
+      return val.preview;
     default:
-      return val.preview
+      return val.preview;
   }
 }
 
 /** 执行菜单操作 */
 async function copyJson() {
-  if (!menuTargetNode.value) return
-  const jsonVal = serializedToJson(menuTargetNode.value)
-  const text = JSON.stringify(jsonVal, null, 2)
-  await doCopy(text)
+  if (!menuTargetNode.value) return;
+  const jsonVal = serializedToJson(menuTargetNode.value);
+  const text = JSON.stringify(jsonVal, null, 2);
+  await doCopy(text);
 }
 
 async function copyValue() {
-  if (!menuTargetNode.value) return
+  if (!menuTargetNode.value) return;
   /** 函数类型：value 存的是完整源码，优先复制源码；其他类型复制 preview */
-  const text = menuTargetNode.value.type === 'function' && menuTargetNode.value.value
-    ? String(menuTargetNode.value.value)
-    : menuTargetNode.value.preview
-  await doCopy(text)
+  const text =
+    menuTargetNode.value.type === "function" && menuTargetNode.value.value
+      ? String(menuTargetNode.value.value)
+      : menuTargetNode.value.preview;
+  await doCopy(text);
 }
 
 async function doCopy(text: string) {
-  menuVisible.value = false
+  menuVisible.value = false;
   try {
-    await navigator.clipboard.writeText(text)
-    showToast('✓ 已复制')
+    await navigator.clipboard.writeText(text);
+    showToast("✓ 已复制");
   } catch {
-    showToast('✗ 复制失败')
+    showToast("✗ 复制失败");
   }
 }
 
 function showToast(msg: string) {
-  copyToast.value = msg
-  setTimeout(() => { copyToast.value = '' }, 1500)
+  copyToast.value = msg;
+  setTimeout(() => {
+    copyToast.value = "";
+  }, 1500);
 }
 
 /**
@@ -413,78 +452,78 @@ function showToast(msg: string) {
  * 同时 watch override 会把 manualExpanded 同步过来，保证 override 清除后状态不回退。
  */
 function expandAll() {
-  menuVisible.value = false
-  if (!isRoot) return
+  menuVisible.value = false;
+  if (!isRoot) return;
   expandOverride.value = {
     targetPath: menuTargetPath.value,
     value: true,
     version: (expandOverride.value?.version ?? 0) + 1,
-  }
+  };
 }
 
 function collapseAll() {
-  menuVisible.value = false
-  if (!isRoot) return
+  menuVisible.value = false;
+  if (!isRoot) return;
   expandOverride.value = {
     targetPath: menuTargetPath.value,
     value: false,
     version: (expandOverride.value?.version ?? 0) + 1,
-  }
+  };
 }
 
 function closeMenu() {
-  menuVisible.value = false
+  menuVisible.value = false;
 }
 
 /* ==================== 编辑模式 ==================== */
 
 /** 是否正在编辑（仅 editable 模式的叶子节点） */
-const editing = ref(false)
+const editing = ref(false);
 /** 编辑草稿 */
-const editDraft = ref('')
+const editDraft = ref("");
 
 /** 当前叶子是否可编辑（只有 string/number/boolean/null 可编辑） */
 const isEditableLeaf = computed(() => {
-  if (!props.editable || hasChildren.value) return false
-  const t = node.value.type
-  return t === 'string' || t === 'number' || t === 'boolean' || t === 'null'
-})
+  if (!props.editable || hasChildren.value) return false;
+  const t = node.value.type;
+  return t === "string" || t === "number" || t === "boolean" || t === "null";
+});
 
 function startEdit() {
-  if (!isEditableLeaf.value) return
-  editing.value = true
-  const v = node.value
-  if (v.type === 'string') {
-    editDraft.value = v.value as string ?? ''
-  } else if (v.type === 'null') {
-    editDraft.value = 'null'
+  if (!isEditableLeaf.value) return;
+  editing.value = true;
+  const v = node.value;
+  if (v.type === "string") {
+    editDraft.value = (v.value as string) ?? "";
+  } else if (v.type === "null") {
+    editDraft.value = "null";
   } else {
-    editDraft.value = String(v.value ?? v.preview)
+    editDraft.value = String(v.value ?? v.preview);
   }
 }
 
 function saveEdit() {
-  editing.value = false
-  const raw = editDraft.value.trim()
-  const t = node.value.type
-  let newValue: unknown = raw
+  editing.value = false;
+  const raw = editDraft.value.trim();
+  const t = node.value.type;
+  let newValue: unknown = raw;
 
-  if (t === 'number') {
-    newValue = Number(raw)
-    if (isNaN(newValue as number)) return
-  } else if (t === 'boolean') {
-    if (raw === 'true') newValue = true
-    else if (raw === 'false') newValue = false
-    else return
-  } else if (t === 'null') {
-    if (raw !== 'null') return
-    newValue = null
+  if (t === "number") {
+    newValue = Number(raw);
+    if (isNaN(newValue as number)) return;
+  } else if (t === "boolean") {
+    if (raw === "true") newValue = true;
+    else if (raw === "false") newValue = false;
+    else return;
+  } else if (t === "null") {
+    if (raw !== "null") return;
+    newValue = null;
   }
-  emit('update:modelValue', newValue)
+  emit("update:modelValue", newValue);
 }
 
 function cancelEdit() {
-  editing.value = false
+  editing.value = false;
 }
 
 /** 子节点编辑冒泡 */
@@ -495,24 +534,26 @@ function onChildUpdate(childKey: string, newChildValue: unknown) {
    */
   if (props.raw !== undefined) {
     if (Array.isArray(props.raw)) {
-      const arr = [...props.raw]
-      arr[Number(childKey)] = newChildValue
-      emit('update:modelValue', arr)
-    } else if (props.raw !== null && typeof props.raw === 'object') {
-      const obj = { ...(props.raw as Record<string, unknown>) }
-      obj[childKey] = newChildValue
-      emit('update:modelValue', obj)
+      const arr = [...props.raw];
+      arr[Number(childKey)] = newChildValue;
+      emit("update:modelValue", arr);
+    } else if (props.raw !== null && typeof props.raw === "object") {
+      const obj = { ...(props.raw as Record<string, unknown>) };
+      obj[childKey] = newChildValue;
+      emit("update:modelValue", obj);
     }
   } else if (props.json !== undefined) {
     try {
-      const parsed = JSON.parse(props.json)
+      const parsed = JSON.parse(props.json);
       if (Array.isArray(parsed)) {
-        parsed[Number(childKey)] = newChildValue
-      } else if (parsed !== null && typeof parsed === 'object') {
-        parsed[childKey] = newChildValue
+        parsed[Number(childKey)] = newChildValue;
+      } else if (parsed !== null && typeof parsed === "object") {
+        parsed[childKey] = newChildValue;
       }
-      emit('update:modelValue', JSON.stringify(parsed, null, 2))
-    } catch { /* 忽略 */ }
+      emit("update:modelValue", JSON.stringify(parsed, null, 2));
+    } catch {
+      /* 忽略 */
+    }
   }
 }
 
@@ -521,63 +562,63 @@ function onChildUpdate(childKey: string, newChildValue: unknown) {
 /** 类型 → CSS 变量（跟随亮/暗主题，亮色下饱和度更高更醒目） */
 function typeColor(type: string): string {
   const colors: Record<string, string> = {
-    string: 'var(--cs-oi-string)',
-    number: 'var(--cs-oi-number)',
-    boolean: 'var(--cs-oi-boolean)',
-    null: 'var(--cs-oi-boolean)',
-    undefined: 'var(--cs-oi-boolean)',
-    bigint: 'var(--cs-oi-number)',
-    function: 'var(--cs-oi-function)',
-    array: 'var(--cs-oi-type)',
-    object: 'var(--cs-oi-type)',
-    date: 'var(--cs-oi-function)',
-    regexp: 'var(--cs-oi-regexp)',
-    error: 'var(--cs-oi-error)',
-    symbol: 'var(--cs-oi-regexp)',
-    map: 'var(--cs-oi-type)',
-    set: 'var(--cs-oi-type)',
-    promise: 'var(--cs-oi-type)',
-    element: 'var(--cs-oi-element)',
-    event: 'var(--cs-oi-element)',
-  }
-  return colors[type] || 'var(--cs-oi-default)'
+    string: "var(--cs-oi-string)",
+    number: "var(--cs-oi-number)",
+    boolean: "var(--cs-oi-boolean)",
+    null: "var(--cs-oi-boolean)",
+    undefined: "var(--cs-oi-boolean)",
+    bigint: "var(--cs-oi-number)",
+    function: "var(--cs-oi-function)",
+    array: "var(--cs-oi-type)",
+    object: "var(--cs-oi-type)",
+    date: "var(--cs-oi-function)",
+    regexp: "var(--cs-oi-regexp)",
+    error: "var(--cs-oi-error)",
+    symbol: "var(--cs-oi-regexp)",
+    map: "var(--cs-oi-type)",
+    set: "var(--cs-oi-type)",
+    promise: "var(--cs-oi-type)",
+    element: "var(--cs-oi-element)",
+    event: "var(--cs-oi-element)",
+  };
+  return colors[type] || "var(--cs-oi-default)";
 }
 
 function typeBadge(type: string): string {
   const badges: Record<string, string> = {
-    string: 'str',
-    number: 'num',
-    boolean: 'bool',
-    null: 'null',
-    undefined: 'undef',
-    bigint: 'bigint',
-    function: 'fn',
-    array: 'arr',
-    object: 'obj',
-    date: 'date',
-    regexp: 're',
-    error: 'err',
-    map: 'Map',
-    set: 'Set',
-    weakmap: 'WMap',
-    weakset: 'WSet',
-    promise: 'Promise',
-    element: 'el',
-    textnode: '#text',
-    event: 'evt',
-    symbol: 'sym',
-    unknown: '?',
-  }
-  return badges[type] || type
+    string: "str",
+    number: "num",
+    boolean: "bool",
+    null: "null",
+    undefined: "undef",
+    bigint: "bigint",
+    function: "fn",
+    array: "arr",
+    object: "obj",
+    date: "date",
+    regexp: "re",
+    error: "err",
+    map: "Map",
+    set: "Set",
+    weakmap: "WMap",
+    weakset: "WSet",
+    promise: "Promise",
+    element: "el",
+    textnode: "#text",
+    event: "evt",
+    symbol: "sym",
+    unknown: "?",
+  };
+  return badges[type] || type;
 }
 
 /** 处理子组件冒泡上来的右键菜单事件 */
 function handleChildContextMenu(ctx: MenuContext) {
   if (isRoot) {
-    onChildContextMenu(ctx)
+    onChildContextMenu(ctx);
   } else {
     /** 非根：继续向上冒泡 */
-    emit('context-menu', ctx)
+    emit("context-menu", ctx);
   }
 }
 </script>
@@ -587,7 +628,10 @@ function handleChildContextMenu(ctx: MenuContext) {
     <!-- 行：箭头 + key + 值预览 -->
     <div class="oi-row" @click.stop="toggle" @contextmenu="onContextMenu">
       <!-- 展开箭头 -->
-      <span class="oi-arrow" :class="{ 'oi-expanded': expanded && hasChildren, 'oi-hidden': !hasChildren }">
+      <span
+        class="oi-arrow"
+        :class="{ 'oi-expanded': expanded && hasChildren, 'oi-hidden': !hasChildren }"
+      >
         ▶
       </span>
 
@@ -613,7 +657,8 @@ function handleChildContextMenu(ctx: MenuContext) {
           :class="{ 'oi-clickable': isEditableLeaf }"
           :style="{ color: typeColor(node.type) }"
           @click.stop="startEdit"
-        >{{ node.type === 'string' ? node.value ?? node.preview : node.preview }}</span>
+          >{{ node.type === "string" ? (node.value ?? node.preview) : node.preview }}</span
+        >
       </span>
 
       <!-- 容器节点摘要 -->
@@ -623,10 +668,10 @@ function handleChildContextMenu(ctx: MenuContext) {
         </span>
         <span :style="{ color: typeColor(node.type) }">{{ node.preview }}</span>
         <span v-if="!expanded && node.type === 'function'" class="oi-collapsed-hint">
-          ({{ (node.value || '').split('\n').length }} lines)
+          ({{ (node.value || "").split("\n").length }} lines)
         </span>
         <span v-else-if="!expanded && node.type !== 'function'" class="oi-collapsed-hint">
-          ({{ children.length }} {{ node.type === 'array' ? 'items' : 'props' }})
+          ({{ children.length }} {{ node.type === "array" ? "items" : "props" }})
         </span>
       </span>
     </div>
@@ -650,8 +695,26 @@ function handleChildContextMenu(ctx: MenuContext) {
           @update:model-value="onChildUpdate(child.key, $event)"
           @context-menu="handleChildContextMenu"
         />
-        <div v-if="children.length > 50" class="oi-more">
-          … {{ children.length - 50 }} more
+        <div v-if="children.length > 50" class="oi-more">… {{ children.length - 50 }} more</div>
+        <!-- 原型链继承属性分组：折叠进单个 [[Prototype]] 节点 -->
+        <div v-if="protoChildren.length > 0" class="oi-proto">
+          <div class="oi-row" @click.stop="protoExpanded = !protoExpanded">
+            <span class="oi-arrow" :class="{ 'oi-expanded': protoExpanded }">▶</span>
+            <span class="oi-key">[[Prototype]]:</span>
+            <span class="oi-collapsed-hint">({{ protoChildren.length }} inherited)</span>
+          </div>
+          <div v-if="protoExpanded" class="oi-children">
+            <ObjectInspector
+              v-for="(child, idx) in protoChildren.slice(0, 50)"
+              :key="'p' + idx"
+              :value="child.value"
+              :key-name="child.key"
+              :depth="depth + 1"
+              :child-index="idx"
+              :editable="false"
+              @context-menu="handleChildContextMenu"
+            />
+          </div>
         </div>
       </template>
     </div>
@@ -696,7 +759,7 @@ function handleChildContextMenu(ctx: MenuContext) {
 
 <style scoped>
 .oi-node {
-  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Menlo', monospace;
+  font-family: "SF Mono", "Monaco", "Cascadia Code", "Menlo", monospace;
   font-size: 12px;
   line-height: 1.6;
   user-select: text;
@@ -803,6 +866,11 @@ function handleChildContextMenu(ctx: MenuContext) {
   font-size: 11px;
 }
 
+/** [[Prototype]] 分组容器（与自有属性间留呼吸感） */
+.oi-proto {
+  margin-top: 2px;
+}
+
 /** 函数展开时显示的源码块 */
 .oi-fn-src {
   font-family: inherit;
@@ -827,7 +895,7 @@ function handleChildContextMenu(ctx: MenuContext) {
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   padding: 4px 0;
-  font-family: -apple-system, 'Segoe UI', sans-serif;
+  font-family: -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
   user-select: none;
 }
@@ -886,13 +954,19 @@ function handleChildContextMenu(ctx: MenuContext) {
   padding: 8px 20px;
   border-radius: 6px;
   font-size: 13px;
-  font-family: -apple-system, 'Segoe UI', sans-serif;
+  font-family: -apple-system, "Segoe UI", sans-serif;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   animation: oi-toast-in 0.2s ease;
 }
 
 @keyframes oi-toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 </style>

@@ -247,7 +247,8 @@ export async function handleApiRoute(
      * 控制台 Feature 面板和 AI skill 都可调用，排查"目标设备是否不支持某特性"。
      */
     case 'feature-detect': {
-      const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript())
+      /** 重检测（webgl 首建上下文在软件渲染/低端设备上可达数十秒）→ 独立 60s 超时 */
+      const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript(), 60000)
       if (!result.success) {
         sendJson(ctx, { error: result.error }, 500)
         return true
@@ -526,7 +527,14 @@ export async function handleApiRoute(
 export async function execOnDevice(
   registry: DeviceRegistry,
   deviceId: string,
-  code: string
+  code: string,
+  /**
+   * 本条 exec 的超时毫秒数（默认 EXEC_TIMEOUT）
+   *
+   * feature-detect 这类重检测（canvas.getContext('webgl') 在软件渲染/低端设备上
+   * 首次建上下文可达数十秒）需要独立的长超时，不与通用 exec 共用 10s。
+   */
+  timeoutMs: number = EXEC_TIMEOUT
 ): Promise<import('@silkpulse/shared').ExecResult> {
   const device = registry.get(deviceId)
   if (!device) {
@@ -545,7 +553,7 @@ export async function execOnDevice(
     const timer = setTimeout(() => {
       device.pendingExecs.delete(execId)
       resolve({ success: false, error: '执行超时（10s）' })
-    }, EXEC_TIMEOUT)
+    }, timeoutMs)
 
     device.pendingExecs.set(execId, { resolve, timer })
 

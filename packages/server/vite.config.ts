@@ -48,9 +48,9 @@ function uwsNativePlugin(): Plugin {
 
 export default defineConfig({
   pack: {
-    dts: {
-      tsgo: true,
-    },
+    /** 不用 tsgo：WSL2 下 spawn tsgo 二进制偶发 EBUSY（被 Windows Defender 扫描锁文件），
+     *  且失败会打断 watch 构建；留空则走进程内 TS API 生成类型，更稳 */
+    dts: {},
     /** 不让 vp pack 自动管理 exports —— server 有库入口和 bin 入口，手动管理更稳 */
     exports: false,
     deps: {
