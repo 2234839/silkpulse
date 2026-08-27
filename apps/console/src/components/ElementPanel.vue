@@ -144,24 +144,31 @@ const snapshotOffset = ref({ x: 0, y: 0 });
 /** 拖拽进行中标志（用于光标与禁用过渡） */
 const snapshotDragging = ref(false);
 
-/** 以快照显示区中心为锚点缩放：因子>1 放大、<1 缩小，限制 [0.2, 10] */
-function zoomSnapshot(factor: number, centerX?: number, centerY?: number) {
+/**
+ * 锚点不动的数学约束。img 变换为 p = O + t + s·(q − O)，其中 O 是图片布局
+ * 中心（flex 居中 → 恰为容器中心），t 是平移偏移，q 为锚点屏幕位置。
+ * 要求缩放前后 p(q) 不变：
+ *   O + t' + s'·(q − O) = O + t + s·(q − O)
+ * 解得 t' = t + (s − s')·(q − O)，即只需按新旧缩放差乘以「锚点相对容器中心」。
+ */
+function applyZoom(next: number, ax?: number, ay?: number) {
   const area = screenAreaRef.value;
   if (!area) return;
-  /** 容器中心（默认锚点） */
   const rect = area.getBoundingClientRect();
-  const cx = centerX ?? rect.width / 2;
-  const cy = centerY ?? rect.height / 2;
-  const prev = snapshotScale.value;
-  const next = Math.min(10, Math.max(0.2, prev * factor));
-  if (next === prev) return;
-  /** 让锚点下的图像点保持不动：offset' = anchor - (anchor - offset) * (next/prev) */
-  const ratio = next / prev;
+  const qxAbs = ax ?? rect.width / 2;
+  const qyAbs = ay ?? rect.height / 2;
   snapshotOffset.value = {
-    x: cx - (cx - snapshotOffset.value.x) * ratio,
-    y: cy - (cy - snapshotOffset.value.y) * ratio,
+    x: snapshotOffset.value.x + (snapshotScale.value - next) * (qxAbs - rect.width / 2),
+    y: snapshotOffset.value.y + (snapshotScale.value - next) * (qyAbs - rect.height / 2),
   };
   snapshotScale.value = next;
+}
+
+/** 以指定锚点缩放：因子>1 放大、<1 缩小，限制 [0.2, 10]；锚点下的图像点保持屏幕位置不变 */
+function zoomSnapshot(factor: number, centerX?: number, centerY?: number) {
+  const next = Math.min(10, Math.max(0.2, snapshotScale.value * factor));
+  if (next === snapshotScale.value) return;
+  applyZoom(next, centerX, centerY);
 }
 
 /** 快照滚轮缩放（以鼠标为锚点） */
