@@ -425,6 +425,22 @@ export function setupWebSocket(
           case 'network-body': {
             /** 设备返回完整 body（懒加载响应），转发给订阅该设备的控制台 */
             if (!device) return
+            /**
+             * 服务端防线：单条 body 超过硬上限就拒发。
+             * SDK 层有同款限制，但设备可能跑旧版 SDK 或被恶意仿冒——
+             * 不能信任采集端已裁剪；否则一个超大帧能把所有订阅控制台的
+             * 解析和 Vue 响应式状态一起拖崩（MAX_BUFFERED 只在超时后才踢线）。
+             */
+            const bodyText = msg.body
+            if (typeof bodyText !== 'string' || bodyText.length > NETWORK_BODY_HARD_MAX) {
+              broadcast(deviceId, {
+                type: 'network-body',
+                deviceId,
+                bodySeq: msg.bodySeq,
+                body: `[body 过大或类型非法，服务端拒发：${typeof bodyText === 'string' ? `${bodyText.length} 字符` : typeof bodyText}]`,
+              })
+              break
+            }
             broadcast(deviceId, { type: 'network-body', deviceId, bodySeq: msg.bodySeq, body: msg.body })
             break
           }
@@ -633,6 +649,14 @@ export function getUrlFromSocket(silk: SilkWs): string {
 
 /** SilkWs → 连接 URL（upgrade 阶段由 index.ts 注册） */
 const socketUrls = new WeakMap<SilkWs, string>()
+
+/**
+ * 单条 network body 转发硬上限（字符数）
+ *
+ * SDK 侧有同款限制（BODY_HARD_MAX），但设备可能跑旧版 SDK 或被恶意仿冒，
+ * 服务端必须有自己的防线：超限帧直接替换为提示文本转发。
+ */
+const NETWORK_BODY_HARD_MAX = 2 * 1024 * 1024
 
 /** 注册连接 URL（upgrade 阶段调用，open 回调前） */
 export function registerSocketUrl(silk: SilkWs, url: string): void {

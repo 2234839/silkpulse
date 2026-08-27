@@ -35,6 +35,13 @@ const BODY_STORE_MAX = 200
 
 /** 内联推送阈值：小于此值直接完整推送，大于此值走懒加载 */
 const BODY_INLINE_MAX = 512 * 1024
+/**
+ * 单条 body 硬上限：超过此值的懒加载存储也只存前段
+ *
+ * 没有它时任意大的响应体会完整驻留设备内存（bodyStore 无字节限制，
+ * 只限条数），一个几十 MB 的下载/上传就能撑爆嵌入式页面或触发 OOM。
+ */
+const BODY_HARD_MAX = 2 * 1024 * 1024
 /** 懒加载摘要长度（大 body 推送时只带这么多字符预览） */
 const BODY_SUMMARY_LEN = 500
 /** 单个 header 值最大截断长度 */
@@ -51,8 +58,12 @@ function processBody(seqNum: number, fullBody: string): { body: string; truncate
   if (fullBody.length <= BODY_INLINE_MAX) {
     return { body: fullBody, truncated: false }
   }
-  /** 大 body：存完整，推摘要 */
-  bodyStore.set(seqNum, fullBody)
+  /**
+   * 大 body：只把硬上限内的前段存入懒加载缓存，推摘要。
+   * 超硬上限的部分永久丢弃——调试器不需要完整镜像一个 50MB 的响应体。
+   */
+  const storable = fullBody.length > BODY_HARD_MAX ? fullBody.slice(0, BODY_HARD_MAX) : fullBody
+  bodyStore.set(seqNum, storable)
   if (bodyStore.size > BODY_STORE_MAX) {
     const oldest = bodyStore.keys().next().value
     if (oldest !== undefined) bodyStore.delete(oldest)
