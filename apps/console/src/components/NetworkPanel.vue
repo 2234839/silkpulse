@@ -14,6 +14,7 @@ import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
 import { useResizable } from "../composables/useResizable";
 import ObjectInspector from "./ObjectInspector.vue";
+import SseDurationCell from "./SseDurationCell.vue";
 
 /** 请求列表宽度可拖拽 */
 const { width: listWidth, onDragStart: onListResize } = useResizable({
@@ -25,18 +26,26 @@ const { width: listWidth, onDragStart: onListResize } = useResizable({
 });
 
 /**
- * 每秒刷新的 tick，驱动 SSE open 状态下耗时/大小的动态计算
+ * 详情区每秒 tick：驱动 SSE open 状态下耗时/大小的动态计算
  *
- * SSE 连接持续时间 = 当前时间 - 建连时间，需要持续刷新。
- * SSE 累积大小 = events 数据总和，随事件到达实时增长。
+ * 只在选中了某条请求时推进 now（未选中时定时器空转零重渲染）；
+ * 列表行的 SSE 动态耗时由下方 SseDurationCell 行内组件各自驱动，
+ * 不让每秒 tick 打到整个面板的重渲染上。
  */
 const now = ref(Date.now());
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
-  tickTimer = setInterval(() => {
-    now.value = Date.now();
-  }, 1000);
+  tickTimer = setInterval(onlyWhenDetailOpenTick, 1000);
 });
+/**
+ * 详情区动态耗时的每秒驱动：只在选中了某条请求时推进 now。
+ * selectedSeq 声明在后面（setup 顺序执行），函数体内引用规避 TDZ。
+ */
+function onlyWhenDetailOpenTick() {
+  if (selectedSeq.value !== null) {
+    now.value = Date.now();
+  }
+}
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer);
 });
@@ -146,8 +155,11 @@ function calcDuration(n: NetworkEntry): number {
   if (n.sseState === "open" || (n.sseState === "closed" && n.events?.length)) {
     const start = new Date(n.timestamp).getTime();
     if (n.sseState === "open") {
-      /** 依赖 now tick 驱动每秒刷新 */
-      void now.value;
+      /**
+       * 注意：这里不再依赖全局 now。列表行的每秒刷新由 SseDurationCell
+       * 行内组件驱动；详情区的动态值仍由 now tick 驱动（只作用于选中行）。
+       * 本函数在行渲染时每次取当下时间，结合单元格组件的 tick 实现节拍刷新。
+       */
       return Math.max(0, Date.now() - start);
     }
     /** closed：最后一条事件时间 - start */
@@ -910,9 +922,9 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 :class="
                   calcDuration(n) > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'
                 "
-                :title="calcDuration(n) > SLOW_THRESHOLD ? `慢请求（> ${SLOW_THRESHOLD}ms）` : ''"
               >
-                {{ calcDuration(n) }}ms
+                <!-- open 流式行走行内自驱动单元格（每秒只刷这一格）；其余是静态值 -->
+                <SseDurationCell :entry="n" :duration-ms="calcDuration(n)" />
               </td>
             </tr>
           </tbody>
