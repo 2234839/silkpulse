@@ -136,8 +136,78 @@ function stopScreenShare() {
 const snapshotLoading = ref(false);
 /** 快照图片 URL（blob） */
 const snapshotUrl = ref<string | null>(null);
-/** 快照放大 dialog */
-const snapshotDialogVisible = ref(false);
+
+/** 快照预览缩放倍率（1 = 适应容器） */
+const snapshotScale = ref(1);
+/** 快照拖拽偏移（px，相对居中位置） */
+const snapshotOffset = ref({ x: 0, y: 0 });
+/** 拖拽进行中标志（用于光标与禁用过渡） */
+const snapshotDragging = ref(false);
+
+/** 以快照显示区中心为锚点缩放：因子>1 放大、<1 缩小，限制 [0.2, 10] */
+function zoomSnapshot(factor: number, centerX?: number, centerY?: number) {
+  const area = screenAreaRef.value;
+  if (!area) return;
+  /** 容器中心（默认锚点） */
+  const rect = area.getBoundingClientRect();
+  const cx = centerX ?? rect.width / 2;
+  const cy = centerY ?? rect.height / 2;
+  const prev = snapshotScale.value;
+  const next = Math.min(10, Math.max(0.2, prev * factor));
+  if (next === prev) return;
+  /** 让锚点下的图像点保持不动：offset' = anchor - (anchor - offset) * (next/prev) */
+  const ratio = next / prev;
+  snapshotOffset.value = {
+    x: cx - (cx - snapshotOffset.value.x) * ratio,
+    y: cy - (cy - snapshotOffset.value.y) * ratio,
+  };
+  snapshotScale.value = next;
+}
+
+/** 快照滚轮缩放（以鼠标为锚点） */
+function onSnapshotWheel(e: WheelEvent) {
+  e.preventDefault();
+  const area = screenAreaRef.value;
+  if (!area) return;
+  const rect = area.getBoundingClientRect();
+  zoomSnapshot(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - rect.left, e.clientY - rect.top);
+}
+
+/** 拖拽会话状态（模块级临时变量，无需响应式） */
+let dragSession: { startX: number; startY: number; baseX: number; baseY: number } | null = null;
+
+/** 开始拖拽快照 */
+function onSnapshotDragStart(e: MouseEvent) {
+  if (snapshotScale.value <= 1) return;
+  dragSession = {
+    startX: e.clientX,
+    startY: e.clientY,
+    baseX: snapshotOffset.value.x,
+    baseY: snapshotOffset.value.y,
+  };
+  snapshotDragging.value = true;
+}
+
+/** 拖拽中：直接映射位移到偏移量 */
+function onSnapshotDragMove(e: MouseEvent) {
+  if (!dragSession) return;
+  snapshotOffset.value = {
+    x: dragSession.baseX + e.clientX - dragSession.startX,
+    y: dragSession.baseY + e.clientY - dragSession.startY,
+  };
+}
+
+/** 结束拖拽 */
+function onSnapshotDragEnd() {
+  dragSession = null;
+  snapshotDragging.value = false;
+}
+
+/** 双击复位缩放与偏移 */
+function resetSnapshotView() {
+  snapshotScale.value = 1;
+  snapshotOffset.value = { x: 0, y: 0 };
+}
 
 /**
  * 截取远端页面当前视口的一次性快照
@@ -236,6 +306,8 @@ watch(
 onUnmounted(() => {
   compositor?.clear();
   compositor = null;
+  window.removeEventListener("mousemove", onSnapshotDragMove);
+  window.removeEventListener("mouseup", onSnapshotDragEnd);
 });
 
 /** 元素诊断信息（server /element/inspect 返回） */
@@ -878,6 +950,9 @@ onMounted(() => {
     loadElementTree();
     fetchSnap(props.deviceId);
   }
+  /** 快照拖拽：鼠标可能移出 img，move/up 挂在 window 上 */
+  window.addEventListener("mousemove", onSnapshotDragMove);
+  window.addEventListener("mouseup", onSnapshotDragEnd);
 });
 </script>
 
@@ -1557,12 +1632,20 @@ onMounted(() => {
               class="max-w-full max-h-full shadow-lg rounded"
               :style="{ objectFit: 'contain' }"
             ></canvas>
-            <!-- 有快照时显示 -->
+            <!-- 有快照时显示：滚轮缩放 + 拖拽 + 双击复位 -->
             <img
               v-else-if="snapshotUrl"
               :src="snapshotUrl"
-              @click="snapshotDialogVisible = true"
-              class="max-w-full max-h-full shadow-lg rounded cursor-zoom-in hover:opacity-90 transition-opacity"
+              class="max-w-full max-h-full shadow-lg rounded select-none"
+              :class="snapshotScale > 1 ? 'cursor-grab' : 'cursor-zoom-in'"
+              :style="{
+                transform: `translate(${snapshotOffset.x}px, ${snapshotOffset.y}px) scale(${snapshotScale})`,
+                transition: snapshotDragging ? 'none' : 'transform 0.15s ease-out',
+              }"
+              :draggable="false"
+              @wheel.prevent="onSnapshotWheel"
+              @mousedown="onSnapshotDragStart"
+              @dblclick="resetSnapshotView"
               alt="页面快照"
             />
             <!-- 空状态 -->
