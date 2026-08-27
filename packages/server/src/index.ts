@@ -131,8 +131,13 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
 
     /** 缓存请求体（项目管理 + 鉴权 API 需要） */
     if (ctx.url.startsWith('/api/projects') || ctx.url.startsWith('/api/auth')) {
-      await readBody(ctx)
+      const { oversize } = await readBody(ctx)
       if (ctx.aborted) return
+      /** 超限（原始超 2MB 或解压后超解压上限）一律回 413 */
+      if (oversize) {
+        writeResponse(ctx, 413, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ error: 'body 超过上限' }))
+        return
+      }
       /** 项目管理 API + 鉴权状态 API */
       if (handleProjectApiRoute(ctx, auth)) return
     }

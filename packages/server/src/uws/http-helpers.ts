@@ -102,10 +102,17 @@ export function readBody(ctx: Ctx): Promise<{ body: string; oversize: boolean }>
       chunks.push(buf)
       if (isLast) {
         const merged = Buffer.concat(chunks)
-        const decompressed = maybeGunzipRequest(
-          { headers: ctx.headers },
-          merged,
-        )
+        /**
+         * 解压可能因 zip bomb 触发 maxOutputLength 的 RangeError，
+         * 恶意请求在这里就地拒绝（413），不让异常冒泡炸掉 onDrain 之外的回调链
+         */
+        let decompressed: Buffer
+        try {
+          decompressed = maybeGunzipRequest({ headers: ctx.headers }, merged)
+        } catch {
+          finish('', true)
+          return
+        }
         ctx.bodyBuf = decompressed
         finish(decompressed.toString('utf-8'), false)
       }
