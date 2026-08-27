@@ -18,6 +18,8 @@ import fs from 'node:fs'
 
 const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8080'
 const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY
+/** 游客/项目密钥——鉴权部署下设备接入用 */
+const PLAYGROUND_KEY = process.env.SILKPULSE_PLAYGROUND_KEY ?? ''
 
 const PASS = '\x1b[32m✓\x1b[0m'
 const FAIL = '\x1b[31m✗\x1b[0m'
@@ -87,14 +89,19 @@ async function waitDevice(urlHint, timeoutMs = 20000) {
   return null
 }
 
-/** 动态注入 SDK（后注入动作本体） */
+/** 动态注入 SDK（后注入动作本体）。鉴权部署下需带 data-api-key/data-project-id
+ *  （714a2bc 后设备接入必须自持密钥，服务端不再代发） */
 async function injectSDK(page) {
-  await page.evaluate((origin) => {
+  await page.evaluate((origin, apiKey) => {
     const s = document.createElement('script')
     s.src = `${origin}/sdk.js`
     s.dataset.server = origin
+    if (apiKey) {
+      s.dataset.apiKey = apiKey
+      s.dataset.projectId = 'cs_playground'
+    }
     document.head.appendChild(s)
-  }, SERVER)
+  }, SERVER, PLAYGROUND_KEY)
 }
 
 /** 逐 case 启独立浏览器（独立 profile → 独立 localStorage → 独立持久设备 id，
@@ -111,7 +118,10 @@ async function launchCase() {
   return puppeteer.launch({
     executablePath: detectChromium(),
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(profileDir, `matrix-${caseSeq}`)}`],
+    /** LocalNetworkAccessChecks：Chrome 146 默认启用的本地网络访问检查会把
+     *  测试页早期发起的 ws://localhost 连接误拦（ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS）
+     *  ——本地测试环境必须关闭 */
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-features=LocalNetworkAccessChecks', `--user-data-dir=${path.join(profileDir, `matrix-${caseSeq}`)}`],
   })
 }
 
@@ -135,17 +145,22 @@ async function runCase(cfg) {
           headers: req.headers(),
         }).catch(() => {})
       })
-      await page.evaluateOnNewDocument((origin) => {
+      await page.evaluateOnNewDocument((origin, apiKey) => {
         /** document_start 时 head/body 均可能为 null——监听首个元素落地再插 */
         const inject = () => {
           const s = document.createElement('script')
           s.src = `${origin}/sdk.js`
           s.dataset.server = origin
+          /** 鉴权部署下设备接入凭据（调用方自持密钥） */
+          if (apiKey) {
+            s.dataset.apiKey = apiKey
+            s.dataset.projectId = 'cs_playground'
+          }
           ;(document.head ?? document.documentElement).appendChild(s)
         }
         if (document.documentElement) inject()
         else document.addEventListener('readystatechange', () => document.readyState !== 'loading' && inject(), { once: true })
-      }, SERVER)
+      }, SERVER, PLAYGROUND_KEY)
       await page.goto(cfg.url, { waitUntil: 'networkidle0' })
     } else {
       await page.goto(cfg.url, { waitUntil: 'networkidle0' })

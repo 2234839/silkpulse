@@ -12,6 +12,10 @@ const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8081'
 /** 鉴权模式：所有 API fetch 带超管密钥（与压测脚本同款约定） */
 const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY ?? ''
 const AUTH_HEADERS = ADMIN_KEY ? { Authorization: `Bearer ${ADMIN_KEY}` } : {}
+/** 游客/项目密钥 —— 714a2bc 安全修复后 /demo 不再自动注入超管密钥，设备接入需显式传参 */
+const PLAYGROUND_KEY = process.env.SILKPULSE_PLAYGROUND_KEY ?? ADMIN_KEY
+/** 带密钥的 /demo 地址（调用方自持密钥接入） */
+const DEMO_URL = `${SERVER}/demo?apiKey=${encodeURIComponent(PLAYGROUND_KEY)}&projectId=cs_playground`
 
 /** 带鉴权的 API fetch */
 async function apiFetch(path, init = {}) {
@@ -55,6 +59,11 @@ async function fetchDevicesResponse() {
   return (await apiFetch('/api/devices')).json()
 }
 
+/** 环境基线：测试开始前已在线的设备 id 集合（如开发者浏览器挂着的 /demo 页签）。
+ *  后续 waitForDemoDevice 只认「新增」设备——否则会把真实页签误认成本测试的设备，
+ *  数据打到别的会话上导致大量假失败。模块级声明供各等待函数闭包引用。 */
+const baselineDeviceIds = new Set()
+
 async function waitForDevice(timeoutMs = 10000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -67,13 +76,16 @@ async function waitForDevice(timeoutMs = 10000) {
   return null
 }
 
-/** 等待本测试打开的 /demo 页设备上线（排除环境里挂着的其他真实设备会话） */
-async function waitForDemoDevice(timeoutMs = 10000) {
+/** 等待指定 id 的设备上线（expectedId 来自页面 sessionStorage，保证选中的是本测试自己的无头浏览器会话）。
+ *  期望 id 为空时回退：匹配本测试新增的 /demo 设备（排除基线）。 */
+async function waitForDemoDevice(expectedId, timeoutMs = 10000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
       const devices = await fetchDevices()
-      const demo = devices.find((d) => d.url.includes('/demo'))
+      const demo = expectedId
+        ? devices.find((d) => d.id === expectedId)
+        : devices.find((d) => d.url.includes('/demo') && !baselineDeviceIds.has(d.id))
       if (demo) return demo
     } catch {}
     await new Promise((r) => setTimeout(r, 300))
@@ -83,6 +95,7 @@ async function waitForDemoDevice(timeoutMs = 10000) {
 
 async function main() {
   console.log('启动无头浏览器...')
+  try { for (const id of await fetchDevices()) baselineDeviceIds.add(id) } catch {}
   const browser = await puppeteer.launch({
     executablePath: CHROMIUM,
     headless: true,
@@ -138,16 +151,18 @@ async function main() {
     /** 2. 测试页注入 SDK → 自动连接（同源加载，network 采集不受跨域影响） */
     const testPage = await browser.newPage()
     testPage.on('pageerror', (e) => console.log('  [pageerror]', e.message))
-    await testPage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+    await testPage.goto(DEMO_URL, { waitUntil: 'networkidle0', timeout: 15000 })
+    /** 页面内 SDK 会话 id —— 精确锁定本测试打开的那台设备 */
+    const pageDeviceId = await testPage.evaluate(() => sessionStorage.getItem('__silkpulse_device_id__')).catch(() => null)
 
     /**
      * 选「本测试自己打开的 /demo 页」对应的那台设备。
      * 环境里可能同时挂着其他真实设备的会话（如开发者浏览器里开着的测试页），
      * waitForDevice 取列表第一台会误连外部设备，导致后续 exec 找不到元素。
      */
-    const device = await waitForDemoDevice()
+    const device = await waitForDemoDevice(pageDeviceId)
     if (device) ok(`SDK 连接成功，设备上线: title="${device.title}", url=${device.url.slice(0, 40)}`)
-    else { fail('SDK 未连接，/demo 设备未出现'); throw new Error('abort') }
+    else { fail(`SDK 未连接，/demo 设备未出现（pageDeviceId=${pageDeviceId ?? 'null'}）`); throw new Error('abort') }
 
     /** 2.1 设备类型识别（desktop/tablet/mobile） */
     if (device.deviceType === 'desktop') ok(`设备类型识别正确: ${device.deviceType}`)
@@ -579,14 +594,14 @@ async function main() {
     {
       /** 开独立 page 作为待下线设备 */
       const execOfflinePage = await browser.newPage()
-      await execOfflinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+      await execOfflinePage.goto(DEMO_URL, { waitUntil: 'networkidle0', timeout: 15000 })
       await new Promise((r) => setTimeout(r, 1500))
       /** 从页面拿 SDK 会话 id（避免误选其他在线设备，exec 挂错设备会等到超时） */
       const execOfflineId = await execOfflinePage.evaluate(() => sessionStorage.getItem('__silkpulse_device_id__')).catch(() => null)
       const allDevs = await fetchDevices()
-      /** 优先按 id 精确匹配；回退最新接入（保底） */
-      const execOfflineDev = allDevs.find((d) => execOfflineId && d.id === execOfflineId) ?? allDevs[allDevs.length - 1]
-      if (!execOfflineDev) { fail('掉线 exec 测试前置失败：无设备') }
+      /** 从页面拿 SDK 会话 id，只精确匹配——回退会误打到别的在线设备上 */
+      const execOfflineDev = allDevs.find((d) => execOfflineId && d.id === execOfflineId)
+      if (!execOfflineDev) { fail('掉线 exec 测试前置失败：目标设备未在列表中') }
       else {
 
       /** 发起挂起 exec（不 await），立即关闭设备 page 触发 WS 断开 */
@@ -1017,7 +1032,7 @@ async function main() {
 
     /** 10. 多设备并发 —— 再开第二个 /demo 页面（同源，第二个设备） */
     const testPage2 = await browser.newPage()
-    await testPage2.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+    await testPage2.goto(DEMO_URL, { waitUntil: 'networkidle0', timeout: 15000 })
     await new Promise((r) => setTimeout(r, 1000))
     const devicesList = await fetchDevices()
     if (devicesList.length >= 2) {
@@ -1078,7 +1093,9 @@ async function main() {
 
     /** 12. bookmarklet 注入 —— 拉取 bookmarklet，在真实页面执行，验证新设备上线 */
     const beforeCount = (await fetchDevices()).length
-    const bookmarklet = await (await fetch(`${SERVER}/inject/bookmarklet`)).text()
+    /** 带 apiKey/project_id 时凭证内嵌进 bookmarklet 代码（鉴权部署下唯一正确的注入方式）；无密钥部署则不带参数 */
+  const credQuery = PLAYGROUND_KEY ? `?api_key=${encodeURIComponent(PLAYGROUND_KEY)}&project_id=cs_playground` : ''
+  const bookmarklet = await (await fetch(`${SERVER}/inject/bookmarklet${credQuery}`)).text()
     /** bookmarklet 形如 javascript:<encoded>，解码后在目标页面执行 */
     const bmCode = decodeURIComponent(bookmarklet.replace(/^javascript:/, ''))
     const bmPage = await browser.newPage()
@@ -1210,14 +1227,13 @@ async function main() {
     {
       /** 开一个独立 page 作为待下线设备（记下 page 内 SDK 的 deviceId，避免误选其他设备） */
       const offlinePage = await browser.newPage()
-      await offlinePage.goto(`${SERVER}/demo`, { waitUntil: 'networkidle0', timeout: 15000 })
+      await offlinePage.goto(DEMO_URL, { waitUntil: 'networkidle0', timeout: 15000 })
       /** 从页面拿当前 SDK 会话 id（SDK 存 sessionStorage.__silkpulse_device_id__），无则回退 url 匹配 */
       const pageDevId = await offlinePage.evaluate(() => (sessionStorage.getItem('__silkpulse_device_id__') ?? null)).catch(() => null)
       await new Promise((r) => setTimeout(r, 1500))
       const offlineDevs = await fetchDevices()
-      /** 优先按 id 匹配；回退：url 含 /demo 且不等于 testPage 那台 */
+      /** 只精确匹配页面自己的 SDK 会话 id——回退会误打到别的在线设备上 */
       const offlineDev = offlineDevs.find((d) => pageDevId && d.id === pageDevId)
-        ?? offlineDevs.find((d) => d.url.includes('/demo') && d.id !== device.id)
       /** close page 触发 WS 断开 → server 有 5s 下线宽限期（防 reload 抖动），须等满宽限期后才真正下线 */
       await offlinePage.close()
       await new Promise((r) => setTimeout(r, 6500))
@@ -2441,9 +2457,13 @@ async function main() {
         }
       })
       await new Promise((r) => setTimeout(r, 300))
-      /** 搜索后行数统计应显示 */
+      /** 搜索后行数统计应显示（限定在 Snapshot 面板工具栏内找徽标——
+       *  DeviceList 的在线时长徽标用了相同类名组合 .text-faint.whitespace-nowrap，
+       *  全局 querySelector 会撞上左侧设备列表先渲染的「· desktop 800×600」） */
       const searchState = await consolePage.evaluate(() => {
-        const lineBadge = document.querySelector('.text-faint.whitespace-nowrap')
+        const input = document.querySelector('input[placeholder*="搜索快照"]')
+        const toolbar = input?.closest('div')
+        const lineBadge = toolbar?.querySelector('.text-faint.whitespace-nowrap')
         const pre = document.querySelector('.flex-1.overflow-auto pre, .flex-1.overflow-y-auto.p-4 pre')
         return {
           lineText: lineBadge ? lineBadge.textContent.trim() : '',

@@ -18,8 +18,10 @@ import { execSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 
-const SERVER = 'http://localhost:8080'
+const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8080'
 const KEY = process.env.SILKPULSE_ADMIN_KEY
+/** 游客/项目密钥——鉴权部署下设备接入用（714a2bc 后必须自持密钥） */
+const PLAYGROUND_KEY = process.env.SILKPULSE_PLAYGROUND_KEY ?? ''
 
 async function execOn(devId, code) {
   const res = await fetch(`${SERVER}/api/devices/${devId}/exec`, {
@@ -49,7 +51,9 @@ async function runCase(name, url, preInject) {
   console.log(`\n■ ${name}`)
   const b = await puppeteer.launch({
     executablePath: chrom, headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(os.homedir(), `snap/chromium/common/tmp-profiles/rv-${Date.now()}`)}`],
+    /** --disable-features=LocalNetworkAccessChecks：Chrome 146 拦截 mock 文档
+     *  发起的 ws://localhost 连接（ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS） */
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-features=LocalNetworkAccessChecks', `--user-data-dir=${path.join(os.homedir(), `snap/chromium/common/tmp-profiles/rv-${Date.now()}`)}`],
   })
   const page = await b.newPage()
   let pass = 0, failCount = 0
@@ -57,15 +61,43 @@ async function runCase(name, url, preInject) {
   const fail = (m, d = '') => { failCount++; console.log(`  ✗ ${m}${d ? ' ' + d : ''}`) }
   try {
     if (preInject) {
+      /** 先注入：react-vite-post.html 静态页内嵌的 sdk script 无法携带密钥
+       *  （密钥不能进仓库/产物），拦截文档响应、给 <script src="/sdk.js"> 标签
+       *  补上 data-api-key/data-project-id（714a2bc 后设备接入必须自持密钥），
+       *  SDK 仍由页面自身在 document_start 语义下加载——先注入时序不变。 */
+      await page.setRequestInterception(true)
+      page.on('request', (req) => {
+        const proceed = () => { req.continue({ headers: req.headers() }).catch(() => {}) }
+        if (req.resourceType() === 'document' && req.url().includes('react-vite-post')) {
+          /** 用 fetch 拿原始 HTML，改写后 mock 响应（request.response() 在
+           *  continue 前为 null，不可用） */
+          fetch(req.url())
+            .then((res) => res.text())
+            .then((html) => {
+              const patched = html.replace(
+                '<script src="/sdk.js" data-server="http://localhost:8080"></script>',
+                `<script src="/sdk.js" data-server="${SERVER}"${PLAYGROUND_KEY ? ` data-api-key="${PLAYGROUND_KEY}" data-project-id="cs_playground"` : ''}></script>`,
+              )
+              req.respond({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body: patched }).catch(() => {})
+            })
+            .catch(proceed)
+        } else {
+          proceed()
+        }
+      })
       await page.goto(url, { waitUntil: 'networkidle0' })
     } else {
       await page.goto(url, { waitUntil: 'networkidle0' })
-      await page.evaluate((origin) => {
+      await page.evaluate((origin, apiKey) => {
         const s = document.createElement('script')
         s.src = `${origin}/sdk.js`
         s.dataset.server = origin
+        if (apiKey) {
+          s.dataset.apiKey = apiKey
+          s.dataset.projectId = 'cs_playground'
+        }
         document.head.appendChild(s)
-      }, SERVER)
+      }, SERVER, PLAYGROUND_KEY)
     }
     /** 等设备注册 */
     let dev = null

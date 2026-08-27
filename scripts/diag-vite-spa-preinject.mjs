@@ -10,8 +10,10 @@ import { execSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 
-const SERVER = 'http://localhost:8080'
+const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8080'
 const KEY = process.env.SILKPULSE_ADMIN_KEY
+/** 游客/项目密钥——鉴权部署下设备接入用（714a2bc 后必须自持密钥） */
+const PLAYGROUND_KEY = process.env.SILKPULSE_PLAYGROUND_KEY ?? ''
 
 async function execOn(devId, code) {
   const res = await fetch(`${SERVER}/api/devices/${devId}/exec`, {
@@ -35,21 +37,28 @@ if (!chrom) for (const n of ['chromium-browser', 'chromium', 'google-chrome']) {
 }
 const b = await puppeteer.launch({
   executablePath: chrom, headless: true,
-  args: ['--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(os.homedir(), 'snap/chromium/common/tmp-profiles/vite-spa-test')}`],
+  /** --disable-features=LocalNetworkAccessChecks：Chrome 146 拦截测试页早期
+   *  发起的 ws://localhost 连接（ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS） */
+  args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-features=LocalNetworkAccessChecks', `--user-data-dir=${path.join(os.homedir(), 'snap/chromium/common/tmp-profiles/vite-spa-test')}`],
 })
 const page = await b.newPage()
 
 /** 先注入：document_start 阶段插 SDK script（等价真实 PWA 的 <head> script 标签） */
-await page.evaluateOnNewDocument((origin) => {
+await page.evaluateOnNewDocument((origin, apiKey) => {
   const inject = () => {
     const s = document.createElement('script')
     s.src = `${origin}/sdk.js`
     s.dataset.server = origin
+    /** 鉴权部署下设备接入凭据（调用方自持密钥） */
+    if (apiKey) {
+      s.dataset.apiKey = apiKey
+      s.dataset.projectId = 'cs_playground'
+    }
     ;(document.head ?? document.documentElement).appendChild(s)
   }
   if (document.documentElement) inject()
   else document.addEventListener('readystatechange', () => document.readyState !== 'loading' && inject(), { once: true })
-}, SERVER)
+}, SERVER, PLAYGROUND_KEY)
 
 /** 目标页 = console 自身（真实 Vue vite build SPA） */
 await page.goto(`${SERVER}/?tab=devtools`, { waitUntil: 'networkidle0' })
