@@ -49,7 +49,7 @@ export type ProjectPublic = Omit<Project, 'apiKeyHash' | 'apiKeySalt'>
 /** 鉴权上下文（附加到 req 上） */
 export interface AuthContext {
   /** 鉴权身份类型：admin=超管 | project=项目密钥 | device=设备WS（无密钥，可被管理端查看） | anonymous=未鉴权 */
-  role: 'admin' | 'project' | 'device' | 'anonymous'
+  role: 'admin' | 'project' | 'anonymous'
   /** 项目 ID（role='project' 时有值，admin 可访问所有项目） */
   projectId?: string
 }
@@ -415,8 +415,6 @@ export class AuthManager {
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
   authorizeWsConnection(url: string, wsPath: string): AuthContext {
-    const projectId = extractQueryParam(url, 'projectId')
-
     // 未启用鉴权：允许匿名
     if (!this.isAuthEnabled()) return { role: 'admin' }
 
@@ -434,19 +432,14 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
-    // 连接数天然受 server 容量约束（WS 每连接有内存开销，超载时背压机制兜底）
+    // 设备 WebSocket：鉴权模式下必须凭有效项目密钥接入
     if (wsPath === '/ws/device') {
-      /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
-      if (projectId) {
-        /** 验证 projectId 是否存在且启用 */
-        const proj = this.projects.get(projectId)
-        if (proj?.enabled) {
-          return { role: 'project', projectId }
-        }
-      }
-      /** 无 projectId 的设备也允许接入（role=device，可被所有管理员看到） */
-      return { role: 'device' }
+      const token = extractQueryParam(url, 'apiKey')
+      if (!token) return { role: 'anonymous' }
+      /** projectId 一律从密钥反查，不信任 query 参数（防伪造归属项目） */
+      const pid = this.projects.verifyKey(token)
+      if (pid) return { role: 'project', projectId: pid }
+      return { role: 'anonymous' }
     }
 
     return { role: 'anonymous' }

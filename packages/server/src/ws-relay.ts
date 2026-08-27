@@ -40,7 +40,6 @@ export function setupWebSocket(
   auth: { authorizeWsConnection: (url: string, wsPath: string) => AuthContext; isAuthEnabled: () => boolean }
 ): { behavior: WebSocketBehavior<WsUserData>; notifyDeviceListChanged: () => void } {
   /** 每个 WS 连接对应的设备 ID（设备端）或订阅集合（控制台端） */
-  const deviceSockets = new Map<SilkWs, Device>()
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
   const consoleSubscriptions = new Map<SilkWs, Set<string>>()
   const deviceWatchers = new Map<string, Set<SilkWs>>()
@@ -254,7 +253,6 @@ export function setupWebSocket(
               return
             }
             device = registered
-            deviceSockets.set(silk, device)
             /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
             broadcast(deviceId, {
               type: 'device-online',

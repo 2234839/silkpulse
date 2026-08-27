@@ -99,7 +99,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
     ...behavior,
     open: (ws) => {
       const data = ws.getUserData() as WsUserData & { authCtx?: AuthContext; url?: string }
-      const silk = new SilkWs(ws, data.authCtx ?? { role: 'device' })
+      const silk = new SilkWs(ws, data.authCtx ?? { role: 'anonymous' })
       data.silk = silk
       registerSocketUrl(silk, data.url ?? '/')
       behavior.open?.(ws)
@@ -245,14 +245,15 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
       const injHost = ctx.headers['host'] || `localhost:${port}`
       const injProto = ctx.headers['x-forwarded-proto'] || 'http'
       const origin = `${injProto}://${injHost}`
-      /** 可选：携带 project_id 查询参数，拼入 inject 代码（设备端不需要密钥） */
+      /** 可选：携带 project_id/api_key 查询参数，拼入 inject 代码（鉴权部署下设备需凭密钥接入） */
       const projectId = url.searchParams.get('project_id') ?? undefined
+      const apiKey = url.searchParams.get('api_key') ?? undefined
       if (pathname === '/inject/iife') {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId, apiKey))
       } else if (pathname === '/inject/bookmarklet') {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/plain; charset=utf-8' }, buildBookmarklet(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/plain; charset=utf-8' }, buildBookmarklet(origin, projectId, apiKey))
       } else {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, buildUserscript(origin, projectId))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, buildUserscript(origin, projectId, apiKey))
       }
       return
     }
@@ -459,13 +460,14 @@ function controlUnavailableHtml(): string {
 /**
  * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
  * 防重复注入（同页面多次点 bookmarklet 只生效一次）
- * 鉴权模式下携带 projectId 标记设备归属（不需要密钥，密钥不暴露到设备端）
+ * 鉴权部署下同时拼入 data-api-key + data-project-id（设备接入需凭项目密钥）
  */
-function injectScriptCode(origin: string, projectId?: string): string {
+function injectScriptCode(origin: string, projectId?: string, apiKey?: string): string {
   /** 动态拼 data-* 属性 */
   const dataAttrs = [
     `s.dataset.server='${origin}'`,
     projectId ? `s.dataset.projectId='${projectId}'` : '',
+    apiKey ? `s.dataset.apiKey='${apiKey}'` : '',
   ].filter(Boolean).join(';')
   return `(function(){var k='__silkpulse_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
 }
@@ -473,8 +475,8 @@ function injectScriptCode(origin: string, projectId?: string): string {
 /**
  * 构建 bookmarklet —— 拖到书签栏，在任意页面点击即注入
  */
-function buildBookmarklet(origin: string, projectId?: string): string {
-  const code = injectScriptCode(origin, projectId)
+function buildBookmarklet(origin: string, projectId?: string, apiKey?: string): string {
+  const code = injectScriptCode(origin, projectId, apiKey)
   /** bookmarklet 需要 URL 编码特殊字符 */
   return `javascript:${encodeURIComponent(code)}`
 }
@@ -482,8 +484,8 @@ function buildBookmarklet(origin: string, projectId?: string): string {
 /**
  * 构建 Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入
  */
-function buildUserscript(origin: string, projectId?: string): string {
-  const code = injectScriptCode(origin, projectId)
+function buildUserscript(origin: string, projectId?: string, apiKey?: string): string {
+  const code = injectScriptCode(origin, projectId, apiKey)
   return `// ==UserScript==
 // @name         silkpulse 远程调试注入
 // @namespace    silkpulse

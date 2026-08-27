@@ -147,8 +147,13 @@ export interface InitOptions {
   tags?: string[]
   /** 预设备注（一句话描述设备身份） */
   note?: string
-  /** 项目 ID（标记设备归属哪个项目，设备端无需密钥） */
+  /** 项目 ID（标记设备归属哪个项目；鉴权部署下由 server 从密钥反查注入） */
   projectId?: string
+  /**
+   * 项目 API Key（鉴权部署下设备接入凭据）
+   * 注入方式：<script data-api-key="...">；未启用鉴权的 server 可省略
+   */
+  apiKey?: string
 }
 
 
@@ -299,10 +304,11 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   let info = collectDeviceInfo(deviceId, options.tags, options.note)
 
   /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port
-   *  设备端只携带 projectId 标记归属，不需要密钥（密钥不暴露到设备端） */
+   *  鉴权部署下携带 apiKey（server 反查项目归属）；未启用鉴权时无感 */
   const wsBase = options.server.replace(/^http/, 'ws').replace(/\/$/, '')
   const wsParams = new URLSearchParams()
   if (options.projectId) wsParams.set('projectId', options.projectId)
+  if (options.apiKey) wsParams.set('apiKey', options.apiKey)
   const queryStr = wsParams.toString()
   const wsUrl = `${wsBase}/ws/device${queryStr ? '?' + queryStr : ''}`
 
@@ -532,10 +538,11 @@ function autoInit(): void {
   const tagsRaw = script?.dataset.tags ?? ''
   const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
   const note = script?.dataset.note || undefined
-  /** 项目归属：data-project-id */
+  /** 项目归属：data-project-id；鉴权凭据：data-api-key（enabled 部署必填） */
   const projectId = script?.dataset.projectId || undefined
+  const apiKey = script?.dataset.apiKey || undefined
 
-  const start = () => init({ server, tags, note, projectId })
+  const start = () => init({ server, tags, note, projectId, apiKey })
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start)
   } else {
