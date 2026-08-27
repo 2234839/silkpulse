@@ -33,7 +33,9 @@ export function collectBuildInfo(cwd: string): BuildInfo {
   return {
     commit: gitCmd("rev-parse HEAD", cwd) ?? "unknown",
     branch: gitCmd("rev-parse --abbrev-ref HEAD", cwd) ?? "",
-    dirty: (gitCmd("status --porcelain", cwd) ?? "").length > 0,
+    // 排除 .codegraph（codegraph 索引自带 .gitignore 会随索引波动，
+    // 把工具自身的元数据算进 dirty 会污染版本指纹）
+    dirty: (gitCmd("status --porcelain -- . ':!.codegraph'", cwd) ?? "").length > 0,
     buildAt: new Date().toISOString(),
   };
 }
