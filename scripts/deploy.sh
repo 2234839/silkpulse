@@ -78,8 +78,10 @@ fi
 
 # 资产 MIME 校验：状态码会骗人——SPA 回退把 /assets/* 响应成 200 的 text/html，
 # 只有 Content-Type 能识别这种「看起来正常实则白屏」的错位（见 deploy-workflow.md 2026-08-27 教训）
+# 注意 Vite 的 js/css entry hash 不同，必须分别从 index.html 提取真实文件名
 for ext in js css; do
-  ASSET_URL="$DEPLOY_SITE_URL/assets/${LOCAL_HASH%.js}.$ext"
+  ENTRY=$(grep -o "assets/index-[^\"]*\.$ext" packages/server/public/index.html | head -1)
+  ASSET_URL="$DEPLOY_SITE_URL/$ENTRY"
   MIME=$(curl -sI "$ASSET_URL" | grep -i '^content-type:' | tail -1)
   case "$ext:$MIME" in
     js:*javascript*) ;;
