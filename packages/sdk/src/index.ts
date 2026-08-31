@@ -147,7 +147,7 @@ export interface InitOptions {
   tags?: string[]
   /** 预设备注（一句话描述设备身份） */
   note?: string
-  /** 项目 ID（设备接入凭据：项目存在且启用即放行；控制台权限归项目密钥管，与设备无关） */
+  /** 项目 ID（标记设备归属哪个项目，设备端无需密钥） */
   projectId?: string
 }
 
@@ -299,7 +299,7 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   let info = collectDeviceInfo(deviceId, options.tags, options.note)
 
   /** 拼 WS 地址：server 可能是 http://host:port 或 ws://host:port
-   *  设备接入凭 projectId（公开标识，可随注入代码外发；项目存在且启用即放行） */
+   *  设备端只携带 projectId 标记归属，不需要密钥（密钥不暴露到设备端） */
   const wsBase = options.server.replace(/^http/, 'ws').replace(/\/$/, '')
   const wsParams = new URLSearchParams()
   if (options.projectId) wsParams.set('projectId', options.projectId)
@@ -532,7 +532,7 @@ function autoInit(): void {
   const tagsRaw = script?.dataset.tags ?? ''
   const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
   const note = script?.dataset.note || undefined
-  /** 项目归属：data-project-id（鉴权部署下的设备接入凭据，公开标识非密钥） */
+  /** 项目归属：data-project-id */
   const projectId = script?.dataset.projectId || undefined
 
   const start = () => init({ server, tags, note, projectId })

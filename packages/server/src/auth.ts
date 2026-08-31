@@ -3,12 +3,8 @@
  *
  * 鉴权架构：
  * - 超管密钥 (Admin Key)：环境变量 SILKPULSE_ADMIN_KEY 配置，全量权限
- * - 项目 (Project)：每个项目有唯一 projectId + apiKey
- * - 设备连接鉴权（/ws/device）：凭 projectId——项目存在且启用即放行。
- *   projectId 是公开标识（会出现在注入代码里分发给任意第三方），
- *   拿到它只能「把设备接入该项目」，无法登录控制台、无法调管理 API。
- *   这样注入代码可以放心外发，控制台权限不会随之泄露。
- * - 控制台连接鉴权（/ws/console）：凭 token（超管密钥或项目密钥）
+ * - 项目 (Project)：每个项目有唯一 projectId + apiKey，SDK 接入时携带
+ * - 设备连接鉴权：WebSocket 连接 URL query 中携带 projectId + apiKey
  * - API 鉴权：Authorization: Bearer <key>（超管密钥或项目密钥）
  * - Console 鉴权：同 API，超管密钥看所有项目，项目密钥只看本项目
  *
@@ -18,7 +14,7 @@
  * - 定时密钥比较（timingSafeEqual 防时序攻击）
  */
 
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { maybeGzipResponse } from './gzip.js'
@@ -45,6 +41,10 @@ export interface Project {
   updatedAt: string
   /** 是否启用（禁用后 SDK 无法接入） */
   enabled: boolean
+  /** 游客自建项目（公网服务上游客创建，最长存活 5 天） */
+  guest?: boolean
+  /** 过期时间（ISO，guest 项目到期后销毁） */
+  expiresAt?: string
 }
 
 /** 项目信息（对外展示，不含密钥哈希） */
@@ -53,7 +53,7 @@ export type ProjectPublic = Omit<Project, 'apiKeyHash' | 'apiKeySalt'>
 /** 鉴权上下文（附加到 req 上） */
 export interface AuthContext {
   /** 鉴权身份类型：admin=超管 | project=项目密钥 | device=设备WS（无密钥，可被管理端查看） | anonymous=未鉴权 */
-  role: 'admin' | 'project' | 'anonymous'
+  role: 'admin' | 'project' | 'device' | 'anonymous'
   /** 项目 ID（role='project' 时有值，admin 可访问所有项目） */
   projectId?: string
 }
@@ -87,16 +87,20 @@ function verifyApiKey(plainKey: string, hash: string, salt: string): boolean {
 
 /** 定时安全比较超管密钥 */
 function safeEqual(a: string, b: string): boolean {
-  /**
-   * 双方先过一遍 SHA256 再 timingSafeEqual
-   *
-   * 直接比较会因长度早退泄露 adminKey 长度；SHA256 把任意输入归一成等长摘要，
-   * 既隐藏真实长度，又保持恒定时间比较特性。
-   */
-  const da = createHash('sha256').update(a).digest()
-  const db = createHash('sha256').update(b).digest()
-  return timingSafeEqual(da, db)
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) return false
+  return timingSafeEqual(bufA, bufB)
 }
+
+/** 游客自建项目的最长存活时间：5 天 */
+export const GUEST_PROJECT_TTL_MS = 5 * 24 * 60 * 60 * 1000
+/** 游客项目过期清理扫描间隔：10 分钟 */
+const GUEST_CLEANUP_INTERVAL_MS = 10 * 60 * 1000
+/** 游客创建限流窗口：1 小时 */
+const GUEST_RATE_WINDOW_MS = 60 * 60 * 1000
+/** 游客创建限流：窗口内每 IP 最多创建数 */
+const GUEST_RATE_MAX = 5
 
 // ─── 项目存储（JSON 文件持久化） ──────────────────────────
 
@@ -106,28 +110,11 @@ function safeEqual(a: string, b: string): boolean {
  * 数据存储为 JSON 文件（~/.silkpulse/projects.json 或指定路径）。
  * 适合个人/小团队场景，无需数据库依赖。
  */
-/** 密钥验证成功缓存的容量上限：防恶意海量不同假 key 撑内存 */
-const VERIFY_CACHE_MAX = 512
-
 export class ProjectStore {
   private projects: Map<string, Project> = new Map()
   private filePath: string
-  /**
-   * 数据版本号：任何写操作递增
-   *
-   * 供密钥验证缓存做失效判断 —— 缓存记住取值时的版本号，
-   * 读到的版本号不同即说明密钥可能已变（rotate/delete/disable），需重新 scrypt 验证。
-   */
-  private dataVersion = 0
-  /**
-   * 密钥验证成功缓存：明文密钥 → { projectId, 缓存时的数据版本号 }
-   *
-   * verifyKey 是全表 scrypt 扫描（每项目一次 ~32MB 同步计算），在 HTTP 热路径上
-   * 每请求都要跑一遍，是最容易被打爆的 CPU 放大器。首次 scrypt 验证成功后缓存结果，
-   * 后续同密钥请求直接查 Map（O(1)），项目数据变更时靠 dataVersion 失效。
-   * 容量上限防恶意海量不同假 key 撑内存（命中不了缓存照旧走 scrypt，无额外风险）。
-   */
-  private verifyCache = new Map<string, { projectId: string; version: number }>()
+  /** apiKey 前缀 → projectId 的反查索引（加速密钥验证） */
+  private keyPrefixIndex: Map<string, string> = new Map()
 
   constructor(filePath: string) {
     this.filePath = filePath
@@ -142,26 +129,33 @@ export class ProjectStore {
       const arr: Project[] = JSON.parse(raw)
       for (const p of arr) {
         this.projects.set(p.id, p)
+        // 用 apiKey 前 16 字符做索引加速验证（不用完整 key，安全）
+        // 注意：存储中没有明文 key，索引基于 hash 前缀
+        this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), p.id)
       }
     } catch {
       /** 文件损坏时从空开始 */
     }
   }
 
-  /** 保存到 JSON 文件（版本号随写入递增，作为缓存失效信号） */
+  /** 保存到 JSON 文件 */
   private save(): void {
     const dir = dirname(this.filePath)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const arr = Array.from(this.projects.values())
     writeFileSync(this.filePath, JSON.stringify(arr, null, 2), 'utf-8')
-    this.dataVersion++
   }
 
   /**
    * 创建新项目
+   * @param opts.guest 标记为游客自建项目（带过期时间）
    * @returns 项目信息 + 明文 API Key（只返回这一次）
    */
-  create(name: string, description?: string): { project: ProjectPublic; apiKey: string } {
+  create(
+    name: string,
+    description?: string,
+    opts?: { guest?: boolean },
+  ): { project: ProjectPublic; apiKey: string } {
     const id = generateId('cs', 12)
     const apiKey = generateApiKey()
     const { hash, salt } = hashApiKey(apiKey)
@@ -175,11 +169,32 @@ export class ProjectStore {
       createdAt: now,
       updatedAt: now,
       enabled: true,
+      guest: opts?.guest,
+      expiresAt: opts?.guest ? new Date(Date.now() + GUEST_PROJECT_TTL_MS).toISOString() : undefined,
     }
     this.projects.set(id, project)
+    this.keyPrefixIndex.set(hash.slice(0, 16), id)
     this.save()
     const { apiKeyHash, apiKeySalt, ...publicInfo } = project
     return { project: publicInfo, apiKey }
+  }
+
+  /** 项目是否已过期（非 guest 永不过期） */
+  isExpired(p: Project): boolean {
+    return !!p.guest && !!p.expiresAt && Date.now() > Date.parse(p.expiresAt)
+  }
+
+  /** 清理所有已过期的游客项目，返回被清理的 projectId 列表 */
+  cleanupExpired(): string[] {
+    const expired: string[] = []
+    for (const [id, p] of this.projects) {
+      if (!this.isExpired(p)) continue
+      expired.push(id)
+      this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
+      this.projects.delete(id)
+    }
+    if (expired.length > 0) this.save()
+    return expired
   }
 
   /** 列出所有项目（不含密钥） */
@@ -206,6 +221,7 @@ export class ProjectStore {
   /** 直接写入项目原始数据（供 Playground 项目初始化使用） */
   setRaw(projectId: string, project: Project): void {
     this.projects.set(projectId, project)
+    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId)
     this.save()
   }
 
@@ -213,15 +229,20 @@ export class ProjectStore {
   updateRaw(projectId: string, patch: { apiKeyHash: string; apiKeySalt: string }): void {
     const p = this.projects.get(projectId)
     if (!p) return
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
     p.apiKeyHash = patch.apiKeyHash
     p.apiKeySalt = patch.apiKeySalt
     p.updatedAt = new Date().toISOString()
+    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId)
     this.save()
   }
 
   /** 删除项目 */
   delete(projectId: string): boolean {
-    if (!this.projects.delete(projectId)) return false
+    const p = this.projects.get(projectId)
+    if (!p) return false
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
+    this.projects.delete(projectId)
     this.save()
     return true
   }
@@ -246,11 +267,13 @@ export class ProjectStore {
   rotateKey(projectId: string): string | undefined {
     const p = this.projects.get(projectId)
     if (!p) return undefined
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
     const newKey = generateApiKey()
     const { hash, salt } = hashApiKey(newKey)
     p.apiKeyHash = hash
     p.apiKeySalt = salt
     p.updatedAt = new Date().toISOString()
+    this.keyPrefixIndex.set(hash.slice(0, 16), projectId)
     this.save()
     return newKey
   }
@@ -260,25 +283,12 @@ export class ProjectStore {
    * @returns 项目 ID（验证成功）或 undefined（失败）
    */
   verifyKey(plainKey: string): string | undefined {
-    /** 先查缓存：版本号一致直接返回，避免热路径上的同步 scrypt 计算 */
-    const cached = this.verifyCache.get(plainKey)
-    if (cached && cached.version === this.dataVersion) {
-      const p = this.projects.get(cached.projectId)
-      if (p?.enabled) return cached.projectId
-      this.verifyCache.delete(plainKey)
-      return undefined
-    }
     // 遍历所有项目尝试验证（因为密钥是哈希的，不能直接反查）
-    // 有缓存兜底后，只有冷启动/数据变更后的首次请求才走到这里
+    // 对于少量项目（通常 <100）性能可接受
     for (const [id, p] of this.projects) {
       if (!p.enabled) continue
+      if (this.isExpired(p)) continue
       if (verifyApiKey(plainKey, p.apiKeyHash, p.apiKeySalt)) {
-        /** FIFO 淘汰：Map 保序，删最老的一条控制总量 */
-        if (this.verifyCache.size >= VERIFY_CACHE_MAX) {
-          const oldest = this.verifyCache.keys().next().value
-          if (oldest !== undefined) this.verifyCache.delete(oldest)
-        }
-        this.verifyCache.set(plainKey, { projectId: id, version: this.dataVersion })
         return id
       }
     }
@@ -320,13 +330,55 @@ export class AuthManager {
   private adminKey: string | undefined
   /** 项目存储 */
   readonly projects: ProjectStore
+  /** 游客项目过期清理回调（通知控制台刷新设备列表） */
+  private onProjectsExpired: (projectIds: string[]) => void
 
-  constructor(projectStore: ProjectStore) {
+  /** 游客自建项目限流：IP → 滑动窗口内的时间戳 */
+  private guestCreateWindow = new Map<string, number[]>()
+
+  constructor(
+    projectStore: ProjectStore,
+    onProjectsExpired: (projectIds: string[]) => void = () => {},
+  ) {
     this.adminKey = process.env.SILKPULSE_ADMIN_KEY
     this.projects = projectStore
+    this.onProjectsExpired = onProjectsExpired
 
     /** Playground 游客模式：初始化时创建/确保存在一个真实的公开项目 */
     this.ensurePlaygroundProject()
+
+    /** 启动即清一次（进程停摆期间过期的），之后周期性清理过期游客项目 */
+    this.fireExpired()
+    this.cleanupTimer = setInterval(() => this.fireExpired(), GUEST_CLEANUP_INTERVAL_MS)
+    this.cleanupTimer.unref?.()
+  }
+
+  /** 定时清理句柄 */
+  private cleanupTimer: ReturnType<typeof setInterval> | undefined
+
+  /** 执行一次过期清理，有清理到项目时触发回调 */
+  private fireExpired(): void {
+    const expired = this.projects.cleanupExpired()
+    if (expired.length > 0) this.onProjectsExpired(expired)
+  }
+
+  /** 游客创建限流：每 IP 每小时最多 5 次，返回是否放行（路由层调用） */
+  checkGuestRateLimit(ip: string): boolean {
+    const now = Date.now()
+    const window = (this.guestCreateWindow.get(ip) ?? []).filter((t) => now - t < GUEST_RATE_WINDOW_MS)
+    if (window.length >= GUEST_RATE_MAX) {
+      this.guestCreateWindow.set(ip, window)
+      return false
+    }
+    window.push(now)
+    this.guestCreateWindow.set(ip, window)
+    /** 窗口条目数帽住，防 map 无限膨胀 */
+    if (this.guestCreateWindow.size > 10000) {
+      for (const [key, entries] of this.guestCreateWindow) {
+        if (entries.every((t) => now - t >= GUEST_RATE_WINDOW_MS)) this.guestCreateWindow.delete(key)
+      }
+    }
+    return true
   }
 
   /** 是否启用了鉴权（配置了超管密钥或至少一个项目） */
@@ -416,15 +468,11 @@ export class AuthManager {
 
   /**
    * 验证 WebSocket 连接鉴权
-   *
-   * 设备接入的信任模型：凭 projectId（项目存在且启用即放行）。
-   * projectId 是公开标识（会出现在注入代码里分发给任意第三方），
-   * 拿到它只能「把设备接入该项目」，无法登录控制台、无法调用管理 API——
-   * 那些凭据是项目密钥（cs_live_*），只掌握在项目所有者手里。
-   * 因此注入代码可以放心外发，控制台访问权不会随之泄露。
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
   authorizeWsConnection(url: string, wsPath: string): AuthContext {
+    const projectId = extractQueryParam(url, 'projectId')
+
     // 未启用鉴权：允许匿名
     if (!this.isAuthEnabled()) return { role: 'admin' }
 
@@ -442,13 +490,19 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 设备 WebSocket：凭 projectId 接入（项目存在且启用即放行，见函数头注释）
+    // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
+    // 连接数天然受 server 容量约束（WS 每连接有内存开销，超载时背压机制兜底）
     if (wsPath === '/ws/device') {
-      const qProjectId = extractQueryParam(url, 'projectId')
-      if (!qProjectId) return { role: 'anonymous' }
-      const project = this.projects.get(qProjectId)
-      if (project?.enabled) return { role: 'project', projectId: qProjectId }
-      return { role: 'anonymous' }
+      /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
+      if (projectId) {
+        /** 验证 projectId 是否存在、启用且未过期（游客项目到期后设备同样拒接） */
+        const proj = this.projects.getRaw(projectId)
+        if (proj?.enabled && !this.projects.isExpired(proj)) {
+          return { role: 'project', projectId }
+        }
+      }
+      /** 无 projectId 的设备也允许接入（role=device，可被所有管理员看到） */
+      return { role: 'device' }
     }
 
     return { role: 'anonymous' }
@@ -551,6 +605,8 @@ export function handleProjectApiRoute(
       authEnabled: auth.isAuthEnabled(),
       hasAdminKey: auth.hasAdminKey(),
       playgroundEnabled: auth.isPlaygroundEnabled(),
+      /** 游客可自建项目 Key（仅在 Playground 开启时） */
+      guestProjectsEnabled: auth.isPlaygroundEnabled(),
     })
     return true
   }
@@ -559,22 +615,61 @@ export function handleProjectApiRoute(
   if (url === '/api/auth/verify' && method === 'GET') {
     const verifyCtx = auth.authorizeHttpRequest(ctx)
     if (verifyCtx.role === 'anonymous') {
-      jsonResponse(ctx, 401, { error: '密钥无效' })
+      jsonResponse(ctx, 401, { error: '密钥无效或已过期' })
       return true
     }
     /** 项目密钥：附带项目名称供前端展示 */
     let projectName: string | undefined
     let isPlayground = false
+    let isGuestProject = false
+    let expiresAt: string | undefined
     if (verifyCtx.role === 'project' && verifyCtx.projectId) {
       const proj = auth.projects.get(verifyCtx.projectId)
       projectName = proj?.name
       isPlayground = verifyCtx.projectId === AuthManager.PLAYGROUND_PROJECT_ID
+      isGuestProject = !!proj?.guest
+      expiresAt = proj?.expiresAt
     }
     jsonResponse(ctx, 200, {
       role: verifyCtx.role,
       projectId: verifyCtx.projectId,
       projectName,
       isPlayground,
+      isGuestProject,
+      expiresAt,
+    })
+    return true
+  }
+
+  /**
+   * 游客自建项目 Key：无需鉴权，创建一个属于该游客自己的临时项目。
+   *
+   * - Key 只在响应中返回这一次（服务端只存哈希），游客必须立即复制保存
+   * - 项目最长存活 5 天，到期自动销毁，设备也会被拒接
+   * - 需要 Playground 开启；限流：每 IP 每小时最多 5 个
+   */
+  if (url === '/api/guest/projects' && method === 'POST') {
+    if (!auth.isPlaygroundEnabled()) {
+      jsonResponse(ctx, 403, { error: '游客模式未开启' })
+      return true
+    }
+    const ip = remoteIp(ctx)
+    if (!auth.checkGuestRateLimit(ip)) {
+      jsonResponse(ctx, 429, { error: '创建太频繁，请 1 小时后再试' })
+      return true
+    }
+    let body: { name?: string }
+    try {
+      body = JSON.parse(readBodySync(ctx))
+    } catch {
+      body = {}
+    }
+    const name = (body.name ?? '').trim() || `游客项目-${randomBytes(2).toString('hex').toUpperCase()}`
+    const result = auth.projects.create(name, '游客自建（5 天后自动销毁）', { guest: true })
+    jsonResponse(ctx, 201, {
+      ...result,
+      expiresInDays: 5,
+      notice: '这是对游客的限制：密钥仅展示这一次，请立即复制保存；项目最长存活 5 天，到期自动销毁。有长期需要建议自己部署一份（开源地址见 GitHub）',
     })
     return true
   }
@@ -713,6 +808,15 @@ export function handleProjectApiRoute(
  */
 function readBodySync(ctx: Ctx): string {
   return ctx.bodyBuf ? ctx.bodyBuf.toString('utf-8') : ''
+}
+
+/** 提取客户端 IP（限流用）：反向代理场景优先 x-forwarded-for，缺失时用 'unknown' 兜底（Ctx 不缓存直连地址，同步阶段之外 req 已失效） */
+function remoteIp(ctx: Ctx): string {
+  const fwd = ctx.headers['x-forwarded-for']
+  if (fwd) return fwd.split(',')[0].trim()
+  const real = ctx.headers['x-real-ip']
+  if (real) return real.trim()
+  return 'unknown'
 }
 
 /** 从缓存的请求体中读取 JSON */

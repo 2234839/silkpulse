@@ -25,7 +25,6 @@ import { AuthManager, ProjectStore, handleProjectApiRoute, type AuthContext } fr
 import { maybeGzipResponse } from './gzip.js'
 import { createCtx, onAborted, readBody, writeResponse, sendNotModified, type Ctx } from './uws/http-helpers.js'
 import { SilkWs, type WsUserData } from './uws/ws-socket.js'
-import { getBuildInfo } from './build-info.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -53,7 +52,6 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
   const defaultDataDir = process.env.SILKPULSE_DATA_DIR ?? path.join(process.env.HOME ?? '/tmp', '.silkpulse')
   const projectDataPath = options.projectDataPath ?? path.join(defaultDataDir, 'projects.json')
   const projectStore = new ProjectStore(projectDataPath)
-  const auth = new AuthManager(projectStore)
   const registry = new DeviceRegistry()
 
   /** 静态资源目录：优先用 options.staticRoot，否则用 ../public（console-ui 构建产物 + sdk） */
@@ -61,8 +59,17 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
 
   const app = uWS.App()
 
-  /** WS 行为定义（设备/控制台共用，鉴权在 upgrade 阶段做） */
+  /**
+   * 鉴权管理器：游客项目过期销毁时，踢掉对应项目的设备并刷新控制台列表
+   * （必须先有 registry / ws 层的 notifyDeviceListChanged，所以在其后构造）
+   */
+  const auth = new AuthManager(projectStore, (expiredIds) => {
+    for (const pid of expiredIds) registry.evictDevicesOfProject(pid)
+  })
+
+  /** 游客项目过期销毁后的设备踢除 → 通知控制台刷新列表 */
   const { behavior, notifyDeviceListChanged } = setupWebSocket(registry, auth)
+  registry.onEvict(() => notifyDeviceListChanged())
 
   /**
    * WS upgrade 处理器工厂（device/console 各一份）
@@ -100,7 +107,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
     ...behavior,
     open: (ws) => {
       const data = ws.getUserData() as WsUserData & { authCtx?: AuthContext; url?: string }
-      const silk = new SilkWs(ws, data.authCtx ?? { role: 'anonymous' })
+      const silk = new SilkWs(ws, data.authCtx ?? { role: 'device' })
       data.silk = silk
       registerSocketUrl(silk, data.url ?? '/')
       behavior.open?.(ws)
@@ -130,15 +137,10 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
       'X-Frame-Options': 'SAMEORIGIN',
     }
 
-    /** 缓存请求体（项目管理 + 鉴权 API 需要） */
-    if (ctx.url.startsWith('/api/projects') || ctx.url.startsWith('/api/auth')) {
-      const { oversize } = await readBody(ctx)
+    /** 缓存请求体（项目管理 + 鉴权 + 游客自建项目 API 需要） */
+    if (ctx.url.startsWith('/api/projects') || ctx.url.startsWith('/api/auth') || ctx.url.startsWith('/api/guest')) {
+      await readBody(ctx)
       if (ctx.aborted) return
-      /** 超限（原始超 2MB 或解压后超解压上限）一律回 413 */
-      if (oversize) {
-        writeResponse(ctx, 413, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ error: 'body 超过上限' }))
-        return
-      }
       /** 项目管理 API + 鉴权状态 API */
       if (handleProjectApiRoute(ctx, auth)) return
     }
@@ -147,7 +149,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
     const authCtx = auth.authorizeHttpRequest(ctx)
 
     /** 1.5 先交给 agent API 路由（/api/agent/*） */
-    if (await handleAgentApiRoute(ctx, registry, authCtx, auth)) return
+    if (await handleAgentApiRoute(ctx, registry, authCtx)) return
 
     /** 1.6 再交给内部 API 路由（/api/devices/* 等） */
     if (await handleApiRoute(ctx, registry, notifyDeviceListChanged, auth, authCtx)) return
@@ -206,22 +208,18 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
         const demoProto = ctx.headers['x-forwarded-proto'] || 'http'
         const demoOrigin = `${demoProto}://${demoHost}`
         let html = fs.readFileSync(demoPagePath, 'utf8').replace(/https?:\/\/localhost:8080/g, demoOrigin)
-        /**
-         * demo 页永不注入任何服务端持有的密钥
-         *
-         * 曾经的设计是「鉴权启用时自动注入超管密钥方便本机测试」——这是把
-         * 安全边界押在部署环境上，必然出事：服务对外暴露后 /demo 任何人可达，
-         * HTML 源码里的密钥等于公开；走反代/容器部署时连接来源还是 127.0.0.1，
-         * 连「仅限回环注入」这类判断都会被穿透。
-         * 设备接入凭 projectId（公开标识，非密钥），需要测试不同项目时显式用
-         * ?projectId=yyy 查询参数，服务端绝不代发任何密钥。
-         */
-        {
-          /** 从 URL query 获取可选的 projectId（设备接入凭据，公开标识） */
+        /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
+        if (auth.isAuthEnabled()) {
+          /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
+          const qApiKey = url.searchParams.get('apiKey')
           const qProjectId = url.searchParams.get('projectId')
-          const injectAttrs = qProjectId
-            ? `data-project-id="${qProjectId}"`
-            : ''
+          /** 默认用超管密钥（demo 页面是 server 本地测试页，用超管密钥直连） */
+          const envAdminKey = process.env.SILKPULSE_ADMIN_KEY
+          const injectAttrs = qApiKey && qProjectId
+            ? `data-api-key="${qApiKey}" data-project-id="${qProjectId}"`
+            : envAdminKey
+              ? `data-api-key="${envAdminKey}"`
+              : ''
           if (injectAttrs) {
             /** 兼容两种写法：带 data-server 的完整形态 + 相对路径 /sdk.js 简写形态 */
             html = html.replace(
@@ -245,7 +243,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
       const injHost = ctx.headers['host'] || `localhost:${port}`
       const injProto = ctx.headers['x-forwarded-proto'] || 'http'
       const origin = `${injProto}://${injHost}`
-      /** 设备接入凭 projectId（公开标识，注入代码可安全外发）；不再拼入任何密钥 */
+      /** 可选：携带 project_id 查询参数，拼入 inject 代码（设备端不需要密钥） */
       const projectId = url.searchParams.get('project_id') ?? undefined
       if (pathname === '/inject/iife') {
         writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId))
@@ -363,9 +361,7 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
   await new Promise<void>((resolve, reject) => {
     app.listen(port, (listenSocket) => {
       if (listenSocket) {
-        const bi = getBuildInfo()
         console.log(`\n  silkpulse 服务已启动 → http://localhost:${port}`)
-        console.log(`  版本：${bi.branch || '(detached)'}@${bi.commit.slice(0, 7)}${bi.dirty ? ' (dirty)' : ''} · 构建于 ${bi.buildAt}`)
         console.log(`  控制台：浏览器打开 http://localhost:${port}`)
         console.log(`  接入设备：在目标页面注入 <script src="http://localhost:${port}/sdk.js"></script>`)
         console.log(`  AI 接入：HTTP API → http://localhost:${port}/api/devices`)
@@ -461,8 +457,7 @@ function controlUnavailableHtml(): string {
 /**
  * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
  * 防重复注入（同页面多次点 bookmarklet 只生效一次）
- * 设备接入凭 projectId（公开标识）——注入代码可安全发给任意第三方，
- * 拿到它只能把设备接入本项目，无法登录控制台（控制台凭项目密钥，只归项目所有者持有）
+ * 鉴权模式下携带 projectId 标记设备归属（不需要密钥，密钥不暴露到设备端）
  */
 function injectScriptCode(origin: string, projectId?: string): string {
   /** 动态拼 data-* 属性 */

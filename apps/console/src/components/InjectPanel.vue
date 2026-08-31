@@ -4,10 +4,14 @@
  *
  * 展示四种接入方式（Script 标签 / IIFE / Bookmarklet / Userscript）的代码 + 复制按钮。
  * 既用于未选设备时的空状态卡片，也用于"接入新设备"弹窗。
+ *
+ * 设备接入凭 projectId：项目密钥登录用自己项目的；超管不属于任何单一项目，
+ * 但能看到全部项目——拉取列表让超管选择设备要接入哪个项目。
  */
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { useAuth } from "../composables/useAuth";
 import { copyText } from "../utils/clipboard";
+import { apiFetch } from "../utils/api";
 
 const props = defineProps<{
   /** 是否显示关闭按钮（Modal 模式） */
@@ -20,6 +24,56 @@ const { authStatus, userRole, projectId } = useAuth();
 
 const serverOrigin = location.origin;
 
+/** 项目公开信息（超管拉取项目列表用） */
+interface ProjectPublic {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+/** 超管可见的项目列表 */
+const adminProjects = ref<ProjectPublic[]>([]);
+/** 超管当前选中的项目（注入代码归属） */
+const adminSelectedProjectId = ref<string>("");
+
+/** 拉取项目列表（仅超管，供可选归组） */
+async function loadAdminProjects(): Promise<void> {
+  try {
+    const res = await apiFetch("/api/projects");
+    if (!res.ok) return;
+    const data = (await res.json()) as { projects: ProjectPublic[] };
+    adminProjects.value = data.projects;
+    /** 默认未分组（全局设备）；仅当选中的项目从列表消失时才重置 */
+    const stillThere =
+      adminSelectedProjectId.value === "" ||
+      data.projects.some((p) => p.id === adminSelectedProjectId.value);
+    if (!stillThere) adminSelectedProjectId.value = "";
+  } catch {
+    /** 面板照常展示，只是没有项目可选 */
+  }
+}
+
+watch(
+  () => userRole.value,
+  (role) => {
+    if (role === "admin") void loadAdminProjects();
+  },
+  { immediate: true },
+);
+
+/**
+ * 注入代码归属的项目 ID：
+ * - 项目密钥登录：自己项目的（verify 返回）
+ * - 超管：下拉选择，默认 ""（未分组，设备全局可见，不借用任何项目）
+ * - 未启用鉴权：无需 projectId
+ */
+const injectProjectId = computed(() => {
+  if (!authStatus.value?.authEnabled) return undefined;
+  if (userRole.value === "project") return projectId.value;
+  if (userRole.value === "admin") return adminSelectedProjectId.value || undefined;
+  return undefined;
+});
+
 /**
  * script 标签方式（前端自己拼，最简单）
  * ⚠️ 不能直接写 HTML 标签字符串字面量（含尖括号）：
@@ -29,12 +83,9 @@ const scriptSnippet = computed(() => {
   const lt = String.fromCharCode(60);
   const gt = String.fromCharCode(62);
   const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`;
-  if (authStatus.value?.authEnabled) {
-    /** 项目密钥登录：带自己的 projectId（公开标识，注入代码可外发） */
-    if (userRole.value === "project" && projectId.value) {
-      return `${base} data-project-id="${projectId.value}"${gt}${lt}/script${gt}`;
-    }
-    return `${base} data-project-id="你的项目ID"${gt}${lt}/script${gt}`;
+  /** 归属项目时带 projectId（公开标识，可外发）；未分组/未启用鉴权不带也能接入 */
+  if (injectProjectId.value) {
+    return `${base} data-project-id="${injectProjectId.value}"${gt}${lt}/script${gt}`;
   }
   return `${base}${gt}${lt}/script${gt}`;
 });
@@ -47,9 +98,7 @@ const scriptSnippet = computed(() => {
 const injectScriptCode = computed(() => {
   const dataAttrs = [
     `s.dataset.server='${serverOrigin}'`,
-    userRole.value === "project" && projectId.value
-      ? `s.dataset.projectId='${projectId.value}'`
-      : "",
+    injectProjectId.value ? `s.dataset.projectId='${injectProjectId.value}'` : "",
   ]
     .filter(Boolean)
     .join(";");
@@ -167,6 +216,28 @@ async function copyInject() {
       </div>
 
       <p class="text-xs text-muted mb-2">{{ scenarioText }}</p>
+
+      <!-- 超管：选择设备归属（默认未分组，全局可见；需要归组管理时再选项目） -->
+      <div
+        v-if="authStatus?.authEnabled && userRole === 'admin'"
+        class="flex items-center gap-2 mb-3"
+      >
+        <label class="text-xs text-secondary shrink-0">设备归属</label>
+        <select
+          v-model="adminSelectedProjectId"
+          class="px-2 py-1 text-xs rounded border border-input bg-elevated text-primary"
+        >
+          <option value="">未分组（全局可见）</option>
+          <option
+            v-for="p in adminProjects"
+            :key="p.id"
+            :value="p.id"
+            :disabled="!p.enabled"
+          >
+            {{ p.name }}（{{ p.id }}）{{ p.enabled ? "" : " · 已停用" }}
+          </option>
+        </select>
+      </div>
 
       <div class="relative">
         <pre

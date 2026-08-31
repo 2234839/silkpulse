@@ -40,6 +40,7 @@ export function setupWebSocket(
   auth: { authorizeWsConnection: (url: string, wsPath: string) => AuthContext; isAuthEnabled: () => boolean }
 ): { behavior: WebSocketBehavior<WsUserData>; notifyDeviceListChanged: () => void } {
   /** 每个 WS 连接对应的设备 ID（设备端）或订阅集合（控制台端） */
+  const deviceSockets = new Map<SilkWs, Device>()
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
   const consoleSubscriptions = new Map<SilkWs, Set<string>>()
   const deviceWatchers = new Map<string, Set<SilkWs>>()
@@ -253,6 +254,7 @@ export function setupWebSocket(
               return
             }
             device = registered
+            deviceSockets.set(silk, device)
             /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
             broadcast(deviceId, {
               type: 'device-online',
@@ -423,22 +425,6 @@ export function setupWebSocket(
           case 'network-body': {
             /** 设备返回完整 body（懒加载响应），转发给订阅该设备的控制台 */
             if (!device) return
-            /**
-             * 服务端防线：单条 body 超过硬上限就拒发。
-             * SDK 层有同款限制，但设备可能跑旧版 SDK 或被恶意仿冒——
-             * 不能信任采集端已裁剪；否则一个超大帧能把所有订阅控制台的
-             * 解析和 Vue 响应式状态一起拖崩（MAX_BUFFERED 只在超时后才踢线）。
-             */
-            const bodyText = msg.body
-            if (typeof bodyText !== 'string' || bodyText.length > NETWORK_BODY_HARD_MAX) {
-              broadcast(deviceId, {
-                type: 'network-body',
-                deviceId,
-                bodySeq: msg.bodySeq,
-                body: `[body 过大或类型非法，服务端拒发：${typeof bodyText === 'string' ? `${bodyText.length} 字符` : typeof bodyText}]`,
-              })
-              break
-            }
             broadcast(deviceId, { type: 'network-body', deviceId, bodySeq: msg.bodySeq, body: msg.body })
             break
           }
@@ -491,20 +477,6 @@ export function setupWebSocket(
 
     /** ---------- 控制台消息 ---------- */
     if (pathname === '/ws/console') {
-      /**
-       * 设备归属校验：项目级控制台只能对自己项目的设备发指令
-       *
-       * subscribe/set-watchers/start-screen-share/get-network-body/devtools-relay
-       * 全部经此入口；未通过时静默忽略（不回报，避免给越权探测者反馈设备存在性）。
-       * admin 角色与未启用鉴权时放行（与 broadcast 的项目过滤同规则）。
-       */
-      const canAccess = (deviceId: string): boolean => {
-        const ctx = silk.authCtx
-        if (!ctx || ctx.role === 'admin') return true
-        if (ctx.role !== 'project') return false
-        const target = registry.get(deviceId)
-        return target ? ctx.projectId === target.info.projectId : false
-      }
       {
         let msg: ConsoleMessage
         try {
@@ -512,10 +484,27 @@ export function setupWebSocket(
         } catch {
           return
         }
+
+        /**
+         * 指令鉴权守卫：携带 deviceId 的控制台→设备指令（subscribe/exec/screen-share 等）
+         * 必须通过项目隔离检查——项目级控制台只能操作自己项目的设备，
+         * 未分组设备（projectId=undefined）仅超管可操作。
+         * 列表推送（broadcast/notifyDeviceListChanged）已过滤，但指令路径
+         * 是控制台主动发起，不拦的话项目密钥可对任何设备发指令（越权）。
+         */
+        const msgWithDeviceId = msg as { deviceId?: string }
+        if (msgWithDeviceId.deviceId) {
+          const targetDevice = registry.get(msgWithDeviceId.deviceId)
+          const devicePid = targetDevice?.info.projectId
+          const ctx = silk.authCtx
+          if (ctx?.role === 'project' && ctx.projectId !== devicePid) {
+            /** 越权：目标设备不属于本控制台的项目（含未分组）——忽略指令 */
+            return
+          }
+        }
         const ws = silk
         switch (msg.type) {
           case 'subscribe': {
-            if (!canAccess(msg.deviceId)) break
             const subs = consoleSubscriptions.get(ws)!
             subs.add(msg.deviceId)
             let watchers = deviceWatchers.get(msg.deviceId)
@@ -535,7 +524,6 @@ export function setupWebSocket(
             break
           }
           case 'set-watchers': {
-            if (!canAccess(msg.deviceId)) break
             /** 控制台通知当前打开的面板，server 汇总所有控制台的 watcher 后下发合并结果 */
             consoleWatcherPrefs.set(ws, { deviceId: msg.deviceId, watchers: new Set(msg.watchers) })
             /** 重新计算该设备的 watcher 并集 */
@@ -556,7 +544,6 @@ export function setupWebSocket(
           }
           case 'start-screen-share': {
             /** 控制台请求设备开始屏幕共享（用户侧弹出授权弹窗） */
-            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -566,7 +553,6 @@ export function setupWebSocket(
           }
           case 'stop-screen-share': {
             /** 控制台请求设备停止屏幕共享 */
-            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -576,7 +562,6 @@ export function setupWebSocket(
           }
           case 'get-network-body': {
             /** 控制台请求完整 body（懒加载），转发给设备 */
-            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -586,7 +571,6 @@ export function setupWebSocket(
           }
           case 'devtools-relay': {
             /** 控制台 devtools client 的 RPC 消息，透传给对应设备（发 latestSocket：指令类消息单点送达） */
-            if (!canAccess(msg.deviceId)) break
             const device = registry.get(msg.deviceId)
             const sock = device?.latestSocket
             if (sock && sock.readyState === sock.OPEN) {
@@ -647,14 +631,6 @@ export function getUrlFromSocket(silk: SilkWs): string {
 
 /** SilkWs → 连接 URL（upgrade 阶段由 index.ts 注册） */
 const socketUrls = new WeakMap<SilkWs, string>()
-
-/**
- * 单条 network body 转发硬上限（字符数）
- *
- * SDK 侧有同款限制（BODY_HARD_MAX），但设备可能跑旧版 SDK 或被恶意仿冒，
- * 服务端必须有自己的防线：超限帧直接替换为提示文本转发。
- */
-const NETWORK_BODY_HARD_MAX = 2 * 1024 * 1024
 
 /** 注册连接 URL（upgrade 阶段调用，open 回调前） */
 export function registerSocketUrl(silk: SilkWs, url: string): void {

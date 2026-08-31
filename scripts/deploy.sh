@@ -37,10 +37,19 @@ done
 cd "$(dirname "$0")/.."
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
-  echo "▶ [1/4] 清理旧产物并构建…"
-  # 根构建 copy 步骤不清空 server/public，旧 hash 产物会堆积导致部署不生效（见 deploy-workflow.md 2026-08-24 教训）
+  echo "▶ [1/4] 清理旧产物并逐包串行构建…"
+  # 旧 hash 产物堆积会导致部署不生效；先清（见 deploy-workflow.md 2026-08-24 教训）
   rm -rf packages/server/public/assets packages/server/public/index.html
-  NODE_OPTIONS="--max-old-space-size=2048" pnpm build
+  # 不走根 pnpm build（vp run 并发多包，本机内存紧张时随机 OOM/EBUSY，见 2026-08-27 教训），
+  # 按依赖顺序逐包串行：plugins(增量) → feature-detect → sdk → console → 拷 sdk.js → server
+  # server 必须走它自己的 pnpm build（vite.config.ts 的 uwsNativePlugin 才会 emit .node 二进制）
+  node scripts/build-plugins.mjs
+  ( cd packages/feature-detect && NODE_OPTIONS="--max-old-space-size=2048" pnpm build )
+  ( cd packages/sdk && NODE_OPTIONS="--max-old-space-size=2048" pnpm build )
+  # console 的 outDir 直接指向 packages/server/public（emptyOutDir:false，不覆盖 sdk.js 等）
+  ( cd apps/console && NODE_OPTIONS="--max-old-space-size=2048" pnpm build )
+  cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js
+  ( cd packages/server && NODE_OPTIONS="--max-old-space-size=2048" pnpm build )
 else
   echo "▶ [1/4] 跳过构建（--skip-build）"
 fi
@@ -67,6 +76,25 @@ sleep 5
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOY_HEALTH_URL")
 [[ "$CODE" == "200" ]] || { echo "✗ 健康检查失败: HTTP $CODE" >&2; exit 1; }
 echo "  健康检查: 200 ✓"
+
+# 部署后 WS 设备握手校验：设备接入不设密钥门槛（role=device 全局可见），
+# 带 projectId 归组、不带为未分组，两者都应升级成功（101）；控制台 WS 仍需 token。
+# 浏览器端跨域 WS 失败时只报模糊的 "failed:"，真实原因只有服务端能确认——部署脚本顺手把这条链路验掉。
+# 注意：101 成功后连接保持打开，curl 会挂到超时——用 grep -m1 提前截断取状态行。
+# --noproxy：本地代理会劫持 CONNECT（curl 显示 "Connection established" 后卡死超时）
+ws_handshake() {
+  # tr -d '\r'：HTTP 头行尾是 CRLF，且只取第一个状态行（grep -m1 立即退出触发管道收尾）
+  curl -s --noproxy '*' --http1.1 -i -N \
+    -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+    --max-time 10 "$1" 2>/dev/null | tr -d '\r' | grep -m1 -oE 'HTTP/[0-9.]+ [0-9]+' | grep -oE '[0-9]+$'
+}
+WS_URL="${DEPLOY_HEALTH_URL%/api/health}"
+# || true：101 成功后 curl 挂满 max-time 退出 28，pipefail 会把成功校验误判为失败触发 set -e
+NOAUTH_CODE=$(ws_handshake "$WS_URL/ws/device" || true)
+[[ "$NOAUTH_CODE" == "101" ]] || { echo "✗ 无凭据 /ws/device 期望 101（设备免密接入），实际 $NOAUTH_CODE" >&2; exit 1; }
+AUTH_CODE=$(ws_handshake "$WS_URL/ws/device?projectId=cs_playground" || true)
+[[ "$AUTH_CODE" == "101" ]] || { echo "✗ 带 projectId 的 /ws/device 握手期望 101，实际 $AUTH_CODE" >&2; exit 1; }
+echo "  WS 设备握手: 免密 101 / projectId→101 ✓"
 
 REMOTE_HASH=$(curl -s "$DEPLOY_TOOLS_URL" | grep -o 'index-[^"]*\.js' | head -1)
 if [[ "$REMOTE_HASH" == "$LOCAL_HASH" ]]; then

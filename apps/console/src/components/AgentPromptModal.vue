@@ -10,6 +10,7 @@
  */
 import { computed, ref, watch } from "vue";
 import { copyText } from "../utils/clipboard";
+import SecretText from "./SecretText.vue";
 import { renderSkillPrompt, renderSkillSystemPrompt } from "@silkpulse/shared";
 
 const props = defineProps<{
@@ -18,6 +19,10 @@ const props = defineProps<{
   serverUrl: string;
   /** 当前用户的 API key（超管密钥或项目密钥） */
   apiKey: string;
+  /** 是否为游客自建项目（临时项目，5 天后销毁） */
+  isGuestProject?: boolean;
+  /** 游客项目的过期时间（ISO） */
+  projectExpiresAt?: string;
 }>();
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
@@ -146,6 +151,24 @@ watch(
 
       <!-- 提示词内容 -->
       <div class="flex-1 overflow-y-auto p-5">
+        <!-- 游客项目限制提示 -->
+        <div
+          v-if="isGuestProject"
+          class="mb-3 p-3 rounded bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700"
+        >
+          <p class="text-xs text-yellow-700 dark:text-yellow-300 leading-relaxed">
+            🔑 你在使用游客临时项目（最长存活 5 天，{{
+              projectExpiresAt ? new Date(projectExpiresAt).toLocaleString() : "到期"
+            }}自动销毁）。到期后此提示词中的 Key 失效，需重新创建。这是对游客的限制，有长期需要建议自己部署一份：
+            <a
+              href="https://github.com/2234839/silkpulse"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="underline underline-offset-2"
+              >GitHub 开源，顺手求个 ⭐</a
+            >
+          </p>
+        </div>
         <!-- 渐进式加载说明 -->
         <div
           v-if="activeTab === 'lazy'"
@@ -156,9 +179,12 @@ watch(
             会在需要远程调试时自动 curl 拉取完整文档，平时不占用 token。
           </p>
         </div>
-        <pre class="text-xs font-mono text-primary whitespace-pre-wrap leading-relaxed">{{
-          currentPrompt
-        }}</pre>
+        <!-- 密钥部分模糊化（secret 精确匹配 + auto 正则兜底探测），点击查看明文 -->
+        <pre class="text-xs font-mono text-primary whitespace-pre-wrap leading-relaxed"><SecretText
+          :text="currentPrompt"
+          :secret="apiKey"
+          auto
+        /></pre>
       </div>
 
       <!-- 底部提示 -->

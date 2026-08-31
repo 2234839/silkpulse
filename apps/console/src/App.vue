@@ -1,5 +1,5 @@
 <script setup lang="ts">
- /**
+/**
  * App.vue —— 路由壳
  *
  * 只负责挂载 router-view，具体页面内容由路由懒加载。

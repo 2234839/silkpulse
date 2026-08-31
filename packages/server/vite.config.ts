@@ -3,7 +3,6 @@ import path from "node:path";
 import { defineConfig } from "vite-plus";
 /** rolldown 类型经 vite-plus-core re-export（rolldown 本体未直接暴露给项目） */
 import type { Plugin } from "@voidzero-dev/vite-plus-core/rolldown";
-import { buildInfoPlugin } from "@silkpulse/shared/build-info-plugin";
 
 /**
  * uWS 原生二进制自包含插件
@@ -49,9 +48,9 @@ function uwsNativePlugin(): Plugin {
 
 export default defineConfig({
   pack: {
-    /** 不用 tsgo：WSL2 下 spawn tsgo 二进制偶发 EBUSY（被 Windows Defender 扫描锁文件），
-     *  且失败会打断 watch 构建；留空则走进程内 TS API 生成类型，更稳 */
-    dts: {},
+    dts: {
+      tsgo: true,
+    },
     /** 不让 vp pack 自动管理 exports —— server 有库入口和 bin 入口，手动管理更稳 */
     exports: false,
     deps: {
@@ -61,7 +60,7 @@ export default defineConfig({
       alwaysBundle: ['@silkpulse/feature-detect', '@silkpulse/shared', 'uWebSockets.js'],
     },
     /** uWS 的 import 被上面的插件替换为同目录 .node 加载，且二进制随产物 emit */
-    plugins: [uwsNativePlugin(), buildInfoPlugin(path.resolve(import.meta.dirname, "../.."))],
+    plugins: [uwsNativePlugin()],
   },
   lint: {
     options: {

@@ -8,6 +8,7 @@
 import { ref, watch } from "vue";
 import { apiFetch } from "../utils/api";
 import { copyText } from "../utils/clipboard";
+import SecretText from "./SecretText.vue";
 
 /** 项目公开信息类型 */
 interface ProjectPublic {
@@ -16,6 +17,10 @@ interface ProjectPublic {
   description?: string;
   enabled: boolean;
   createdAt: number;
+  /** 游客自建项目（5 天后自动销毁） */
+  guest?: boolean;
+  /** 过期时间（ISO） */
+  expiresAt?: string;
 }
 
 const props = defineProps<{ modelValue: boolean }>();
@@ -143,6 +148,12 @@ async function doCopy(key: string) {
   if (ok) createdApiKey.value = "✓ 已复制";
 }
 
+/** 游客项目剩余天数（向上取整） */
+function remainDays(iso: string): number {
+  const ms = Date.parse(iso) - Date.now();
+  return ms <= 0 ? 0 : Math.ceil(ms / 86400000);
+}
+
 /** 暴露给父组件（设备列表需要 projectId→name 映射） */
 defineExpose({ projects, loadProjects });
 </script>
@@ -208,7 +219,10 @@ defineExpose({ projects, loadProjects });
             <div class="flex items-center gap-2">
               <code
                 class="flex-1 px-2 py-1 text-xs bg-input rounded font-mono break-all text-primary"
-                >{{ createdApiKey }}</code
+                ><SecretText
+                  v-if="!createdApiKey.startsWith('✓')"
+                  :text="createdApiKey"
+                />{{ createdApiKey.startsWith('✓') ? createdApiKey : '' }}</code
               >
               <button
                 v-if="!createdApiKey.startsWith('✓')"
@@ -240,6 +254,12 @@ defineExpose({ projects, loadProjects });
                   "
                   class="ml-2 px-1.5 py-0.5 text-[10px] rounded font-medium"
                   >{{ p.enabled ? "启用" : "禁用" }}</span
+                >
+                <span
+                  v-if="p.guest"
+                  class="ml-1 px-1.5 py-0.5 text-[10px] rounded font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
+                  :title="p.expiresAt ? `${new Date(p.expiresAt).toLocaleString()}自动销毁` : '最长存活 5 天'"
+                  >🔑 游客 · {{ p.expiresAt ? `剩 ${remainDays(p.expiresAt)} 天` : "5 天限" }}</span
                 >
                 <span class="ml-1 text-[10px] text-faint">{{
                   new Date(p.createdAt).toLocaleDateString()

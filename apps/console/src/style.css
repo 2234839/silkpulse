@@ -1,29 +1,6 @@
 @import "tailwindcss";
 
 /**
- * 重定义 Tailwind font-mono 字体栈。
- *
- * 默认栈（ui-monospace…Consolas, "Liberation Mono", "Courier New", monospace）在
- * Linux 上这些名字常被 fontconfig 整体代偿到 Noto Sans Mono CJK——其 ASCII 字宽
- * 接近全角，导致 URL/时间戳/表格值被撑出巨大字距。显式加入 Linux 发行版普遍
- * 预装的 DejaVu Sans Mono / Ubuntu Sans Mono 作为可靠回退，再落回通用 monospace。
- */
-@theme {
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Ubuntu Sans Mono",
-    "Liberation Mono", "Courier New", monospace;
-
-  /**
-   * 同理重定义 font-sans：缺 Segoe UI/Roboto/Helvetica 的 Linux 上，
-   * 通用 sans-serif 会被 fontconfig 代偿到 CJK 字体，拉丁字符与数字字宽偏大。
-   * 显式加入 Linux 发行版普遍预装的 DejaVu Sans / Ubuntu 作为可靠回退。
-   */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "DejaVu Sans",
-    "Ubuntu", "Noto Sans", Arial, sans-serif;
-}
-
-/**
  * clarosight 控制台主题 —— 语义化 CSS 变量驱动的双主题（亮/暗）
  *
  * 不用 Tailwind 的 dark: 变体（152 处颜色逐个加 dark: 易遗漏且繁琐），
@@ -33,80 +10,67 @@
 
 /** 亮色主题（默认） */
 :root {
-  --cs-bg: #f9fafb; /** 页面底色 gray-50 */
-  --cs-surface: #ffffff; /** 卡片/面板/工具栏 */
-  --cs-elevated: #f3f4f6; /** 悬浮/header/按钮底 gray-100 */
+  --cs-bg: #f9fafb;          /** 页面底色 gray-50 */
+  --cs-surface: #ffffff;      /** 卡片/面板/工具栏 */
+  --cs-elevated: #f3f4f6;     /** 悬浮/header/按钮底 gray-100 */
   --cs-elevated-hover: #e5e7eb; /** hover 态 gray-200 */
-  --cs-text: #1f2937; /** 主文字 gray-800 */
+  --cs-text: #1f2937;         /** 主文字 gray-800 */
   --cs-text-secondary: #4b5563; /** 次要文字 gray-600 */
-  --cs-text-muted: #6b7280; /** 弱文字 gray-500 */
-  --cs-text-faint: #9ca3af; /** 更弱 gray-400 */
-  --cs-border: #e5e7eb; /** 分隔线 gray-200 */
+  --cs-text-muted: #6b7280;   /** 弱文字 gray-500 */
+  --cs-text-faint: #9ca3af;   /** 更弱 gray-400 */
+  --cs-border: #e5e7eb;       /** 分隔线 gray-200 */
   --cs-border-light: #f3f4f6; /** 浅分隔 gray-100 */
-  --cs-input-bg: #ffffff; /** 输入框底色 */
+  --cs-input-bg: #ffffff;     /** 输入框底色 */
   --cs-input-border: #d1d5db; /** 输入框边框 gray-300 */
   /** 状态色（双主题通用，仅微调透明背景） */
-  --cs-blue-soft: #eff6ff; /** blue-50 */
-  --cs-blue-text: #1d4ed8; /** blue-700 */
-  --cs-red-soft: #fef2f2; /** red-50 */
-  --cs-red-border: #fecaca; /** red-200 */
-  --cs-red-text: #991b1b; /** red-800 */
+  --cs-blue-soft: #eff6ff;    /** blue-50 */
+  --cs-blue-text: #1d4ed8;    /** blue-700 */
+  --cs-red-soft: #fef2f2;     /** red-50 */
+  --cs-red-border: #fecaca;   /** red-200 */
+  --cs-red-text: #991b1b;     /** red-800 */
 
   /** ObjectInspector 类型配色（亮色：VS Code Light+ 风格） */
-  --cs-oi-default: #1f2937; /** 主文字（未匹配类型） */
-  --cs-oi-key: #0550ae; /** 对象键名（蓝） */
-  --cs-oi-arrow: #6b7280; /** 展开箭头（灰） */
-  --cs-oi-string: #963800; /** 字符串（橙） */
-  --cs-oi-number: #05660a; /** 数字（深绿） */
-  --cs-oi-boolean: #0566d6; /** 布尔/null/undefined（蓝） */
-  --cs-oi-function: #7c4dff; /** 函数（紫） */
-  --cs-oi-type: #098a6e; /** 容器类型 object/array（青绿） */
-  --cs-oi-regexp: #b91c1c; /** 正则（红） */
-  --cs-oi-error: #b91c1c; /** 错误（红） */
-  --cs-oi-element: #8b5cf6; /** DOM/Event（紫） */
-  --cs-oi-hint: #6b7280; /** 折叠提示文字（灰） */
-  --cs-oi-row-hover: rgba(0, 0, 0, 0.08); /** 行 hover 背景 */
-  --cs-oi-edit-hover: rgba(0, 0, 0, 0.12); /** 可编辑叶子 hover 背景 */
+  --cs-oi-default: #1f2937;     /** 主文字（未匹配类型） */
+  --cs-oi-key: #0550ae;         /** 对象键名（蓝） */
+  --cs-oi-arrow: #6b7280;       /** 展开箭头（灰） */
+  --cs-oi-string: #963800;      /** 字符串（橙） */
+  --cs-oi-number: #05660a;      /** 数字（深绿） */
+  --cs-oi-boolean: #0566d6;     /** 布尔/null/undefined（蓝） */
+  --cs-oi-function: #7c4dff;    /** 函数（紫） */
+  --cs-oi-type: #098a6e;        /** 容器类型 object/array（青绿） */
+  --cs-oi-regexp: #b91c1c;      /** 正则（红） */
+  --cs-oi-error: #b91c1c;       /** 错误（红） */
+  --cs-oi-element: #8b5cf6;     /** DOM/Event（紫） */
+  --cs-oi-hint: #6b7280;        /** 折叠提示文字（灰） */
+  --cs-oi-row-hover: rgba(0, 0, 0, 0.06);   /** 行 hover 背景 */
+  --cs-oi-edit-hover: rgba(0, 0, 0, 0.1);   /** 可编辑叶子 hover 背景 */
   --cs-oi-children-border: rgba(0, 0, 0, 0.1); /** 子节点竖线 */
-  --cs-oi-edit-border: #098a6e; /** 编辑框边框 */
-  --cs-oi-edit-bg: #f9fafb; /** 编辑框背景 */
+  --cs-oi-edit-border: #098a6e;  /** 编辑框边框 */
+  --cs-oi-edit-bg: #f9fafb;     /** 编辑框背景 */
 
   /** Diff 配色（VS Code 风格：双层高亮） */
-  --cs-diff-inserted-line: rgba(155, 185, 85, 0.15); /** 新增整行背景（淡绿） */
-  --cs-diff-removed-line: rgba(255, 0, 0, 0.1); /** 删除整行背景（淡红） */
-  --cs-diff-inserted-char: rgba(155, 185, 85, 0.45); /** 新增字符背景（浓绿） */
-  --cs-diff-removed-char: rgba(255, 0, 0, 0.35); /** 删除字符背景（浓红） */
+  --cs-diff-inserted-line: rgba(155, 185, 85, 0.15);  /** 新增整行背景（淡绿） */
+  --cs-diff-removed-line: rgba(255, 0, 0, 0.10);      /** 删除整行背景（淡红） */
+  --cs-diff-inserted-char: rgba(155, 185, 85, 0.45);  /** 新增字符背景（浓绿） */
+  --cs-diff-removed-char: rgba(255, 0, 0, 0.35);      /** 删除字符背景（浓红） */
   --cs-diff-gutter-inserted: rgba(155, 185, 85, 0.3); /** 新增行号区背景 */
-  --cs-diff-gutter-removed: rgba(255, 0, 0, 0.2); /** 删除行号区背景 */
-  --cs-diff-empty-bg: rgba(128, 128, 128, 0.06); /** split 模式空白占位行背景 */
-
-  /** DOM 树（ElementTreeNode）配色（亮色：VS Code Light+ 风格） */
-  --cs-etn-bracket: #6e7681; /** 尖括号（灰） */
-  --cs-etn-tag: #044289; /** 标签名（深蓝） */
-  --cs-etn-attr-name: #0550ae; /** 属性名（蓝） */
-  --cs-etn-attr-value: #a31515; /** 属性值（暗红） */
-  --cs-etn-text: #7a5c00; /** 内联文本（暗金） */
-  --cs-etn-hint: #098658; /** 子元素数提示（绿） */
-  --cs-etn-arrow: #6b7280; /** 展开箭头（灰） */
-  --cs-etn-hover: rgba(0, 0, 0, 0.05); /** 行 hover 背景 */
-  --cs-etn-selected: rgba(9, 105, 218, 0.12); /** 选中行背景（蓝） */
-  --cs-etn-shadow: #8250df; /** shadow boundary 紫（亮色加深） */
-  --cs-etn-flash: rgba(255, 213, 79, 0.5); /** DOM 变化闪烁 */
+  --cs-diff-gutter-removed: rgba(255, 0, 0, 0.2);     /** 删除行号区背景 */
+  --cs-diff-empty-bg: rgba(128, 128, 128, 0.06);      /** split 模式空白占位行背景 */
 }
 
 /** 暗色主题 */
 .dark {
-  --cs-bg: #0f1419; /** 深底色（偏冷） */
-  --cs-surface: #1a1f29; /** 卡片/面板 */
-  --cs-elevated: #252b36; /** 悬浮/header */
+  --cs-bg: #0f1419;           /** 深底色（偏冷） */
+  --cs-surface: #1a1f29;      /** 卡片/面板 */
+  --cs-elevated: #252b36;     /** 悬浮/header */
   --cs-elevated-hover: #2d3441; /** hover 态 */
-  --cs-text: #e5e7eb; /** 主文字 gray-200 */
+  --cs-text: #e5e7eb;         /** 主文字 gray-200 */
   --cs-text-secondary: #9ca3af; /** 次要文字 gray-400 */
-  --cs-text-muted: #8b95a5; /** 弱文字 */
-  --cs-text-faint: #6b7280; /** 更弱 */
-  --cs-border: #2d3441; /** 分隔线 */
+  --cs-text-muted: #8b95a5;   /** 弱文字 */
+  --cs-text-faint: #6b7280;   /** 更弱 */
+  --cs-border: #2d3441;       /** 分隔线 */
   --cs-border-light: #252b36; /** 浅分隔 */
-  --cs-input-bg: #0f1419; /** 输入框底色 */
+  --cs-input-bg: #0f1419;     /** 输入框底色 */
   --cs-input-border: #3a4150; /** 输入框边框 */
   /** 状态色暗色版（降低饱和度，提高可读性） */
   --cs-blue-soft: #1e293b;
@@ -116,172 +80,73 @@
   --cs-red-text: #fca5a5;
 
   /** ObjectInspector 类型配色（暗色：VS Code Dark+ 风格） */
-  --cs-oi-default: #f5f5f5;
-  --cs-oi-key: #7dd3fc;
-  --cs-oi-arrow: #aaa;
-  --cs-oi-string: #fbbf72;
-  --cs-oi-number: #bef264;
-  --cs-oi-boolean: #60a5fa;
-  --cs-oi-function: #fef08a;
-  --cs-oi-type: #5eead4;
-  --cs-oi-regexp: #f87171;
-  --cs-oi-error: #ff5252;
-  --cs-oi-element: #fbbf24;
+  --cs-oi-default: #d4d4d4;
+  --cs-oi-key: #9cdcfe;
+  --cs-oi-arrow: #888;
+  --cs-oi-string: #ce9178;
+  --cs-oi-number: #b5cea8;
+  --cs-oi-boolean: #569cd6;
+  --cs-oi-function: #dcdcaa;
+  --cs-oi-type: #4ec9b0;
+  --cs-oi-regexp: #d16969;
+  --cs-oi-error: #f44747;
+  --cs-oi-element: #d7ba7d;
   --cs-oi-hint: #666;
-  --cs-oi-row-hover: rgba(127, 127, 127, 0.18);
-  --cs-oi-edit-hover: rgba(127, 127, 127, 0.25);
+  --cs-oi-row-hover: rgba(127, 127, 127, 0.08);
+  --cs-oi-edit-hover: rgba(127, 127, 127, 0.12);
   --cs-oi-children-border: rgba(127, 127, 127, 0.12);
   --cs-oi-edit-border: #4ec9b0;
   --cs-oi-edit-bg: rgba(0, 0, 0, 0.3);
 
   /** Diff 配色（VS Code 风格：双层高亮） */
   --cs-diff-inserted-line: rgba(155, 185, 85, 0.12);
-  --cs-diff-removed-line: rgba(255, 80, 80, 0.1);
-  --cs-diff-inserted-char: rgba(155, 185, 85, 0.4);
+  --cs-diff-removed-line: rgba(255, 80, 80, 0.10);
+  --cs-diff-inserted-char: rgba(155, 185, 85, 0.40);
   --cs-diff-removed-char: rgba(255, 80, 80, 0.35);
   --cs-diff-gutter-inserted: rgba(155, 185, 85, 0.25);
-  --cs-diff-gutter-removed: rgba(255, 80, 80, 0.2);
+  --cs-diff-gutter-removed: rgba(255, 80, 80, 0.20);
   --cs-diff-empty-bg: rgba(128, 128, 128, 0.04);
-
-  /** DOM 树（ElementTreeNode）配色（暗色：VS Code Dark+ 风格，保持原配色） */
-  --cs-etn-bracket: #808080;
-  --cs-etn-tag: #569cd6;
-  --cs-etn-attr-name: #9cdcfe;
-  --cs-etn-attr-value: #ce9178;
-  --cs-etn-text: #dcdcaa;
-  --cs-etn-hint: #6a9955;
-  --cs-etn-arrow: #888888;
-  --cs-etn-hover: rgba(127, 127, 127, 0.12);
-  --cs-etn-selected: rgba(86, 156, 214, 0.15);
-  --cs-etn-shadow: #7c3aed;
-  --cs-etn-flash: rgba(255, 213, 79, 0.5);
 }
 
 /** 语义 utility class —— 映射到 CSS 变量，双主题自动切换 */
 @layer utilities {
-  .bg-base {
-    background-color: var(--cs-bg);
-  }
-  .bg-surface {
-    background-color: var(--cs-surface);
-  }
-  .bg-elevated {
-    background-color: var(--cs-elevated);
-  }
-  .bg-elevated-hover:hover {
-    background-color: var(--cs-elevated-hover);
-  }
-  .bg-input {
-    background-color: var(--cs-input-bg);
-  }
-  .bg-blue-soft {
-    background-color: var(--cs-blue-soft);
-  }
-  .bg-red-soft {
-    background-color: var(--cs-red-soft);
-  }
+  .bg-base { background-color: var(--cs-bg); }
+  .bg-surface { background-color: var(--cs-surface); }
+  .bg-elevated { background-color: var(--cs-elevated); }
+  .bg-elevated-hover:hover { background-color: var(--cs-elevated-hover); }
+  .bg-input { background-color: var(--cs-input-bg); }
+  .bg-blue-soft { background-color: var(--cs-blue-soft); }
+  .bg-red-soft { background-color: var(--cs-red-soft); }
 
-  .text-primary {
-    color: var(--cs-text);
-  }
-  .text-secondary {
-    color: var(--cs-text-secondary);
-  }
-  .text-muted {
-    color: var(--cs-text-muted);
-  }
-  .text-faint {
-    color: var(--cs-text-faint);
-  }
-  .text-blue-key {
-    color: var(--cs-blue-text);
-  }
-  .text-red-key {
-    color: var(--cs-red-text);
-  }
+  .text-primary { color: var(--cs-text); }
+  .text-secondary { color: var(--cs-text-secondary); }
+  .text-muted { color: var(--cs-text-muted); }
+  .text-faint { color: var(--cs-text-faint); }
+  .text-blue-key { color: var(--cs-blue-text); }
+  .text-red-key { color: var(--cs-red-text); }
 
-  .border-base {
-    border-color: var(--cs-border);
-  }
-  .border-light {
-    border-color: var(--cs-border-light);
-  }
-  .border-input {
-    border-color: var(--cs-input-border);
-  }
-  .border-red-soft {
-    border-color: var(--cs-red-border);
-  }
+  .border-base { border-color: var(--cs-border); }
+  .border-light { border-color: var(--cs-border-light); }
+  .border-input { border-color: var(--cs-input-border); }
+  .border-red-soft { border-color: var(--cs-red-border); }
 
-  .focus-border-blue:focus {
-    border-color: #3b82f6;
-  }
-
-  /** 隐藏滚动条但保留滚动手势——用于 tab 栏等横向导航 */
-  .no-scrollbar {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
+  .focus-border-blue:focus { border-color: #3b82f6; }
 
   /** Diff 语义 class（VS Code 风格双层高亮） */
-  .diff-line-add {
-    background-color: var(--cs-diff-inserted-line);
-  }
-  .diff-line-del {
-    background-color: var(--cs-diff-removed-line);
-  }
-  .diff-char-add {
-    background-color: var(--cs-diff-inserted-char);
-  }
-  .diff-char-del {
-    background-color: var(--cs-diff-removed-char);
-  }
-  .diff-gutter-add {
-    background-color: var(--cs-diff-gutter-inserted);
-  }
-  .diff-gutter-del {
-    background-color: var(--cs-diff-gutter-removed);
-  }
-  .diff-empty {
-    background-color: var(--cs-diff-empty-bg);
-  }
+  .diff-line-add { background-color: var(--cs-diff-inserted-line); }
+  .diff-line-del { background-color: var(--cs-diff-removed-line); }
+  .diff-char-add { background-color: var(--cs-diff-inserted-char); }
+  .diff-char-del { background-color: var(--cs-diff-removed-char); }
+  .diff-gutter-add { background-color: var(--cs-diff-gutter-inserted); }
+  .diff-gutter-del { background-color: var(--cs-diff-gutter-removed); }
+  .diff-empty { background-color: var(--cs-diff-empty-bg); }
 }
 
 /* ─── 响应式适配 ─── */
 
 /** 防止窄屏横向溢出 */
-html,
-body,
-#app {
+html, body, #app {
   overflow-x: hidden;
-}
-
-/** 全局细节：细滚动条（Webkit + Firefox）、选区颜色、平滑过渡 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(127, 127, 127, 0.35) transparent;
-}
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(127, 127, 127, 0.3);
-  border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(127, 127, 127, 0.55);
-}
-::selection {
-  background: rgba(59, 130, 246, 0.25);
 }
 
 /** 窄屏下 tab 导航按钮不收缩 */
@@ -325,32 +190,13 @@ nav button {
   font-weight: 600;
   margin: 1.75rem 0 0.5rem;
 }
-.blog-content p {
-  margin: 0.875rem 0;
-}
-.blog-content strong {
-  color: var(--cs-text);
-  font-weight: 600;
-}
-.blog-content a {
-  color: var(--cs-blue-text);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.blog-content ul,
-.blog-content ol {
-  margin: 0.875rem 0;
-  padding-left: 1.5rem;
-}
-.blog-content ul {
-  list-style: disc;
-}
-.blog-content ol {
-  list-style: decimal;
-}
-.blog-content li {
-  margin: 0.375rem 0;
-}
+.blog-content p { margin: 0.875rem 0; }
+.blog-content strong { color: var(--cs-text); font-weight: 600; }
+.blog-content a { color: var(--cs-blue-text); text-decoration: underline; text-underline-offset: 2px; }
+.blog-content ul, .blog-content ol { margin: 0.875rem 0; padding-left: 1.5rem; }
+.blog-content ul { list-style: disc; }
+.blog-content ol { list-style: decimal; }
+.blog-content li { margin: 0.375rem 0; }
 .blog-content blockquote {
   margin: 1.25rem 0;
   padding: 0.625rem 1rem;
@@ -395,8 +241,7 @@ nav button {
   border-collapse: collapse;
   font-size: 0.875rem;
 }
-.blog-content th,
-.blog-content td {
+.blog-content th, .blog-content td {
   border: 1px solid var(--cs-border);
   padding: 0.5rem 0.75rem;
   text-align: left;
