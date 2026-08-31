@@ -44,21 +44,18 @@ const b = await puppeteer.launch({
 const page = await b.newPage()
 
 /** 先注入：document_start 阶段插 SDK script（等价真实 PWA 的 <head> script 标签） */
-await page.evaluateOnNewDocument((origin, apiKey) => {
+await page.evaluateOnNewDocument((origin) => {
   const inject = () => {
     const s = document.createElement('script')
     s.src = `${origin}/sdk.js`
     s.dataset.server = origin
-    /** 鉴权部署下设备接入凭据（调用方自持密钥） */
-    if (apiKey) {
-      s.dataset.apiKey = apiKey
-      s.dataset.projectId = 'cs_playground'
-    }
+    /** 设备接入凭据：projectId（公开标识，项目存在且启用即放行） */
+    s.dataset.projectId = 'cs_playground'
     ;(document.head ?? document.documentElement).appendChild(s)
   }
   if (document.documentElement) inject()
   else document.addEventListener('readystatechange', () => document.readyState !== 'loading' && inject(), { once: true })
-}, SERVER, PLAYGROUND_KEY)
+}, SERVER)
 
 /** 目标页 = console 自身（真实 Vue vite build SPA） */
 await page.goto(`${SERVER}/?tab=devtools`, { waitUntil: 'networkidle0' })

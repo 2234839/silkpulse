@@ -213,15 +213,14 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
          * 安全边界押在部署环境上，必然出事：服务对外暴露后 /demo 任何人可达，
          * HTML 源码里的密钥等于公开；走反代/容器部署时连接来源还是 127.0.0.1，
          * 连「仅限回环注入」这类判断都会被穿透。
-         * 需要带密钥测试时显式用 ?apiKey=xxx&projectId=yyy 查询参数（调用方自己持有密钥），
-         * 服务端绝不代发。
+         * 设备接入凭 projectId（公开标识，非密钥），需要测试不同项目时显式用
+         * ?projectId=yyy 查询参数，服务端绝不代发任何密钥。
          */
         {
-          /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
-          const qApiKey = url.searchParams.get('apiKey')
+          /** 从 URL query 获取可选的 projectId（设备接入凭据，公开标识） */
           const qProjectId = url.searchParams.get('projectId')
-          const injectAttrs = qApiKey && qProjectId
-            ? `data-api-key="${qApiKey}" data-project-id="${qProjectId}"`
+          const injectAttrs = qProjectId
+            ? `data-project-id="${qProjectId}"`
             : ''
           if (injectAttrs) {
             /** 兼容两种写法：带 data-server 的完整形态 + 相对路径 /sdk.js 简写形态 */
@@ -246,15 +245,14 @@ export async function createServer(options: SilkPulseServerOptions = {}): Promis
       const injHost = ctx.headers['host'] || `localhost:${port}`
       const injProto = ctx.headers['x-forwarded-proto'] || 'http'
       const origin = `${injProto}://${injHost}`
-      /** 可选：携带 project_id/api_key 查询参数，拼入 inject 代码（鉴权部署下设备需凭密钥接入） */
+      /** 设备接入凭 projectId（公开标识，注入代码可安全外发）；不再拼入任何密钥 */
       const projectId = url.searchParams.get('project_id') ?? undefined
-      const apiKey = url.searchParams.get('api_key') ?? undefined
       if (pathname === '/inject/iife') {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId, apiKey))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, injectScriptCode(origin, projectId))
       } else if (pathname === '/inject/bookmarklet') {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/plain; charset=utf-8' }, buildBookmarklet(origin, projectId, apiKey))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/plain; charset=utf-8' }, buildBookmarklet(origin, projectId))
       } else {
-        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, buildUserscript(origin, projectId, apiKey))
+        writeResponse(ctx, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, buildUserscript(origin, projectId))
       }
       return
     }
@@ -463,14 +461,14 @@ function controlUnavailableHtml(): string {
 /**
  * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
  * 防重复注入（同页面多次点 bookmarklet 只生效一次）
- * 鉴权部署下同时拼入 data-api-key + data-project-id（设备接入需凭项目密钥）
+ * 设备接入凭 projectId（公开标识）——注入代码可安全发给任意第三方，
+ * 拿到它只能把设备接入本项目，无法登录控制台（控制台凭项目密钥，只归项目所有者持有）
  */
-function injectScriptCode(origin: string, projectId?: string, apiKey?: string): string {
+function injectScriptCode(origin: string, projectId?: string): string {
   /** 动态拼 data-* 属性 */
   const dataAttrs = [
     `s.dataset.server='${origin}'`,
     projectId ? `s.dataset.projectId='${projectId}'` : '',
-    apiKey ? `s.dataset.apiKey='${apiKey}'` : '',
   ].filter(Boolean).join(';')
   return `(function(){var k='__silkpulse_injected__';if(window[k])return;window[k]=1;var s=document.createElement('script');s.src='${origin}/sdk.js';${dataAttrs};document.head.appendChild(s);})();`
 }
@@ -478,8 +476,8 @@ function injectScriptCode(origin: string, projectId?: string, apiKey?: string): 
 /**
  * 构建 bookmarklet —— 拖到书签栏，在任意页面点击即注入
  */
-function buildBookmarklet(origin: string, projectId?: string, apiKey?: string): string {
-  const code = injectScriptCode(origin, projectId, apiKey)
+function buildBookmarklet(origin: string, projectId?: string): string {
+  const code = injectScriptCode(origin, projectId)
   /** bookmarklet 需要 URL 编码特殊字符 */
   return `javascript:${encodeURIComponent(code)}`
 }
@@ -487,8 +485,8 @@ function buildBookmarklet(origin: string, projectId?: string, apiKey?: string): 
 /**
  * 构建 Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入
  */
-function buildUserscript(origin: string, projectId?: string, apiKey?: string): string {
-  const code = injectScriptCode(origin, projectId, apiKey)
+function buildUserscript(origin: string, projectId?: string): string {
+  const code = injectScriptCode(origin, projectId)
   return `// ==UserScript==
 // @name         silkpulse 远程调试注入
 // @namespace    silkpulse

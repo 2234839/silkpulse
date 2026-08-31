@@ -3,8 +3,12 @@
  *
  * 鉴权架构：
  * - 超管密钥 (Admin Key)：环境变量 SILKPULSE_ADMIN_KEY 配置，全量权限
- * - 项目 (Project)：每个项目有唯一 projectId + apiKey，SDK 接入时携带
- * - 设备连接鉴权：WebSocket 连接 URL query 中携带 projectId + apiKey
+ * - 项目 (Project)：每个项目有唯一 projectId + apiKey
+ * - 设备连接鉴权（/ws/device）：凭 projectId——项目存在且启用即放行。
+ *   projectId 是公开标识（会出现在注入代码里分发给任意第三方），
+ *   拿到它只能「把设备接入该项目」，无法登录控制台、无法调管理 API。
+ *   这样注入代码可以放心外发，控制台权限不会随之泄露。
+ * - 控制台连接鉴权（/ws/console）：凭 token（超管密钥或项目密钥）
  * - API 鉴权：Authorization: Bearer <key>（超管密钥或项目密钥）
  * - Console 鉴权：同 API，超管密钥看所有项目，项目密钥只看本项目
  *
@@ -412,6 +416,12 @@ export class AuthManager {
 
   /**
    * 验证 WebSocket 连接鉴权
+   *
+   * 设备接入的信任模型：凭 projectId（项目存在且启用即放行）。
+   * projectId 是公开标识（会出现在注入代码里分发给任意第三方），
+   * 拿到它只能「把设备接入该项目」，无法登录控制台、无法调用管理 API——
+   * 那些凭据是项目密钥（cs_live_*），只掌握在项目所有者手里。
+   * 因此注入代码可以放心外发，控制台访问权不会随之泄露。
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
   authorizeWsConnection(url: string, wsPath: string): AuthContext {
@@ -432,13 +442,12 @@ export class AuthManager {
       return { role: 'anonymous' }
     }
 
-    // 设备 WebSocket：鉴权模式下必须凭有效项目密钥接入
+    // 设备 WebSocket：凭 projectId 接入（项目存在且启用即放行，见函数头注释）
     if (wsPath === '/ws/device') {
-      const token = extractQueryParam(url, 'apiKey')
-      if (!token) return { role: 'anonymous' }
-      /** projectId 一律从密钥反查，不信任 query 参数（防伪造归属项目） */
-      const pid = this.projects.verifyKey(token)
-      if (pid) return { role: 'project', projectId: pid }
+      const qProjectId = extractQueryParam(url, 'projectId')
+      if (!qProjectId) return { role: 'anonymous' }
+      const project = this.projects.get(qProjectId)
+      if (project?.enabled) return { role: 'project', projectId: qProjectId }
       return { role: 'anonymous' }
     }
 

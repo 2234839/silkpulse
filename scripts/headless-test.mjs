@@ -12,10 +12,11 @@ const SERVER = process.env.SILKPULSE_SERVER ?? 'http://localhost:8081'
 /** 鉴权模式：所有 API fetch 带超管密钥（与压测脚本同款约定） */
 const ADMIN_KEY = process.env.SILKPULSE_ADMIN_KEY ?? ''
 const AUTH_HEADERS = ADMIN_KEY ? { Authorization: `Bearer ${ADMIN_KEY}` } : {}
-/** 游客/项目密钥 —— 714a2bc 安全修复后 /demo 不再自动注入超管密钥，设备接入需显式传参 */
+/** 设备接入凭 projectId（公开标识，项目存在且启用即放行；控制台访问凭密钥与此无关）
+ *  游客模式密钥仅用于控制台登录断言 */
 const PLAYGROUND_KEY = process.env.SILKPULSE_PLAYGROUND_KEY ?? ADMIN_KEY
-/** 带密钥的 /demo 地址（调用方自持密钥接入） */
-const DEMO_URL = `${SERVER}/demo?apiKey=${encodeURIComponent(PLAYGROUND_KEY)}&projectId=cs_playground`
+/** 带项目 ID 的 /demo 地址（设备接入凭据只需 projectId） */
+const DEMO_URL = `${SERVER}/demo?projectId=cs_playground`
 
 /** 带鉴权的 API fetch */
 async function apiFetch(path, init = {}) {
@@ -703,16 +704,16 @@ async function main() {
      *
      * responseType='json' 时 responseText 抛 InvalidStateError，
      * 必须改用 response（已解析对象）+ JSON.stringify。
-     * 验证响应体被正确捕获（含 "devices" 关键内容），而非 undefined。
+     * 验证响应体被正确捕获（含 "ok" 关键内容），而非 undefined。
      */
     await testPage.evaluate(() => document.getElementById('xhr-json-btn')?.click())
     await new Promise((r) => setTimeout(r, 1500))
     const network2 = await (await apiFetch(`/api/devices/${device.id}/network`)).json()
-    /** 找最新一条 /api/devices 的 GET XHR（responseType=json 的那条） */
+    /** 找最新一条 /api/echo 的 POST XHR（responseType=json 的那条） */
     const xhrJsonEntry = network2
-      .filter((n) => n.method === 'GET' && n.url.includes('/api/devices'))
+      .filter((n) => n.method === 'POST' && n.url.includes('/api/echo'))
       .sort((a, b) => b.seq - a.seq)[0]
-    if (xhrJsonEntry && xhrJsonEntry.resBody && (xhrJsonEntry.resBody.includes('devices') || xhrJsonEntry.resBody.includes('[]'))) {
+    if (xhrJsonEntry && xhrJsonEntry.resBody && xhrJsonEntry.resBody.includes('ok')) {
       ok(`XHR responseType=json 响应体采集成功（resBody ${xhrJsonEntry.resBody.length} 字符: ${xhrJsonEntry.resBody.slice(0, 40)}）`)
     } else {
       fail(`XHR responseType=json 响应体丢失: resBody=${xhrJsonEntry?.resBody ?? 'undefined'}（responseText 在 json 模式抛 InvalidStateError，需用 response 读取）`)
@@ -1093,8 +1094,8 @@ async function main() {
 
     /** 12. bookmarklet 注入 —— 拉取 bookmarklet，在真实页面执行，验证新设备上线 */
     const beforeCount = (await fetchDevices()).length
-    /** 带 apiKey/project_id 时凭证内嵌进 bookmarklet 代码（鉴权部署下唯一正确的注入方式）；无密钥部署则不带参数 */
-  const credQuery = PLAYGROUND_KEY ? `?api_key=${encodeURIComponent(PLAYGROUND_KEY)}&project_id=cs_playground` : ''
+    /** 设备接入凭 projectId（公开标识非密钥，注入代码可安全外发） */
+  const credQuery = '?project_id=cs_playground'
   const bookmarklet = await (await fetch(`${SERVER}/inject/bookmarklet${credQuery}`)).text()
     /** bookmarklet 形如 javascript:<encoded>，解码后在目标页面执行 */
     const bmCode = decodeURIComponent(bookmarklet.replace(/^javascript:/, ''))

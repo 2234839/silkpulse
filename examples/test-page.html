@@ -280,21 +280,21 @@
       xhr.send()
     })
 
-    /** network：XHR responseType=json（验证非 text 模式响应体采集） */
+    /** network：XHR responseType=json（验证非 text 模式响应体采集）
+     *  用公开的 /api/echo 端点（无需鉴权，返回 JSON），
+     *  SDK 注入代码只带 projectId（公开标识）不带密钥，测试页无密钥可用 */
     document.getElementById('xhr-json-btn').addEventListener('click', () => {
-      console.log('XHR(json) 发起: /api/devices')
+      console.log('XHR(json) 发起: /api/echo')
       const xhr = new XMLHttpRequest()
-      xhr.open('GET', '/api/devices')
-      /** 鉴权部署下 API 需带密钥（与 SDK 注入的 data-api-key 一致） */
-      const sdkKey = document.querySelector('script[src*="sdk.js"]')?.getAttribute('data-api-key')
-      if (sdkKey) xhr.setRequestHeader('Authorization', `Bearer ${sdkKey}`)
+      xhr.open('POST', '/api/echo')
+      xhr.setRequestHeader('Content-Type', 'application/json')
       xhr.responseType = 'json'
       xhr.onload = () => {
-        const count = Array.isArray(xhr.response) ? xhr.response.length : (xhr.response?.devices?.length ?? 0)
-        console.log('XHR(json) 完成:', xhr.status, '设备数', count)
-        show(`XHR(json) 完成，状态码 ${xhr.status}，设备数 ${count}`)
+        const ok = xhr.response?.ok
+        console.log('XHR(json) 完成:', xhr.status, 'ok=', ok)
+        show(`XHR(json) 完成，状态码 ${xhr.status}，ok=${ok}`)
       }
-      xhr.send()
+      xhr.send(JSON.stringify({ source: 'xhr-json' }))
     })
 
     /** network：POST 请求（带请求体，验证 reqBody/resBody 采集） */

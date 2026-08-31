@@ -63,7 +63,7 @@ async function runCase(name, url, preInject) {
     if (preInject) {
       /** 先注入：react-vite-post.html 静态页内嵌的 sdk script 无法携带密钥
        *  （密钥不能进仓库/产物），拦截文档响应、给 <script src="/sdk.js"> 标签
-       *  补上 data-api-key/data-project-id（714a2bc 后设备接入必须自持密钥），
+       *  补上 data-project-id（设备接入凭 projectId——公开标识非密钥，可安全内嵌），
        *  SDK 仍由页面自身在 document_start 语义下加载——先注入时序不变。 */
       await page.setRequestInterception(true)
       page.on('request', (req) => {
@@ -76,7 +76,7 @@ async function runCase(name, url, preInject) {
             .then((html) => {
               const patched = html.replace(
                 '<script src="/sdk.js" data-server="http://localhost:8080"></script>',
-                `<script src="/sdk.js" data-server="${SERVER}"${PLAYGROUND_KEY ? ` data-api-key="${PLAYGROUND_KEY}" data-project-id="cs_playground"` : ''}></script>`,
+                `<script src="/sdk.js" data-server="${SERVER}" data-project-id="cs_playground"></script>`,
               )
               req.respond({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body: patched }).catch(() => {})
             })
@@ -88,16 +88,14 @@ async function runCase(name, url, preInject) {
       await page.goto(url, { waitUntil: 'networkidle0' })
     } else {
       await page.goto(url, { waitUntil: 'networkidle0' })
-      await page.evaluate((origin, apiKey) => {
+      await page.evaluate((origin) => {
         const s = document.createElement('script')
         s.src = `${origin}/sdk.js`
         s.dataset.server = origin
-        if (apiKey) {
-          s.dataset.apiKey = apiKey
-          s.dataset.projectId = 'cs_playground'
-        }
+        /** 设备接入凭据：projectId（公开标识，项目存在且启用即放行） */
+        s.dataset.projectId = 'cs_playground'
         document.head.appendChild(s)
-      }, SERVER, PLAYGROUND_KEY)
+      }, SERVER)
     }
     /** 等设备注册 */
     let dev = null

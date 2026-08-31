@@ -99,12 +99,12 @@ async function main() {
     ? ok(`生产 Vue 页面已启动（counter=${vueMounted.rendered}），无 devtools hook，DOM 锚点 __vue_app__ 在场`)
     : fail('生产 Vue 页面启动状态异常', JSON.stringify(vueMounted))
 
-  /** 2. 动态注入 SDK（后注入时刻） */
+  /** 2. 动态注入 SDK（后注入时刻）。设备接入凭 projectId（公开标识非密钥） */
   await page.evaluate((origin) => {
     const s = document.createElement('script')
     s.src = `${origin}/sdk.js`
     s.dataset.server = origin
-    s.dataset.apiKey = 'post-inject-test'
+    s.dataset.projectId = 'cs_playground'
     document.head.appendChild(s)
   }, SERVER)
 

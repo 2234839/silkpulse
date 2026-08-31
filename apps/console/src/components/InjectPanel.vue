@@ -30,7 +30,7 @@ const scriptSnippet = computed(() => {
   const gt = String.fromCharCode(62);
   const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`;
   if (authStatus.value?.authEnabled) {
-    /** 项目密钥登录：只带 projectId（设备端不需要密钥） */
+    /** 项目密钥登录：带自己的 projectId（公开标识，注入代码可外发） */
     if (userRole.value === "project" && projectId.value) {
       return `${base} data-project-id="${projectId.value}"${gt}${lt}/script${gt}`;
     }
@@ -42,6 +42,7 @@ const scriptSnippet = computed(() => {
 /**
  * 注入器核心 JS：往当前页面塞一个带 data-server 的 sdk.js script 标签
  * 防重复注入（同页面多次点 bookmarklet 只生效一次）
+ * 设备接入凭 projectId（公开标识，非密钥）——注入代码可安全发给任意第三方
  */
 const injectScriptCode = computed(() => {
   const dataAttrs = [
@@ -49,7 +50,6 @@ const injectScriptCode = computed(() => {
     userRole.value === "project" && projectId.value
       ? `s.dataset.projectId='${projectId.value}'`
       : "",
-    !authStatus.value?.authEnabled ? "" : "",
   ]
     .filter(Boolean)
     .join(";");

@@ -112,7 +112,7 @@ async function main() {
   // 打开 demo 页作为被调试端（注入 sdk.js）
   const demo = await ctx.newPage()
   await demo.setViewport({ width: 1149, height: 853 })
-  await demo.goto(`${BASE}/demo?apiKey=pg-key-test&projectId=cs_playground`,
+  await demo.goto(`${BASE}/demo?projectId=cs_playground`,
     { waitUntil: 'networkidle2' })
   await sleep(2500)
 

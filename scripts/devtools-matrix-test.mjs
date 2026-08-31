@@ -89,19 +89,16 @@ async function waitDevice(urlHint, timeoutMs = 20000) {
   return null
 }
 
-/** 动态注入 SDK（后注入动作本体）。鉴权部署下需带 data-api-key/data-project-id
- *  （714a2bc 后设备接入必须自持密钥，服务端不再代发） */
+/** 动态注入 SDK（后注入动作本体）。鉴权部署下设备接入凭 data-project-id
+ *  （projectId 是公开标识，非密钥；设备接入不再携带任何密钥） */
 async function injectSDK(page) {
-  await page.evaluate((origin, apiKey) => {
+  await page.evaluate((origin) => {
     const s = document.createElement('script')
     s.src = `${origin}/sdk.js`
     s.dataset.server = origin
-    if (apiKey) {
-      s.dataset.apiKey = apiKey
-      s.dataset.projectId = 'cs_playground'
-    }
+    s.dataset.projectId = 'cs_playground'
     document.head.appendChild(s)
-  }, SERVER, PLAYGROUND_KEY)
+  }, SERVER)
 }
 
 /** 逐 case 启独立浏览器（独立 profile → 独立 localStorage → 独立持久设备 id，
@@ -145,22 +142,19 @@ async function runCase(cfg) {
           headers: req.headers(),
         }).catch(() => {})
       })
-      await page.evaluateOnNewDocument((origin, apiKey) => {
+      await page.evaluateOnNewDocument((origin) => {
         /** document_start 时 head/body 均可能为 null——监听首个元素落地再插 */
         const inject = () => {
           const s = document.createElement('script')
           s.src = `${origin}/sdk.js`
           s.dataset.server = origin
-          /** 鉴权部署下设备接入凭据（调用方自持密钥） */
-          if (apiKey) {
-            s.dataset.apiKey = apiKey
-            s.dataset.projectId = 'cs_playground'
-          }
+          /** 设备接入凭据：projectId（公开标识，项目存在且启用即放行） */
+          s.dataset.projectId = 'cs_playground'
           ;(document.head ?? document.documentElement).appendChild(s)
         }
         if (document.documentElement) inject()
         else document.addEventListener('readystatechange', () => document.readyState !== 'loading' && inject(), { once: true })
-      }, SERVER, PLAYGROUND_KEY)
+      }, SERVER)
       await page.goto(cfg.url, { waitUntil: 'networkidle0' })
     } else {
       await page.goto(cfg.url, { waitUntil: 'networkidle0' })
