@@ -562,6 +562,43 @@ const isRoot = props.depth === 0;
 /** 从 inject 拿到父级 path */
 const parentPath = inject<number[]>("oi-path", []);
 
+/**
+ * 字号通道：根实例持有 fontSize ref（localStorage 持久化）并 provide；
+ * 非根 inject 同一个 ref，模板里绑定到 .oi-node 的 CSS 变量。
+ * 响应式 ref 共享 = 根上改字号，整棵树立即生效。
+ */
+const OI_FONT_KEY = "silkpulse:oi-font-size";
+const OI_FONT_SIZES = [11, 12, 13, 14, 16, 18] as const;
+const fontSize = isRoot
+  ? ref<number>(Number(localStorage.getItem(OI_FONT_KEY)) || 12)
+  : inject<Ref<number>>("oi-font-size", ref<number>(12));
+
+/** 字号增大：取 OI_FONT_SIZES 中比当前大的最小档 */
+function fontLarger() {
+  if (!isRoot) return;
+  const next = OI_FONT_SIZES.find((s) => s > fontSize.value) ?? fontSize.value;
+  setFontSize(next);
+}
+
+/** 字号减小：取 OI_FONT_SIZES 中比当前小的最大档 */
+function fontSmaller() {
+  if (!isRoot) return;
+  const prev = [...OI_FONT_SIZES].reverse().find((s) => s < fontSize.value) ?? fontSize.value;
+  setFontSize(prev);
+}
+
+/** 字号重置为默认 12px */
+function fontReset() {
+  if (!isRoot) return;
+  setFontSize(12);
+}
+
+/** 设置字号并持久化 */
+function setFontSize(size: number) {
+  fontSize.value = size;
+  localStorage.setItem(OI_FONT_KEY, String(size));
+}
+
 /** 当前节点的 path = 父 path + 自己的 childIndex */
 const nodePath = computed(() => [...parentPath, props.childIndex]);
 
@@ -573,6 +610,7 @@ const expandOverride = isRoot
 /** provide 给子组件 */
 provide("oi-path", nodePath.value);
 provide("oi-expand-override", expandOverride as Ref<ExpandOverride>);
+provide("oi-font-size", fontSize as Ref<number>);
 
 /* ==================== Diff 模式：raw 树对比 ==================== */
 
@@ -1131,7 +1169,7 @@ function handleChildContextMenu(ctx: MenuContext) {
 </script>
 
 <template>
-  <div class="oi-node">
+  <div class="oi-node" :style="{ '--oi-font-size': fontSize + 'px' }">
     <!-- 行：箭头 + key + 值预览 -->
     <div
       class="oi-row"
@@ -1299,6 +1337,26 @@ function handleChildContextMenu(ctx: MenuContext) {
         <button class="oi-menu-item" @click="copyValue">
           <span class="oi-menu-icon">📄</span> 复制值
         </button>
+        <div class="oi-menu-sep"></div>
+        <button
+          class="oi-menu-item"
+          :disabled="fontSize >= 18"
+          style="opacity: 0.5"
+          @click="fontLarger"
+        >
+          <span class="oi-menu-icon">🔍＋</span> 字号增大
+        </button>
+        <button
+          class="oi-menu-item"
+          :disabled="fontSize <= 11"
+          style="opacity: 0.5"
+          @click="fontSmaller"
+        >
+          <span class="oi-menu-icon">🔍－</span> 字号减小
+        </button>
+        <button class="oi-menu-item" :disabled="fontSize === 12" @click="fontReset">
+          <span class="oi-menu-icon">↺</span> 重置字号
+        </button>
       </div>
       <!-- 遮罩层：点击关闭菜单 -->
       <div
@@ -1318,7 +1376,7 @@ function handleChildContextMenu(ctx: MenuContext) {
 <style scoped>
 .oi-node {
   font-family: "SF Mono", "Monaco", "Cascadia Code", "Menlo", monospace;
-  font-size: 12px;
+  font-size: var(--oi-font-size, 12px);
   line-height: 1.6;
   user-select: text;
 }
@@ -1528,6 +1586,11 @@ function handleChildContextMenu(ctx: MenuContext) {
 .oi-menu-item:hover {
   background: #04395e;
   color: #ffffff;
+}
+
+.oi-menu-item:disabled:hover {
+  background: none;
+  color: var(--cs-text, #cccccc);
 }
 
 .oi-menu-icon {
