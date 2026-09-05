@@ -12,8 +12,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "../src/index.ts";
 
-function parseArgs(args: string[]): { port?: number } {
-  const result: { port?: number } = {};
+function parseArgs(args: string[]): { port?: number; static?: string } {
+  const result: { port?: number; static?: string } = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--port" || arg === "-p") {
@@ -21,6 +21,11 @@ function parseArgs(args: string[]): { port?: number } {
       i++;
     } else if (arg.startsWith("--port=")) {
       result.port = Number(arg.slice(7));
+    } else if (arg === "--static") {
+      result.static = args[i + 1];
+      i++;
+    } else if (arg.startsWith("--static=")) {
+      result.static = arg.slice(9);
     }
   }
   return result;
@@ -34,6 +39,10 @@ function parseArgs(args: string[]): { port?: number } {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticRoot = path.resolve(__dirname, "../../public");
 
-const { port } = parseArgs(process.argv.slice(2));
+const { port, static: staticOverride } = parseArgs(process.argv.slice(2));
 /** createServer 返回 Promise（uWS listen 异步）：失败时让进程非零退出（let it crash） */
-await createServer({ port, staticRoot });
+await createServer({
+  port,
+  /** --static 覆盖：dev-watch 产物目录（dist-bin）层级与正式 dist/bin 不同，默认推导会错位 */
+  staticRoot: staticOverride ? path.resolve(staticOverride) : staticRoot,
+});

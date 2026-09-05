@@ -104,13 +104,25 @@ console.log("== 等待 server src 首次构建 ==");
 await waitForFile("packages/server/dist/index.mjs");
 
 console.log("== 补建 server bin 并启动 HTTP 服务 ==");
+/**
+ * bin 打到 dist-bin/（与正式 dist/bin/ 差一层目录）。
+ * bin 内 staticRoot 是 path.resolve(__dirname, "../../public")，
+ * dist/bin/ 下解析为 <pkg>/public 正确；dist-bin/ 下会错解析为 packages/public。
+ * 所以 dev 启动时显式传 --static 指向 <pkg>/public。
+ */
 await runOnce(["vp", "pack", "bin/silkpulse.ts", "--format", "esm", "--out-dir", "dist-bin"], {
   cwd: "packages/server",
 });
 // 本地 dev 默认开启 Playground 游客模式（密钥随机生成，仅本地用；显式设置了 SILKPULSE_PLAYGROUND_KEY 则尊重外部值）
 if (!process.env.SILKPULSE_PLAYGROUND_KEY)
   process.env.SILKPULSE_PLAYGROUND_KEY = `dev-playground-${Date.now().toString(36)}`;
-runTask("server-http", ["node", "--watch", "packages/server/dist-bin/silkpulse.mjs"]);
+runTask("server-http", [
+  "node",
+  "--watch",
+  "packages/server/dist-bin/silkpulse.mjs",
+  "--static",
+  "packages/server/public",
+]);
 
 console.log(
   "\n全部就绪：server http://localhost:8080 · console http://localhost:5173 （Ctrl+C 全部退出）\n",

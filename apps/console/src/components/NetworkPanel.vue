@@ -476,11 +476,10 @@ class JsonStreamSplitter {
 
   /** 追加文本，返回切出的完整 JSON 值列表 */
   push(text: string): string[] {
-    this.buffer += text;
     const out: string[] = [];
-    let start = 0;
-    for (let i = 0; i < this.buffer.length; i++) {
-      const ch = this.buffer[i];
+    /** 待输出值从 buffer 前端开始；本段切出后把 buffer 截到最新扫描点之后 */
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
       if (this.inString) {
         if (this.escaped) {
           this.escaped = false;
@@ -501,19 +500,23 @@ class JsonStreamSplitter {
         this.depth--;
         /** 深度归零 = 一个完整 JSON 值结束 */
         if (this.depth === 0 && this.started) {
-          out.push(this.buffer.slice(start, i + 1));
+          out.push(this.buffer + text.slice(0, i + 1));
           this.started = false;
-          start = i + 1;
+          this.buffer = "";
+          text = text.slice(i + 1);
+          i = -1;
         }
       } else if (!this.started && /\s|,/.test(ch)) {
         /** 值之间的空白/逗号分隔符跳过 */
-        start = i + 1;
+        this.buffer += ch;
+        text = text.slice(i + 1);
+        i = -1;
       } else if (!this.started) {
         /** 标量 JSON（数字/true/false/null）开始 */
         this.started = true;
       }
     }
-    this.buffer = this.buffer.slice(start);
+    this.buffer += text;
     return out;
   }
 
