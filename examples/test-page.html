@@ -1,150 +1,211 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>silkpulse 测试页</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; }
-    .demo { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 16px 0; }
-    button { padding: 8px 16px; margin: 4px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
-    button:hover { background: #f3f4f6; }
-    input { padding: 8px; margin: 4px; border: 1px solid #d1d5db; border-radius: 4px; width: 200px; }
-    #log { background: #f9fafb; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 13px; min-height: 60px; }
-  </style>
-</head>
-<body>
-  <h1>silkpulse 测试页</h1>
-  <p>这个页面注入了 silkpulse SDK，用来验证远程调试能力。</p>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>silkpulse 测试页</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 480px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+      .demo {
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin: 16px 0;
+      }
+      button {
+        padding: 8px 16px;
+        margin: 4px;
+        border-radius: 4px;
+        border: 1px solid #d1d5db;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f3f4f6;
+      }
+      input {
+        padding: 8px;
+        margin: 4px;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        width: 200px;
+      }
+      #log {
+        background: #f9fafb;
+        padding: 12px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 13px;
+        min-height: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>silkpulse 测试页</h1>
+    <p>这个页面注入了 silkpulse SDK，用来验证远程调试能力。</p>
 
-  <div class="demo">
-    <h3>交互元素</h3>
-    <input id="name-input" placeholder="输入你的名字" />
-    <button id="greet-btn">打招呼</button>
-  </div>
-
-  <div class="demo">
-    <h3>自定义组件（div 模拟按钮，验证完整鼠标事件序列）</h3>
-    <div id="custom-btn" role="button" tabindex="0" style="display:inline-block;padding:8px 16px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;background:#fff;">自定义按钮</div>
-    <div id="custom-result" style="margin-top:8px;color:#7c3aed;"></div>
-  </div>
-
-  <div class="demo">
-    <h3>搜索（模拟真实交互场景）</h3>
-    <input id="search-input" placeholder="输入关键词搜索..." />
-    <div id="search-result">（输入即搜索）</div>
-  </div>
-
-  <div class="demo">
-    <h3>Shadow DOM（验证 Element 面板 shadow 树展开）</h3>
-    <my-widget id="shadow-host"></my-widget>
-    <button id="shadow-add-btn">Shadow 内部动态添加元素</button>
-  </div>
-
-  <div class="demo">
-    <h3>动态 DOM（验证 Element 面板实时刷新 + 高亮）</h3>
-    <button id="dom-add-btn">动态添加元素</button>
-    <button id="dom-remove-btn">移除最后一个动态元素</button>
-    <div id="dynamic-container"></div>
-  </div>
-
-  <div class="demo">
-    <h3>表单</h3>
-    <select id="city-select">
-      <option value="bj">北京</option>
-      <option value="sh">上海</option>
-      <option value="gz">广州</option>
-    </select>
-    <label><input type="checkbox" id="agree" /> 同意条款</label>
-    <label><input type="radio" name="plan" value="free" /> 免费版</label>
-    <label><input type="radio" name="plan" value="pro" /> 专业版</label>
-  </div>
-
-  <div class="demo">
-    <h3>表单状态（验证快照 disabled/readonly/required/aria 采集）</h3>
-    <form id="state-form" onsubmit="return false">
-      <input id="ro-input" value="只读值" readonly />
-      <input id="req-input" placeholder="必填字段" required />
-      <label><input type="checkbox" id="ind-cb" /> 半选框</label>
-      <button id="disabled-btn" disabled>禁用按钮</button>
-      <button id="aria-disabled-btn" aria-disabled="true">aria禁用</button>
-      <button id="expand-btn" aria-expanded="false" aria-controls="panel">展开</button>
-    </form>
-  </div>
-
-  <div class="demo">
-    <h3>滚动 + hover（验证 __silkpulse_scroll / __silkpulse_hover）</h3>
-    <div id="scroll-box" style="height:100px;overflow:auto;border:1px solid #ccc;padding:8px;">
-      <div id="scroll-content">
-        <p>滚动行 1</p><p>滚动行 2</p><p>滚动行 3</p>
-        <p>滚动行 4</p><p>滚动行 5</p><p>滚动行 6</p>
-        <p>滚动行 7（底部）</p>
-      </div>
+    <div class="demo">
+      <h3>交互元素</h3>
+      <input id="name-input" placeholder="输入你的名字" />
+      <button id="greet-btn">打招呼</button>
     </div>
-    <button id="hover-btn">悬停看我</button>
-    <div id="hover-result" style="display:none;color:#059669;font-weight:bold;">已悬停 ✓</div>
 
-    <h3>键盘交互（验证 __silkpulse_pressKey）</h3>
-    <input id="keyboard-input" placeholder="聚焦后按 Enter 提交 / Escape 清空" style="width:100%;padding:6px;margin-top:8px;">
-    <div id="keyboard-result" style="margin-top:6px;color:#7c3aed;font-weight:bold;"></div>
-  </div>
+    <div class="demo">
+      <h3>自定义组件（div 模拟按钮，验证完整鼠标事件序列）</h3>
+      <div
+        id="custom-btn"
+        role="button"
+        tabindex="0"
+        style="
+          display: inline-block;
+          padding: 8px 16px;
+          border: 1px solid #d1d5db;
+          border-radius: 4px;
+          cursor: pointer;
+          background: #fff;
+        "
+      >
+        自定义按钮
+      </div>
+      <div id="custom-result" style="margin-top: 8px; color: #7c3aed"></div>
+    </div>
 
-  <div class="demo">
-    <h3>网络请求（验证 network 采集）</h3>
-    <button id="fetch-ok">fetch 成功请求</button>
-    <button id="fetch-404">fetch 404 请求</button>
-    <button id="xhr-btn">XHR 请求</button>
-    <button id="xhr-json-btn">XHR responseType=json</button>
-    <button id="post-btn">POST 请求（带 body）</button>
-    <button id="request-btn">POST（Request 对象）</button>
-    <button id="formdata-btn">POST FormData（表单字段）</button>
-  </div>
+    <div class="demo">
+      <h3>搜索（模拟真实交互场景）</h3>
+      <input id="search-input" placeholder="输入关键词搜索..." />
+      <div id="search-result">（输入即搜索）</div>
+    </div>
 
-  <div class="demo">
-    <h3>错误触发（验证 error 采集）</h3>
-    <button id="runtime-error-btn">触发运行时错误</button>
-    <button id="promise-error-btn">触发 Promise 错误</button>
-  </div>
+    <div class="demo">
+      <h3>Shadow DOM（验证 Element 面板 shadow 树展开）</h3>
+      <my-widget id="shadow-host"></my-widget>
+      <button id="shadow-add-btn">Shadow 内部动态添加元素</button>
+    </div>
 
-  <div class="demo">
-    <h3>日志 spam（验证连续重复日志聚合）</h3>
-    <button id="spam-log-btn">连续输出相同日志 ×10</button>
-  </div>
+    <div class="demo">
+      <h3>动态 DOM（验证 Element 面板实时刷新 + 高亮）</h3>
+      <button id="dom-add-btn">动态添加元素</button>
+      <button id="dom-remove-btn">移除最后一个动态元素</button>
+      <div id="dynamic-container"></div>
+    </div>
 
-  <div class="demo">
-    <h3>WebSocket（验证 WS 采集）</h3>
-    <button id="ws-btn">连接 WS 并收发消息</button>
-  </div>
+    <div class="demo">
+      <h3>表单</h3>
+      <select id="city-select">
+        <option value="bj">北京</option>
+        <option value="sh">上海</option>
+        <option value="gz">广州</option>
+      </select>
+      <label><input type="checkbox" id="agree" /> 同意条款</label>
+      <label><input type="radio" name="plan" value="free" /> 免费版</label>
+      <label><input type="radio" name="plan" value="pro" /> 专业版</label>
+    </div>
 
-  <div class="demo">
-    <h3>SSE（验证 Server-Sent Events 流式采集）</h3>
-    <button id="sse-btn">连接 SSE 接收事件</button>
-  </div>
+    <div class="demo">
+      <h3>表单状态（验证快照 disabled/readonly/required/aria 采集）</h3>
+      <form id="state-form" onsubmit="return false;">
+        <input id="ro-input" value="只读值" readonly />
+        <input id="req-input" placeholder="必填字段" required />
+        <label><input type="checkbox" id="ind-cb" /> 半选框</label>
+        <button id="disabled-btn" disabled>禁用按钮</button>
+        <button id="aria-disabled-btn" aria-disabled="true">aria禁用</button>
+        <button id="expand-btn" aria-expanded="false" aria-controls="panel">展开</button>
+      </form>
+    </div>
 
-  <div class="demo">
-    <h3>输出</h3>
-    <div id="log">（点击按钮试试）</div>
-  </div>
+    <div class="demo">
+      <h3>滚动 + hover（验证 __silkpulse_scroll / __silkpulse_hover）</h3>
+      <div
+        id="scroll-box"
+        style="height: 100px; overflow: auto; border: 1px solid #ccc; padding: 8px"
+      >
+        <div id="scroll-content">
+          <p>滚动行 1</p>
+          <p>滚动行 2</p>
+          <p>滚动行 3</p>
+          <p>滚动行 4</p>
+          <p>滚动行 5</p>
+          <p>滚动行 6</p>
+          <p>滚动行 7（底部）</p>
+        </div>
+      </div>
+      <button id="hover-btn">悬停看我</button>
+      <div id="hover-result" style="display: none; color: #059669; font-weight: bold">已悬停 ✓</div>
 
-  <!-- 初始化 storage 测试数据（验证 __silkpulse_storage 查询能力） -->
-  <script>
-    localStorage.setItem('cs-token', 'test-token-abc123')
-    localStorage.setItem('cs-user', JSON.stringify({ id: 1, name: 'silkpulse' }))
-    sessionStorage.setItem('cs-tab', 'session-data')
-    document.cookie = 'cs-auth=cookie-value; path=/'
-  </script>
+      <h3>键盘交互（验证 __silkpulse_pressKey）</h3>
+      <input
+        id="keyboard-input"
+        placeholder="聚焦后按 Enter 提交 / Escape 清空"
+        style="width: 100%; padding: 6px; margin-top: 8px"
+      />
+      <div id="keyboard-result" style="margin-top: 6px; color: #7c3aed; font-weight: bold"></div>
+    </div>
 
-  <!-- silkpulse SDK 注入：使用相对路径，自动适配部署域名 -->
-  <script src="/sdk.js"></script>
-  <script>
-    const logEl = document.getElementById('log')
-    const show = (msg) => { logEl.textContent = msg }
+    <div class="demo">
+      <h3>网络请求（验证 network 采集）</h3>
+      <button id="fetch-ok">fetch 成功请求</button>
+      <button id="fetch-404">fetch 404 请求</button>
+      <button id="xhr-btn">XHR 请求</button>
+      <button id="xhr-json-btn">XHR responseType=json</button>
+      <button id="post-btn">POST 请求（带 body）</button>
+      <button id="request-btn">POST（Request 对象）</button>
+      <button id="formdata-btn">POST FormData（表单字段）</button>
+    </div>
 
-    /** Shadow DOM Web Component（验证 Element 面板 shadow 树展开） */
-    customElements.define('my-widget', class extends HTMLElement {
-      connectedCallback() {
-        const shadow = this.attachShadow({ mode: 'open' })
-        shadow.innerHTML = `
+    <div class="demo">
+      <h3>错误触发（验证 error 采集）</h3>
+      <button id="runtime-error-btn">触发运行时错误</button>
+      <button id="promise-error-btn">触发 Promise 错误</button>
+    </div>
+
+    <div class="demo">
+      <h3>日志 spam（验证连续重复日志聚合）</h3>
+      <button id="spam-log-btn">连续输出相同日志 ×10</button>
+    </div>
+
+    <div class="demo">
+      <h3>WebSocket（验证 WS 采集）</h3>
+      <button id="ws-btn">连接 WS 并收发消息</button>
+    </div>
+
+    <div class="demo">
+      <h3>SSE（验证 Server-Sent Events 流式采集）</h3>
+      <button id="sse-btn">连接 SSE 接收事件</button>
+    </div>
+
+    <div class="demo">
+      <h3>输出</h3>
+      <div id="log">（点击按钮试试）</div>
+    </div>
+
+    <!-- 初始化 storage 测试数据（验证 __silkpulse_storage 查询能力） -->
+    <script>
+      localStorage.setItem("cs-token", "test-token-abc123");
+      localStorage.setItem("cs-user", JSON.stringify({ id: 1, name: "silkpulse" }));
+      sessionStorage.setItem("cs-tab", "session-data");
+      document.cookie = "cs-auth=cookie-value; path=/";
+    </script>
+
+    <!-- silkpulse SDK 注入：使用相对路径，自动适配部署域名 -->
+    <script src="/sdk.js"></script>
+    <script>
+      const logEl = document.getElementById("log");
+      const show = (msg) => {
+        logEl.textContent = msg;
+      };
+
+      /** Shadow DOM Web Component（验证 Element 面板 shadow 树展开） */
+      customElements.define(
+        "my-widget",
+        class extends HTMLElement {
+          connectedCallback() {
+            const shadow = this.attachShadow({ mode: "open" });
+            shadow.innerHTML = `
           <style>
             .widget-box { padding: 12px; border: 2px dashed #7c3aed; border-radius: 6px; }
             .widget-title { color: #7c3aed; font-weight: bold; }
@@ -154,274 +215,282 @@
             <button id="inner-btn">Shadow 内按钮</button>
             <div id="inner-list"></div>
           </div>
-        `
-      }
-    })
+        `;
+          }
+        },
+      );
 
-    /** Shadow 内部动态添加元素 */
-    document.getElementById('shadow-add-btn').addEventListener('click', () => {
-      const host = document.getElementById('shadow-host')
-      const list = host.shadowRoot?.querySelector('#inner-list')
-      if (list) {
-        const item = document.createElement('p')
-        item.textContent = `Shadow item ${list.children.length + 1}`
-        list.appendChild(item)
-      }
-    })
+      /** Shadow 内部动态添加元素 */
+      document.getElementById("shadow-add-btn").addEventListener("click", () => {
+        const host = document.getElementById("shadow-host");
+        const list = host.shadowRoot?.querySelector("#inner-list");
+        if (list) {
+          const item = document.createElement("p");
+          item.textContent = `Shadow item ${list.children.length + 1}`;
+          list.appendChild(item);
+        }
+      });
 
-    /** 动态 DOM 操作（验证 Element 面板实时刷新 + 高亮） */
-    let dynamicCount = 0
-    document.getElementById('dom-add-btn').addEventListener('click', () => {
-      const container = document.getElementById('dynamic-container')
-      const item = document.createElement('div')
-      dynamicCount++
-      item.className = 'dynamic-item'
-      item.textContent = `动态元素 #${dynamicCount}`
-      item.dataset.idx = String(dynamicCount)
-      container.appendChild(item)
-    })
-    document.getElementById('dom-remove-btn').addEventListener('click', () => {
-      const container = document.getElementById('dynamic-container')
-      const last = container.lastElementChild
-      if (last) container.removeChild(last)
-    })
+      /** 动态 DOM 操作（验证 Element 面板实时刷新 + 高亮） */
+      let dynamicCount = 0;
+      document.getElementById("dom-add-btn").addEventListener("click", () => {
+        const container = document.getElementById("dynamic-container");
+        const item = document.createElement("div");
+        dynamicCount++;
+        item.className = "dynamic-item";
+        item.textContent = `动态元素 #${dynamicCount}`;
+        item.dataset.idx = String(dynamicCount);
+        container.appendChild(item);
+      });
+      document.getElementById("dom-remove-btn").addEventListener("click", () => {
+        const container = document.getElementById("dynamic-container");
+        const last = container.lastElementChild;
+        if (last) container.removeChild(last);
+      });
 
-    document.getElementById('greet-btn').addEventListener('click', () => {
-      const name = document.getElementById('name-input').value || '匿名'
-      console.log('打招呼:', name)
-      show(`你好，${name}！`)
-    })
+      document.getElementById("greet-btn").addEventListener("click", () => {
+        const name = document.getElementById("name-input").value || "匿名";
+        console.log("打招呼:", name);
+        show(`你好，${name}！`);
+      });
 
-    /**
-     * 自定义组件：div[role=button] 监听 mousedown 而非 click。
-     * 模拟线上常见的自定义按钮组件（只绑 mousedown/mouseup），验证 __silkpulse_click
-     * 触发完整鼠标事件序列而非只 .click()，否则对此类组件无效。
-     */
-    document.getElementById('custom-btn').addEventListener('mousedown', () => {
-      document.getElementById('custom-result').textContent = '自定义按钮已触发 ✓'
-      console.log('custom-btn mousedown 触发')
-    })
+      /**
+       * 自定义组件：div[role=button] 监听 mousedown 而非 click。
+       * 模拟线上常见的自定义按钮组件（只绑 mousedown/mouseup），验证 __silkpulse_click
+       * 触发完整鼠标事件序列而非只 .click()，否则对此类组件无效。
+       */
+      document.getElementById("custom-btn").addEventListener("mousedown", () => {
+        document.getElementById("custom-result").textContent = "自定义按钮已触发 ✓";
+        console.log("custom-btn mousedown 触发");
+      });
 
-    document.getElementById('city-select').addEventListener('change', (e) => {
-      console.log('选择城市:', e.target.value)
-    })
+      document.getElementById("city-select").addEventListener("change", (e) => {
+        console.log("选择城市:", e.target.value);
+      });
 
-    /** checkbox/radio change：验证 __silkpulse_setValue 对 checkbox/radio 的支持 */
-    document.getElementById('agree').addEventListener('change', (e) => {
-      console.log('同意条款:', e.target.checked ? '已同意' : '未同意')
-    })
-    document.querySelectorAll('input[name="plan"]').forEach((r) => {
-      r.addEventListener('change', (e) => {
-        console.log('选择套餐:', e.target.value)
-      })
-    })
+      /** checkbox/radio change：验证 __silkpulse_setValue 对 checkbox/radio 的支持 */
+      document.getElementById("agree").addEventListener("change", (e) => {
+        console.log("同意条款:", e.target.checked ? "已同意" : "未同意");
+      });
+      document.querySelectorAll('input[name="plan"]').forEach((r) => {
+        r.addEventListener("change", (e) => {
+          console.log("选择套餐:", e.target.value);
+        });
+      });
 
-    /** hover：mouseover 显示提示（验证 __silkpulse_hover 触发 hover 逻辑） */
-    document.getElementById('hover-btn').addEventListener('mouseover', () => {
-      document.getElementById('hover-result').style.display = 'block'
-      console.log('hover 触发')
-    })
+      /** hover：mouseover 显示提示（验证 __silkpulse_hover 触发 hover 逻辑） */
+      document.getElementById("hover-btn").addEventListener("mouseover", () => {
+        document.getElementById("hover-result").style.display = "block";
+        console.log("hover 触发");
+      });
 
-    /** 搜索框：keyup 触发搜索（模拟真实交互，只能用键盘事件触发） */
-    const searchData = ['苹果', '香蕉', '橙子', '葡萄', '西瓜']
-    document.getElementById('search-input').addEventListener('keyup', (e) => {
-      const query = e.target.value.trim()
-      const resultEl = document.getElementById('search-result')
-      console.log('搜索:', query || '(空)')
-      const matches = searchData.filter((item) => item.includes(query))
-      resultEl.textContent = matches.length > 0
-        ? `找到 ${matches.length} 个结果：${matches.join('、')}`
-        : '无匹配结果'
-    })
+      /** 搜索框：keyup 触发搜索（模拟真实交互，只能用键盘事件触发） */
+      const searchData = ["苹果", "香蕉", "橙子", "葡萄", "西瓜"];
+      document.getElementById("search-input").addEventListener("keyup", (e) => {
+        const query = e.target.value.trim();
+        const resultEl = document.getElementById("search-result");
+        console.log("搜索:", query || "(空)");
+        const matches = searchData.filter((item) => item.includes(query));
+        resultEl.textContent =
+          matches.length > 0
+            ? `找到 ${matches.length} 个结果：${matches.join("、")}`
+            : "无匹配结果";
+      });
 
-    /** 键盘交互：Enter 提交、Escape 清空（验证 __silkpulse_pressKey 触发 keydown） */
-    const kbInput = document.getElementById('keyboard-input')
-    const kbResult = document.getElementById('keyboard-result')
-    kbInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        kbResult.textContent = `已提交: ${e.target.value}`
-        console.log('键盘 Enter 提交:', e.target.value)
-      } else if (e.key === 'Escape') {
-        e.target.value = ''
-        kbResult.textContent = '已清空'
-        console.log('键盘 Escape 清空')
-      }
-    })
+      /** 键盘交互：Enter 提交、Escape 清空（验证 __silkpulse_pressKey 触发 keydown） */
+      const kbInput = document.getElementById("keyboard-input");
+      const kbResult = document.getElementById("keyboard-result");
+      kbInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          kbResult.textContent = `已提交: ${e.target.value}`;
+          console.log("键盘 Enter 提交:", e.target.value);
+        } else if (e.key === "Escape") {
+          e.target.value = "";
+          kbResult.textContent = "已清空";
+          console.log("键盘 Escape 清空");
+        }
+      });
 
-    /** network：fetch 成功（用 httpbin 的延迟接口，或本地 /api/devices） */
-    document.getElementById('fetch-ok').addEventListener('click', async () => {
-      console.log('fetch 发起: /api/devices')
-      try {
-        const res = await fetch('/api/devices')
-        const data = await res.json()
-        console.log('fetch 完成: 设备数', data.length)
-        show(`fetch 成功，设备数 ${data.length}`)
-      } catch (e) {
-        show('fetch 失败: ' + e.message)
-      }
-    })
+      /** network：fetch 成功（用 httpbin 的延迟接口，或本地 /api/devices） */
+      document.getElementById("fetch-ok").addEventListener("click", async () => {
+        console.log("fetch 发起: /api/devices");
+        try {
+          const res = await fetch("/api/devices");
+          const data = await res.json();
+          console.log("fetch 完成: 设备数", data.length);
+          show(`fetch 成功，设备数 ${data.length}`);
+        } catch (e) {
+          show("fetch 失败: " + e.message);
+        }
+      });
 
-    /** network：fetch 404 */
-    document.getElementById('fetch-404').addEventListener('click', async () => {
-      console.log('fetch 发起: /api/not-exist')
-      const res = await fetch('/api/not-exist')
-      show(`fetch 完成，状态码 ${res.status}`)
-    })
+      /** network：fetch 404 */
+      document.getElementById("fetch-404").addEventListener("click", async () => {
+        console.log("fetch 发起: /api/not-exist");
+        const res = await fetch("/api/not-exist");
+        show(`fetch 完成，状态码 ${res.status}`);
+      });
 
-    /** network：XHR */
-    document.getElementById('xhr-btn').addEventListener('click', () => {
-      console.log('XHR 发起: /api/devices')
-      const xhr = new XMLHttpRequest()
-      xhr.open('GET', '/api/devices')
-      xhr.onload = () => {
-        console.log('XHR 完成:', xhr.status)
-        show(`XHR 完成，状态码 ${xhr.status}`)
-      }
-      xhr.send()
-    })
+      /** network：XHR */
+      document.getElementById("xhr-btn").addEventListener("click", () => {
+        console.log("XHR 发起: /api/devices");
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/devices");
+        xhr.onload = () => {
+          console.log("XHR 完成:", xhr.status);
+          show(`XHR 完成，状态码 ${xhr.status}`);
+        };
+        xhr.send();
+      });
 
-    /** network：XHR responseType=json（验证非 text 模式响应体采集） */
-    document.getElementById('xhr-json-btn').addEventListener('click', () => {
-      console.log('XHR(json) 发起: /api/devices')
-      const xhr = new XMLHttpRequest()
-      xhr.open('GET', '/api/devices')
-      /** 鉴权部署下 API 需带密钥（与 SDK 注入的 data-api-key 一致） */
-      const sdkKey = document.querySelector('script[src*="sdk.js"]')?.getAttribute('data-api-key')
-      if (sdkKey) xhr.setRequestHeader('Authorization', `Bearer ${sdkKey}`)
-      xhr.responseType = 'json'
-      xhr.onload = () => {
-        const count = Array.isArray(xhr.response) ? xhr.response.length : (xhr.response?.devices?.length ?? 0)
-        console.log('XHR(json) 完成:', xhr.status, '设备数', count)
-        show(`XHR(json) 完成，状态码 ${xhr.status}，设备数 ${count}`)
-      }
-      xhr.send()
-    })
+      /** network：XHR responseType=json（验证非 text 模式响应体采集） */
+      document.getElementById("xhr-json-btn").addEventListener("click", () => {
+        console.log("XHR(json) 发起: /api/devices");
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/devices");
+        /** 鉴权部署下 API 需带密钥（与 SDK 注入的 data-api-key 一致） */
+        const sdkKey = document
+          .querySelector('script[src*="sdk.js"]')
+          ?.getAttribute("data-api-key");
+        if (sdkKey) xhr.setRequestHeader("Authorization", `Bearer ${sdkKey}`);
+        xhr.responseType = "json";
+        xhr.onload = () => {
+          const count = Array.isArray(xhr.response)
+            ? xhr.response.length
+            : (xhr.response?.devices?.length ?? 0);
+          console.log("XHR(json) 完成:", xhr.status, "设备数", count);
+          show(`XHR(json) 完成，状态码 ${xhr.status}，设备数 ${count}`);
+        };
+        xhr.send();
+      });
 
-    /** network：POST 请求（带请求体，验证 reqBody/resBody 采集） */
-    document.getElementById('post-btn').addEventListener('click', async () => {
-      const payload = { name: 'silkpulse', action: 'test', ts: Date.now() }
-      console.log('POST 发起: /api/echo', payload)
-      try {
-        const res = await fetch('/api/echo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const text = await res.text()
-        show(`POST 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
-      } catch (e) {
-        show('POST 失败: ' + e.message)
-      }
-    })
+      /** network：POST 请求（带请求体，验证 reqBody/resBody 采集） */
+      document.getElementById("post-btn").addEventListener("click", async () => {
+        const payload = { name: "silkpulse", action: "test", ts: Date.now() };
+        console.log("POST 发起: /api/echo", payload);
+        try {
+          const res = await fetch("/api/echo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const text = await res.text();
+          show(`POST 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`);
+        } catch (e) {
+          show("POST 失败: " + e.message);
+        }
+      });
 
-    /** network：用 Request 对象发 POST（验证 body 在 Request 上时 reqBody 采集） */
-    document.getElementById('request-btn').addEventListener('click', async () => {
-      const payload = { source: 'request-object', msg: 'hello from Request' }
-      console.log('POST(Request) 发起: /api/echo', payload)
-      try {
-        /** body 在 Request 对象上，不在 fetch init 里——验证 SDK 从 Request 读取 reqBody */
-        const req = new Request('/api/echo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const res = await fetch(req)
-        const text = await res.text()
-        show(`POST(Request) 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`)
-      } catch (e) {
-        show('POST(Request) 失败: ' + e.message)
-      }
-    })
+      /** network：用 Request 对象发 POST（验证 body 在 Request 上时 reqBody 采集） */
+      document.getElementById("request-btn").addEventListener("click", async () => {
+        const payload = { source: "request-object", msg: "hello from Request" };
+        console.log("POST(Request) 发起: /api/echo", payload);
+        try {
+          /** body 在 Request 对象上，不在 fetch init 里——验证 SDK 从 Request 读取 reqBody */
+          const req = new Request("/api/echo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const res = await fetch(req);
+          const text = await res.text();
+          show(`POST(Request) 完成，状态码 ${res.status}，响应 ${text.slice(0, 50)}`);
+        } catch (e) {
+          show("POST(Request) 失败: " + e.message);
+        }
+      });
 
-    /** network：POST FormData（验证 FormData body 采集字段名 + 文件名） */
-    document.getElementById('formdata-btn').addEventListener('click', async () => {
-      const fd = new FormData()
-      fd.append('username', 'alice')
-      fd.append('email', 'alice@example.com')
-      /** 模拟文件字段（用 Blob 构造 File，不依赖真实文件输入） */
-      fd.append('avatar', new File(['fake-img'], 'profile.png', { type: 'image/png' }))
-      console.log('POST(FormData) 发起: /api/echo')
-      try {
-        const res = await fetch('/api/echo', { method: 'POST', body: fd })
-        const text = await res.text()
-        show(`POST(FormData) 完成，状态码 ${res.status}`)
-      } catch (e) {
-        show('POST(FormData) 失败: ' + e.message)
-      }
-    })
+      /** network：POST FormData（验证 FormData body 采集字段名 + 文件名） */
+      document.getElementById("formdata-btn").addEventListener("click", async () => {
+        const fd = new FormData();
+        fd.append("username", "alice");
+        fd.append("email", "alice@example.com");
+        /** 模拟文件字段（用 Blob 构造 File，不依赖真实文件输入） */
+        fd.append("avatar", new File(["fake-img"], "profile.png", { type: "image/png" }));
+        console.log("POST(FormData) 发起: /api/echo");
+        try {
+          const res = await fetch("/api/echo", { method: "POST", body: fd });
+          const text = await res.text();
+          show(`POST(FormData) 完成，状态码 ${res.status}`);
+        } catch (e) {
+          show("POST(FormData) 失败: " + e.message);
+        }
+      });
 
-    /** error：运行时错误（同步抛出，触发 window error 事件） */
-    document.getElementById('runtime-error-btn').addEventListener('click', () => {
-      show('已触发运行时错误')
-      setTimeout(() => { throw new Error('silkpulse 测试：同步运行时错误') }, 0)
-    })
+      /** error：运行时错误（同步抛出，触发 window error 事件） */
+      document.getElementById("runtime-error-btn").addEventListener("click", () => {
+        show("已触发运行时错误");
+        setTimeout(() => {
+          throw new Error("silkpulse 测试：同步运行时错误");
+        }, 0);
+      });
 
-    /** error：未处理的 Promise rejection */
-    document.getElementById('promise-error-btn').addEventListener('click', () => {
-      show('已触发 Promise 错误')
-      Promise.reject(new Error('silkpulse 测试：未处理的 Promise 错误'))
-    })
+      /** error：未处理的 Promise rejection */
+      document.getElementById("promise-error-btn").addEventListener("click", () => {
+        show("已触发 Promise 错误");
+        Promise.reject(new Error("silkpulse 测试：未处理的 Promise 错误"));
+      });
 
-    /**
-     * 连续重复日志：同步输出 10 条完全相同的日志。
-     * 验证 SDK 连续重复聚合：应只上报 1 条 + repeat=9，而非 10 条占满缓冲区。
-     */
-    document.getElementById('spam-log-btn').addEventListener('click', () => {
-      for (let i = 0; i < 10; i++) {
-        console.log('silkpulse spam: 重复日志测试')
-      }
-    })
+      /**
+       * 连续重复日志：同步输出 10 条完全相同的日志。
+       * 验证 SDK 连续重复聚合：应只上报 1 条 + repeat=9，而非 10 条占满缓冲区。
+       */
+      document.getElementById("spam-log-btn").addEventListener("click", () => {
+        for (let i = 0; i < 10; i++) {
+          console.log("silkpulse spam: 重复日志测试");
+        }
+      });
 
-    /**
-     * WebSocket：连接 server 的 echo 端点，send 一条消息，收 echo 回来后关闭。
-     * 验证 SDK 的 WS 采集：network 面板应出现 WS 连接条目 + send/recv/close 帧时间线。
-     */
-    document.getElementById('ws-btn').addEventListener('click', () => {
-      const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/test-ws`)
-      ws.addEventListener('open', () => {
-        console.log('WS 已连接，发送消息')
-        ws.send('silkpulse ws 测试消息')
-      })
-      ws.addEventListener('message', (e) => {
-        console.log('WS 收到 echo:', e.data)
-        ws.close()
-      })
-    })
+      /**
+       * WebSocket：连接 server 的 echo 端点，send 一条消息，收 echo 回来后关闭。
+       * 验证 SDK 的 WS 采集：network 面板应出现 WS 连接条目 + send/recv/close 帧时间线。
+       */
+      document.getElementById("ws-btn").addEventListener("click", () => {
+        const ws = new WebSocket(`${location.origin.replace("http", "ws")}/ws/test-ws`);
+        ws.addEventListener("open", () => {
+          console.log("WS 已连接，发送消息");
+          ws.send("silkpulse ws 测试消息");
+        });
+        ws.addEventListener("message", (e) => {
+          console.log("WS 收到 echo:", e.data);
+          ws.close();
+        });
+      });
 
-    /**
-     * SSE：连接 server 的 /api/sse-test 端点，接收 5 条事件后连接关闭。
-     * 验证 SDK 的 SSE 采集：network 面板应出现带 SSE 标识的 fetch 条目 + 事件时间线。
-     */
-    document.getElementById('sse-btn').addEventListener('click', () => {
-      console.log('SSE 发起: /api/sse-test')
-      const es = new EventSource('/sse-test')
-      es.addEventListener('open', () => {
-        console.log('SSE 已连接')
-      })
-      es.addEventListener('message', (e) => {
-        console.log('SSE message:', e.data)
-      })
-      es.addEventListener('update', (e) => {
-        console.log('SSE update:', e.data)
-      })
-      es.addEventListener('ping', (e) => {
-        console.log('SSE ping:', e.data)
-      })
-      es.addEventListener('done', (e) => {
-        console.log('SSE done:', e.data)
-        es.close()
-      })
-      es.addEventListener('error', () => {
-        /** 连接关闭后 EventSource 会触发 error，es.close 后不再重连 */
-        if (es.readyState === EventSource.CLOSED) return
-        es.close()
-      })
-    })
+      /**
+       * SSE：连接 server 的 /api/sse-test 端点，接收 5 条事件后连接关闭。
+       * 验证 SDK 的 SSE 采集：network 面板应出现带 SSE 标识的 fetch 条目 + 事件时间线。
+       */
+      document.getElementById("sse-btn").addEventListener("click", () => {
+        console.log("SSE 发起: /api/sse-test");
+        const es = new EventSource("/sse-test");
+        es.addEventListener("open", () => {
+          console.log("SSE 已连接");
+        });
+        es.addEventListener("message", (e) => {
+          console.log("SSE message:", e.data);
+        });
+        es.addEventListener("update", (e) => {
+          console.log("SSE update:", e.data);
+        });
+        es.addEventListener("ping", (e) => {
+          console.log("SSE ping:", e.data);
+        });
+        es.addEventListener("done", (e) => {
+          console.log("SSE done:", e.data);
+          es.close();
+        });
+        es.addEventListener("error", () => {
+          /** 连接关闭后 EventSource 会触发 error，es.close 后不再重连 */
+          if (es.readyState === EventSource.CLOSED) return;
+          es.close();
+        });
+      });
 
-    /** 设置 checkbox 半选状态（indeterminate 只能通过 JS 设置，HTML 属性无效） */
-    document.getElementById('ind-cb').indeterminate = true
+      /** 设置 checkbox 半选状态（indeterminate 只能通过 JS 设置，HTML 属性无效） */
+      document.getElementById("ind-cb").indeterminate = true;
 
-    console.info('silkpulse 测试页已加载')
-  </script>
-</body>
+      console.info("silkpulse 测试页已加载");
+    </script>
+  </body>
 </html>

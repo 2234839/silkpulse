@@ -18,45 +18,45 @@
  * key+timestamp 可选——劫持 setItem 时能拿到具体 key，
  * clear() 无法确定具体 key 所以不带（控制台收到后全量刷新）。
  */
-type Sink = (storageType: 'local' | 'session', key?: string, timestamp?: number) => void
+type Sink = (storageType: "local" | "session", key?: string, timestamp?: number) => void;
 
 /** 是否激活上报（默认 false，控制台打开 Storage 面板时激活） */
-let active = false
+let active = false;
 
 /** 安装 storage 变化采集器 */
 export function installStorageWatcher(sink: Sink): void {
   /** 激活时透传 sink，未激活时静默丢弃 */
   const guardedSink: Sink = (...args) => {
-    if (!active) return
-    sink(...args)
-  }
+    if (!active) return;
+    sink(...args);
+  };
   /** 劫持单个 Storage 对象的三个修改方法 */
-  function patchStorage(storage: Storage, storageType: 'local' | 'session'): void {
-    const origSetItem = storage.setItem.bind(storage)
-    const origRemoveItem = storage.removeItem.bind(storage)
-    const origClear = storage.clear.bind(storage)
+  function patchStorage(storage: Storage, storageType: "local" | "session"): void {
+    const origSetItem = storage.setItem.bind(storage);
+    const origRemoveItem = storage.removeItem.bind(storage);
+    const origClear = storage.clear.bind(storage);
 
     storage.setItem = function (key: string, value: string) {
-      origSetItem(key, value)
-      guardedSink(storageType, key, Date.now())
-    }
+      origSetItem(key, value);
+      guardedSink(storageType, key, Date.now());
+    };
     storage.removeItem = function (key: string) {
-      origRemoveItem(key)
-      guardedSink(storageType, key, Date.now())
-    }
+      origRemoveItem(key);
+      guardedSink(storageType, key, Date.now());
+    };
     storage.clear = function () {
-      origClear()
-      guardedSink(storageType)
-    }
+      origClear();
+      guardedSink(storageType);
+    };
   }
 
   try {
-    patchStorage(localStorage, 'local')
+    patchStorage(localStorage, "local");
   } catch {
     /** localStorage 不可用（隐私模式）忽略 */
   }
   try {
-    patchStorage(sessionStorage, 'session')
+    patchStorage(sessionStorage, "session");
   } catch {
     /** sessionStorage 不可用忽略 */
   }
@@ -67,16 +67,16 @@ export function installStorageWatcher(sink: Sink): void {
    * 同 tab 内的修改已被上面的劫持捕获，这里补上跨 tab 场景。
    * event.storageArea 判断是 localStorage 还是 sessionStorage。
    */
-  window.addEventListener('storage', (e) => {
+  window.addEventListener("storage", (e) => {
     if (e.storageArea === localStorage) {
-      guardedSink('local', e.key ?? undefined, Date.now())
+      guardedSink("local", e.key ?? undefined, Date.now());
     } else if (e.storageArea === sessionStorage) {
-      guardedSink('session', e.key ?? undefined, Date.now())
+      guardedSink("session", e.key ?? undefined, Date.now());
     }
-  })
+  });
 }
 
 /** 暂停/恢复上报（控制台未打开 Storage 面板时不发数据减少开销） */
 export function setStorageWatcherActive(value: boolean): void {
-  active = value
+  active = value;
 }

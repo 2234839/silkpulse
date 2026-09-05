@@ -228,12 +228,7 @@ async function copyInject() {
           class="px-2 py-1 text-xs rounded border border-input bg-elevated text-primary"
         >
           <option value="">未分组（全局可见）</option>
-          <option
-            v-for="p in adminProjects"
-            :key="p.id"
-            :value="p.id"
-            :disabled="!p.enabled"
-          >
+          <option v-for="p in adminProjects" :key="p.id" :value="p.id" :disabled="!p.enabled">
             {{ p.name }}（{{ p.id }}）{{ p.enabled ? "" : " · 已停用" }}
           </option>
         </select>

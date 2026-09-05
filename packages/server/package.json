@@ -1,13 +1,13 @@
 {
   "name": "@silkpulse/server",
   "version": "0.0.0",
+  "bin": {
+    "silkpulse": "./dist/bin/silkpulse.mjs"
+  },
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
-  },
-  "bin": {
-    "silkpulse": "./dist/bin/silkpulse.mjs"
   },
   "scripts": {
     "build": "vp pack src/index.ts --format esm --out-dir dist && vp pack bin/silkpulse.ts --format esm --out-dir dist/bin",

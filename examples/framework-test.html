@@ -1,173 +1,389 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>silkpulse 框架事件全量测试</title>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="/sdk.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 1000px; margin: 0 auto; background: #fafafa; }
-    .section { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 20px; margin: 16px 0; }
-    .log { background: #f5f5f5; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin: 3px 0; font-family: 'SF Mono', Consolas, monospace; }
-    .log.react { border-left: 3px solid #61dafb; }
-    .log.vue { border-left: 3px solid #42b883; }
-    .log.native { border-left: 3px solid #f7df1e; }
-    .react-clicked { background: #d4edda !important; }
-    .vue-clicked { background: #cce5ff !important; }
-    button, input, select, textarea { font-size: 14px; }
-    input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
-    .row { margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    #event-log { max-height: 200px; overflow-y: auto; }
-    h3 { margin-top: 0; }
-    .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-    .tag.react { background: #61dafb22; color: #61dafb; }
-    .tag.vue { background: #42b88322; color: #42b883; }
-    .tag.native { background: #f7df1e22; color: #8a8500; }
-  </style>
-</head>
-<body>
-  <h1>silkpulse 框架事件全量测试</h1>
-  <div id="react-root"></div>
-  <div id="vue-root"></div>
-  <div class="section">
-    <h3>原生 JS <span class="tag native">native</span></h3>
-    <div class="row"><button id="native-btn">原生按钮</button></div>
-    <div class="row"><button id="native-btn-mousedown">原生 mousedown 按钮</button></div>
-    <div class="row"><input id="native-input" placeholder="原生 input"></div>
-    <div class="row"><input id="native-input-keyup" placeholder="原生 keyup input"></div>
-    <div class="row"><select id="native-select"><option value="">请选择</option><option value="opt1">选项一</option><option value="opt2">选项二</option></select></div>
-    <div class="row"><label><input id="native-checkbox" type="checkbox"> 原生 checkbox</label></div>
-    <div class="row"><label><input id="native-radio-a" type="radio" name="native-radio"> A</label><label><input id="native-radio-b" type="radio" name="native-radio"> B</label></div>
-    <div class="row"><textarea id="native-textarea" placeholder="原生 textarea"></textarea></div>
-  </div>
-  <div class="section"><h3>事件日志</h3><div id="event-log"></div></div>
-  <script>
-    function pushLog(framework, msg) {
-      var el = document.createElement('div')
-      el.className = 'log ' + framework
-      el.textContent = '[' + framework + '] ' + msg
-      document.getElementById('event-log').prepend(el)
-      console.log('[' + framework + '] ' + msg)
-    }
-    document.getElementById('native-btn').addEventListener('click', function() { pushLog('native', 'btn click') })
-    document.getElementById('native-btn-mousedown').addEventListener('mousedown', function() { pushLog('native', 'btn mousedown') })
-    document.getElementById('native-input').addEventListener('input', function(e) { pushLog('native', 'input value=' + e.target.value) })
-    document.getElementById('native-input-keyup').addEventListener('keyup', function(e) { pushLog('native', 'keyup key=' + e.key + ' value=' + e.target.value) })
-    document.getElementById('native-select').addEventListener('change', function(e) { pushLog('native', 'select change value=' + e.target.value) })
-    document.getElementById('native-checkbox').addEventListener('change', function(e) { pushLog('native', 'checkbox change checked=' + e.target.checked) })
-    document.querySelectorAll('input[name="native-radio"]').forEach(function(r) { r.addEventListener('change', function(e) { pushLog('native', 'radio change id=' + e.target.id) }) })
-    document.getElementById('native-textarea').addEventListener('input', function(e) { pushLog('native', 'textarea input value=' + e.target.value) })
-  </script>
-  <script>
-    var reactLog = function(msg) { pushLog('react', msg) }
-    var useState = React.useState
-    var createElement = React.createElement
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>silkpulse 框架事件全量测试</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/sdk.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 20px;
+        max-width: 1000px;
+        margin: 0 auto;
+        background: #fafafa;
+      }
+      .section {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 16px 0;
+      }
+      .log {
+        background: #f5f5f5;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        margin: 3px 0;
+        font-family: "SF Mono", Consolas, monospace;
+      }
+      .log.react {
+        border-left: 3px solid #61dafb;
+      }
+      .log.vue {
+        border-left: 3px solid #42b883;
+      }
+      .log.native {
+        border-left: 3px solid #f7df1e;
+      }
+      .react-clicked {
+        background: #d4edda !important;
+      }
+      .vue-clicked {
+        background: #cce5ff !important;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font-size: 14px;
+      }
+      input,
+      select,
+      textarea {
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+      }
+      .row {
+        margin: 8px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      #event-log {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      h3 {
+        margin-top: 0;
+      }
+      .tag {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .tag.react {
+        background: #61dafb22;
+        color: #61dafb;
+      }
+      .tag.vue {
+        background: #42b88322;
+        color: #42b883;
+      }
+      .tag.native {
+        background: #f7df1e22;
+        color: #8a8500;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>silkpulse 框架事件全量测试</h1>
+    <div id="react-root"></div>
+    <div id="vue-root"></div>
+    <div class="section">
+      <h3>原生 JS <span class="tag native">native</span></h3>
+      <div class="row"><button id="native-btn">原生按钮</button></div>
+      <div class="row"><button id="native-btn-mousedown">原生 mousedown 按钮</button></div>
+      <div class="row"><input id="native-input" placeholder="原生 input" /></div>
+      <div class="row"><input id="native-input-keyup" placeholder="原生 keyup input" /></div>
+      <div class="row">
+        <select id="native-select">
+          <option value="">请选择</option>
+          <option value="opt1">选项一</option>
+          <option value="opt2">选项二</option>
+        </select>
+      </div>
+      <div class="row">
+        <label><input id="native-checkbox" type="checkbox" /> 原生 checkbox</label>
+      </div>
+      <div class="row">
+        <label><input id="native-radio-a" type="radio" name="native-radio" /> A</label
+        ><label><input id="native-radio-b" type="radio" name="native-radio" /> B</label>
+      </div>
+      <div class="row"><textarea id="native-textarea" placeholder="原生 textarea"></textarea></div>
+    </div>
+    <div class="section">
+      <h3>事件日志</h3>
+      <div id="event-log"></div>
+    </div>
+    <script>
+      function pushLog(framework, msg) {
+        var el = document.createElement("div");
+        el.className = "log " + framework;
+        el.textContent = "[" + framework + "] " + msg;
+        document.getElementById("event-log").prepend(el);
+        console.log("[" + framework + "] " + msg);
+      }
+      document.getElementById("native-btn").addEventListener("click", function () {
+        pushLog("native", "btn click");
+      });
+      document.getElementById("native-btn-mousedown").addEventListener("mousedown", function () {
+        pushLog("native", "btn mousedown");
+      });
+      document.getElementById("native-input").addEventListener("input", function (e) {
+        pushLog("native", "input value=" + e.target.value);
+      });
+      document.getElementById("native-input-keyup").addEventListener("keyup", function (e) {
+        pushLog("native", "keyup key=" + e.key + " value=" + e.target.value);
+      });
+      document.getElementById("native-select").addEventListener("change", function (e) {
+        pushLog("native", "select change value=" + e.target.value);
+      });
+      document.getElementById("native-checkbox").addEventListener("change", function (e) {
+        pushLog("native", "checkbox change checked=" + e.target.checked);
+      });
+      document.querySelectorAll('input[name="native-radio"]').forEach(function (r) {
+        r.addEventListener("change", function (e) {
+          pushLog("native", "radio change id=" + e.target.id);
+        });
+      });
+      document.getElementById("native-textarea").addEventListener("input", function (e) {
+        pushLog("native", "textarea input value=" + e.target.value);
+      });
+    </script>
+    <script>
+      var reactLog = function (msg) {
+        pushLog("react", msg);
+      };
+      var useState = React.useState;
+      var createElement = React.createElement;
 
-    function ReactApp() {
-      var btnClickedState = useState(false)
-      var ctrlValueState = useState('')
-      var checkedState = useState(false)
-      var radioState = useState('')
-      var selectValState = useState('')
-      var hoveredState = useState(false)
+      function ReactApp() {
+        var btnClickedState = useState(false);
+        var ctrlValueState = useState("");
+        var checkedState = useState(false);
+        var radioState = useState("");
+        var selectValState = useState("");
+        var hoveredState = useState(false);
 
-      return createElement('div', { className: 'section' },
-        createElement('h3', null, 'React 18 ', createElement('span', { className: 'tag react' }, 'react')),
-        createElement('div', { className: 'row' },
-          createElement('button', {
-            id: 'react-btn',
-            className: btnClickedState[0] ? 'react-clicked' : '',
-            onClick: function(e) { reactLog('btn onClick isTrusted=' + e.isTrusted); btnClickedState[1](true); setTimeout(function() { btnClickedState[1](false) }, 2000) },
-          }, 'React 按钮')
-        ),
-        createElement('div', { className: 'row' },
-          createElement('div', {
-            id: 'react-hover',
-            style: { padding: '8px 16px', border: '1px dashed #ccc', cursor: 'pointer', background: hoveredState[0] ? '#e3f2fd' : '#fff' },
-            onMouseEnter: function() { reactLog('hover onMouseEnter'); hoveredState[1](true) },
-            onMouseLeave: function() { reactLog('hover onMouseLeave'); hoveredState[1](false) },
-          }, hoveredState[0] ? '已悬停' : '悬停我')
-        ),
-        createElement('div', { className: 'row' },
-          createElement('input', {
-            id: 'react-input',
-            placeholder: 'React 受控 input',
-            value: ctrlValueState[0],
-            onChange: function(e) { reactLog('input onChange value=' + e.target.value); ctrlValueState[1](e.target.value) },
-          })
-        ),
-        createElement('div', { className: 'row' },
-          createElement('label', null,
-            createElement('input', {
-              id: 'react-checkbox',
-              type: 'checkbox',
-              checked: checkedState[0],
-              onChange: function(e) { reactLog('checkbox onChange checked=' + e.target.checked); checkedState[1](e.target.checked) },
-            }), ' React checkbox')
-        ),
-        createElement('div', { className: 'row' },
-          createElement('label', null,
-            createElement('input', {
-              id: 'react-radio-a', type: 'radio', name: 'react-radio', checked: radioState[0] === 'a',
-              onChange: function(e) { reactLog('radio-a onChange checked=' + e.target.checked); if (e.target.checked) radioState[1]('a') },
-            }), ' A'),
-          createElement('label', null,
-            createElement('input', {
-              id: 'react-radio-b', type: 'radio', name: 'react-radio', checked: radioState[0] === 'b',
-              onChange: function(e) { reactLog('radio-b onChange checked=' + e.target.checked); if (e.target.checked) radioState[1]('b') },
-            }), ' B')
-        ),
-        createElement('div', { className: 'row' },
-          createElement('select', {
-            id: 'react-select', value: selectValState[0],
-            onChange: function(e) { reactLog('select onChange value=' + e.target.value); selectValState[1](e.target.value) },
-          },
-            createElement('option', { value: '' }, '请选择'),
-            createElement('option', { value: 'r1' }, 'React 选项1'),
-            createElement('option', { value: 'r2' }, 'React 选项2'))
-        )
-      )
-    }
-    ReactDOM.createRoot(document.getElementById('react-root')).render(createElement(ReactApp))
-  </script>
-  <script>
-    var vueLog = function(msg) { pushLog('vue', msg) }
-    var vueApp = Vue.createApp({
-      setup: function() {
-        var btnClicked = Vue.ref(false)
-        var ctrlValue = Vue.ref('')
-        var checked = Vue.ref(false)
-        var radio = Vue.ref('')
-        var selectVal = Vue.ref('')
-        var hovered = Vue.ref(false)
-        return {
-          btnClicked: btnClicked, ctrlValue: ctrlValue, checked: checked, radio: radio, selectVal: selectVal, hovered: hovered,
-          onBtnClick: function(e) { vueLog('btn onClick isTrusted=' + e.isTrusted); btnClicked.value = true; setTimeout(function() { btnClicked.value = false }, 2000) },
-          onCtrlInput: function(e) { vueLog('input onInput value=' + e.target.value); ctrlValue.value = e.target.value },
-          onCheckboxChange: function(e) { vueLog('checkbox onChange checked=' + e.target.checked); checked.value = e.target.checked },
-          onRadioChange: function(val, e) { if (e.target.checked) { vueLog('radio-' + val + ' onChange checked=' + e.target.checked); radio.value = val } },
-          onSelectChange: function(e) { vueLog('select onChange value=' + e.target.value); selectVal.value = e.target.value },
-          onHoverEnter: function() { vueLog('hover onMouseEnter'); hovered.value = true },
-          onHoverLeave: function() { vueLog('hover onMouseLeave'); hovered.value = false },
-        }
-      },
-      template: [
-        '<div class="section">',
-        '<h3>Vue 3 <span class="tag vue">vue</span></h3>',
-        '<div class="row"><button id="vue-btn" :class="btnClicked ? \'vue-clicked\' : \'\'" @click="onBtnClick">Vue 按钮</button></div>',
-        '<div class="row"><div id="vue-hover" :style="{ padding: \'8px 16px\', border: \'1px dashed #ccc\', cursor: \'pointer\', background: hovered ? \'#e3f2fd\' : \'#fff\' }" @mouseenter="onHoverEnter" @mouseleave="onHoverLeave">{{ hovered ? \'已悬停\' : \'悬停我\' }}</div></div>',
-        '<div class="row"><input id="vue-input" placeholder="Vue input" :value="ctrlValue" @input="onCtrlInput"></div>',
-        '<div class="row"><label><input id="vue-checkbox" type="checkbox" :checked="checked" @change="onCheckboxChange"> Vue checkbox</label></div>',
-        '<div class="row"><label><input id="vue-radio-a" type="radio" name="vue-radio" :checked="radio === \'a\'" @change="onRadioChange(\'a\', $event)"> A</label><label><input id="vue-radio-b" type="radio" name="vue-radio" :checked="radio === \'b\'" @change="onRadioChange(\'b\', $event)"> B</label></div>',
-        '<div class="row"><select id="vue-select" :value="selectVal" @change="onSelectChange"><option value="">请选择</option><option value="v1">Vue 选项1</option><option value="v2">Vue 选项2</option></select></div>',
-        '</div>',
-      ].join('\n'),
-    })
-    vueApp.mount('#vue-root')
-  </script>
-</body>
+        return createElement(
+          "div",
+          { className: "section" },
+          createElement(
+            "h3",
+            null,
+            "React 18 ",
+            createElement("span", { className: "tag react" }, "react"),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement(
+              "button",
+              {
+                id: "react-btn",
+                className: btnClickedState[0] ? "react-clicked" : "",
+                onClick: function (e) {
+                  reactLog("btn onClick isTrusted=" + e.isTrusted);
+                  btnClickedState[1](true);
+                  setTimeout(function () {
+                    btnClickedState[1](false);
+                  }, 2000);
+                },
+              },
+              "React 按钮",
+            ),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement(
+              "div",
+              {
+                id: "react-hover",
+                style: {
+                  padding: "8px 16px",
+                  border: "1px dashed #ccc",
+                  cursor: "pointer",
+                  background: hoveredState[0] ? "#e3f2fd" : "#fff",
+                },
+                onMouseEnter: function () {
+                  reactLog("hover onMouseEnter");
+                  hoveredState[1](true);
+                },
+                onMouseLeave: function () {
+                  reactLog("hover onMouseLeave");
+                  hoveredState[1](false);
+                },
+              },
+              hoveredState[0] ? "已悬停" : "悬停我",
+            ),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement("input", {
+              id: "react-input",
+              placeholder: "React 受控 input",
+              value: ctrlValueState[0],
+              onChange: function (e) {
+                reactLog("input onChange value=" + e.target.value);
+                ctrlValueState[1](e.target.value);
+              },
+            }),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement(
+              "label",
+              null,
+              createElement("input", {
+                id: "react-checkbox",
+                type: "checkbox",
+                checked: checkedState[0],
+                onChange: function (e) {
+                  reactLog("checkbox onChange checked=" + e.target.checked);
+                  checkedState[1](e.target.checked);
+                },
+              }),
+              " React checkbox",
+            ),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement(
+              "label",
+              null,
+              createElement("input", {
+                id: "react-radio-a",
+                type: "radio",
+                name: "react-radio",
+                checked: radioState[0] === "a",
+                onChange: function (e) {
+                  reactLog("radio-a onChange checked=" + e.target.checked);
+                  if (e.target.checked) radioState[1]("a");
+                },
+              }),
+              " A",
+            ),
+            createElement(
+              "label",
+              null,
+              createElement("input", {
+                id: "react-radio-b",
+                type: "radio",
+                name: "react-radio",
+                checked: radioState[0] === "b",
+                onChange: function (e) {
+                  reactLog("radio-b onChange checked=" + e.target.checked);
+                  if (e.target.checked) radioState[1]("b");
+                },
+              }),
+              " B",
+            ),
+          ),
+          createElement(
+            "div",
+            { className: "row" },
+            createElement(
+              "select",
+              {
+                id: "react-select",
+                value: selectValState[0],
+                onChange: function (e) {
+                  reactLog("select onChange value=" + e.target.value);
+                  selectValState[1](e.target.value);
+                },
+              },
+              createElement("option", { value: "" }, "请选择"),
+              createElement("option", { value: "r1" }, "React 选项1"),
+              createElement("option", { value: "r2" }, "React 选项2"),
+            ),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById("react-root")).render(createElement(ReactApp));
+    </script>
+    <script>
+      var vueLog = function (msg) {
+        pushLog("vue", msg);
+      };
+      var vueApp = Vue.createApp({
+        setup: function () {
+          var btnClicked = Vue.ref(false);
+          var ctrlValue = Vue.ref("");
+          var checked = Vue.ref(false);
+          var radio = Vue.ref("");
+          var selectVal = Vue.ref("");
+          var hovered = Vue.ref(false);
+          return {
+            btnClicked: btnClicked,
+            ctrlValue: ctrlValue,
+            checked: checked,
+            radio: radio,
+            selectVal: selectVal,
+            hovered: hovered,
+            onBtnClick: function (e) {
+              vueLog("btn onClick isTrusted=" + e.isTrusted);
+              btnClicked.value = true;
+              setTimeout(function () {
+                btnClicked.value = false;
+              }, 2000);
+            },
+            onCtrlInput: function (e) {
+              vueLog("input onInput value=" + e.target.value);
+              ctrlValue.value = e.target.value;
+            },
+            onCheckboxChange: function (e) {
+              vueLog("checkbox onChange checked=" + e.target.checked);
+              checked.value = e.target.checked;
+            },
+            onRadioChange: function (val, e) {
+              if (e.target.checked) {
+                vueLog("radio-" + val + " onChange checked=" + e.target.checked);
+                radio.value = val;
+              }
+            },
+            onSelectChange: function (e) {
+              vueLog("select onChange value=" + e.target.value);
+              selectVal.value = e.target.value;
+            },
+            onHoverEnter: function () {
+              vueLog("hover onMouseEnter");
+              hovered.value = true;
+            },
+            onHoverLeave: function () {
+              vueLog("hover onMouseLeave");
+              hovered.value = false;
+            },
+          };
+        },
+        template: [
+          '<div class="section">',
+          '<h3>Vue 3 <span class="tag vue">vue</span></h3>',
+          '<div class="row"><button id="vue-btn" :class="btnClicked ? \'vue-clicked\' : \'\'" @click="onBtnClick">Vue 按钮</button></div>',
+          "<div class=\"row\"><div id=\"vue-hover\" :style=\"{ padding: '8px 16px', border: '1px dashed #ccc', cursor: 'pointer', background: hovered ? '#e3f2fd' : '#fff' }\" @mouseenter=\"onHoverEnter\" @mouseleave=\"onHoverLeave\">{{ hovered ? '已悬停' : '悬停我' }}</div></div>",
+          '<div class="row"><input id="vue-input" placeholder="Vue input" :value="ctrlValue" @input="onCtrlInput"></div>',
+          '<div class="row"><label><input id="vue-checkbox" type="checkbox" :checked="checked" @change="onCheckboxChange"> Vue checkbox</label></div>',
+          '<div class="row"><label><input id="vue-radio-a" type="radio" name="vue-radio" :checked="radio === \'a\'" @change="onRadioChange(\'a\', $event)"> A</label><label><input id="vue-radio-b" type="radio" name="vue-radio" :checked="radio === \'b\'" @change="onRadioChange(\'b\', $event)"> B</label></div>',
+          '<div class="row"><select id="vue-select" :value="selectVal" @change="onSelectChange"><option value="">请选择</option><option value="v1">Vue 选项1</option><option value="v2">Vue 选项2</option></select></div>',
+          "</div>",
+        ].join("\n"),
+      });
+      vueApp.mount("#vue-root");
+    </script>
+  </body>
 </html>

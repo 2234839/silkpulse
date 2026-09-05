@@ -159,7 +159,8 @@ watch(
           <p class="text-xs text-yellow-700 dark:text-yellow-300 leading-relaxed">
             🔑 你在使用游客临时项目（最长存活 5 天，{{
               projectExpiresAt ? new Date(projectExpiresAt).toLocaleString() : "到期"
-            }}自动销毁）。到期后此提示词中的 Key 失效，需重新创建。这是对游客的限制，有长期需要建议自己部署一份：
+            }}自动销毁）。到期后此提示词中的 Key
+            失效，需重新创建。这是对游客的限制，有长期需要建议自己部署一份：
             <a
               href="https://github.com/2234839/silkpulse"
               target="_blank"

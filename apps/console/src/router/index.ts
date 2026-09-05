@@ -4,36 +4,36 @@
  * 路由懒加载：每个路由组件用动态 import() 拆为独立 chunk，
  * 访问对应路由时才加载，减小首屏 JS 体积。
  */
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory } from "vue-router";
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
-      path: '/',
-      name: 'console',
+      path: "/",
+      name: "console",
       /** 控制台主页（设备列表 + 调试面板） */
-      component: () => import('../ConsoleApp.vue'),
+      component: () => import("../ConsoleApp.vue"),
     },
     {
-      path: '/tools',
-      name: 'tools',
+      path: "/tools",
+      name: "tools",
       /** Web Debug 工具箱（不需要选中设备） */
-      component: () => import('../components/ToolsPanel.vue'),
+      component: () => import("../components/ToolsPanel.vue"),
     },
     {
-      path: '/blog',
-      name: 'blog',
+      path: "/blog",
+      name: "blog",
       /** blog 列表页（公开区域，帖子用 Vue SFC 编写） */
-      component: () => import('../blog/BlogList.vue'),
+      component: () => import("../blog/BlogList.vue"),
     },
     {
-      path: '/blog/:slug',
-      name: 'blog-post',
+      path: "/blog/:slug",
+      name: "blog-post",
       /** blog 详情页（按 slug 懒加载对应帖子组件） */
-      component: () => import('../blog/BlogPost.vue'),
+      component: () => import("../blog/BlogPost.vue"),
     },
     /** 兜底：未知路由重定向到控制台 */
-    { path: '/:pathMatch(.*)*', redirect: '/' },
+    { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
-})
+});

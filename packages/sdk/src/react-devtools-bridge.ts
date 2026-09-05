@@ -30,76 +30,76 @@
  *   fromBackend 标记方向，避免 SDK 把自己发出的消息又转发回 backend
  */
 
-import { send } from './ws-client.js'
-import { registerServerMessageHandler } from './message-router.js'
+import { send } from "./ws-client.js";
+import { registerServerMessageHandler } from "./message-router.js";
 
 /** backend bundle 加载后的全局名（IIFE global-name） */
-const BACKEND_GLOBAL = 'ReactDevToolsBackend'
+const BACKEND_GLOBAL = "ReactDevToolsBackend";
 
 /** backend bundle URL（server 静态服务，SDK 与目标页同源时直接用相对路径） */
-const BACKEND_URL = '/plugins/react-devtools/assets/backend.bundle.js'
+const BACKEND_URL = "/plugins/react-devtools/assets/backend.bundle.js";
 
 /** backend bundle 模块形状（react-devtools-inline/backend 的导出） */
 interface BackendModule {
-  initialize: (target: Window) => unknown
-  activate: (target: Window, opts?: { bridge?: unknown }) => void
-  createBridge: (target: Window, wall?: unknown) => unknown
+  initialize: (target: Window) => unknown;
+  activate: (target: Window, opts?: { bridge?: unknown }) => void;
+  createBridge: (target: Window, wall?: unknown) => unknown;
 }
 
 /** hook 上的事件订阅回调 */
-type HookListener = (data: unknown) => void
+type HookListener = (data: unknown) => void;
 
 /** react-dom 通过 inject 传入的 renderer internals */
 interface RendererInternals {
-  version?: string
-  bundleType?: number
-  [key: string]: unknown
+  version?: string;
+  bundleType?: number;
+  [key: string]: unknown;
 }
 
 /** rendererInterfaces 里 interface 的形状（backend attachRenderer 的返回物，
  *  reactivate 时要调 flushInitialOperations） */
 interface RendererInterface {
-  flushInitialOperations: () => void
-  [key: string]: unknown
+  flushInitialOperations: () => void;
+  [key: string]: unknown;
 }
 
 /** 真 hook 的形状（installHook 装上的完整对象） */
 interface RealHook {
-  rendererInterfaces: Map<number, RendererInterface>
-  renderers: Map<number, RendererInternals>
-  hasUnsupportedRendererAttached: boolean
-  emit: (event: string, data?: unknown) => void
-  on: (event: string, fn: HookListener) => void
-  off: (event: string, fn: HookListener) => void
-  sub: (event: string, fn: HookListener) => () => void
-  inject: (renderer: RendererInternals) => number
-  getFiberRoots: (rendererID: number) => Set<unknown>
-  onCommitFiberRoot: (rendererID: number, root: unknown, priorityLevel?: unknown) => void
-  onCommitFiberUnmount: (rendererID: number, fiber: unknown) => void
-  onPostCommitFiberRoot?: (rendererID: number, root: unknown) => void
-  setStrictMode?: (isStrictMode: boolean) => void
-  checkDCE: (fn: unknown) => void
-  supportsFiber: boolean
-  supportsFlight: boolean
-  settings?: unknown
-  reactDevtoolsAgent?: unknown
-  [key: string]: unknown
+  rendererInterfaces: Map<number, RendererInterface>;
+  renderers: Map<number, RendererInternals>;
+  hasUnsupportedRendererAttached: boolean;
+  emit: (event: string, data?: unknown) => void;
+  on: (event: string, fn: HookListener) => void;
+  off: (event: string, fn: HookListener) => void;
+  sub: (event: string, fn: HookListener) => () => void;
+  inject: (renderer: RendererInternals) => number;
+  getFiberRoots: (rendererID: number) => Set<unknown>;
+  onCommitFiberRoot: (rendererID: number, root: unknown, priorityLevel?: unknown) => void;
+  onCommitFiberUnmount: (rendererID: number, fiber: unknown) => void;
+  onPostCommitFiberRoot?: (rendererID: number, root: unknown) => void;
+  setStrictMode?: (isStrictMode: boolean) => void;
+  checkDCE: (fn: unknown) => void;
+  supportsFiber: boolean;
+  supportsFlight: boolean;
+  settings?: unknown;
+  reactDevtoolsAgent?: unknown;
+  [key: string]: unknown;
 }
 
 /** 真 hook（backend bundle 加载后赋值，之前为 null） */
-let realHook: RealHook | null = null
+let realHook: RealHook | null = null;
 
 /** stub 阶段收集的 renderer（inject 被调用时存起来，激活时 replay） */
-const pendingRenderers: Array<{ id: number; renderer: RendererInternals }> = []
+const pendingRenderers: Array<{ id: number; renderer: RendererInternals }> = [];
 
 /** stub 阶段的 uid 计数器（与官方 installHook 一致，从 0 自增） */
-let stubUid = 0
+let stubUid = 0;
 
 /** stub 阶段收集的 fiberRoots（rendererID → Set<root>） */
-const stubFiberRoots: Record<number, Set<unknown>> = {}
+const stubFiberRoots: Record<number, Set<unknown>> = {};
 
 /** stub 阶段的事件监听器（激活后合并进真 hook） */
-const stubListeners: Record<string, HookListener[]> = {}
+const stubListeners: Record<string, HookListener[]> = {};
 
 /**
  * 委托式 hook stub —— 同步装到 window，react-dom 加载时调 inject 注册
@@ -114,10 +114,10 @@ const stubListeners: Record<string, HookListener[]> = {}
  * 因为 react-dom 已缓存引用），所有方法在激活后内部转发到 realHook。
  */
 function installDelegatingHookStub(): void {
-  const target = window as unknown as Record<string, unknown>
+  const target = window as unknown as Record<string, unknown>;
 
   /** 已有 hook（别的 devtools 扩展或重复注入）就不动 */
-  if (target.__REACT_DEVTOOLS_GLOBAL_HOOK__ != null) return
+  if (target.__REACT_DEVTOOLS_GLOBAL_HOOK__ != null) return;
 
   const stub = {
     _isSilkPulseStub: true,
@@ -138,73 +138,85 @@ function installDelegatingHookStub(): void {
 
     emit(event: string, data?: unknown) {
       /** 激活后直接走真 hook 的 emit；激活前广播给 stub 订阅者 */
-      if (realHook) { realHook.emit(event, data); return }
-      for (const fn of stubListeners[event] ?? []) fn(data)
+      if (realHook) {
+        realHook.emit(event, data);
+        return;
+      }
+      for (const fn of stubListeners[event] ?? []) fn(data);
     },
 
     on(event: string, fn: HookListener) {
-      if (realHook) { realHook.on(event, fn); return }
-      ;(stubListeners[event] ??= []).push(fn)
+      if (realHook) {
+        realHook.on(event, fn);
+        return;
+      }
+      (stubListeners[event] ??= []).push(fn);
     },
 
     off(event: string, fn: HookListener) {
-      if (realHook) { realHook.off(event, fn); return }
-      const arr = stubListeners[event]
-      if (!arr) return
-      const i = arr.indexOf(fn)
-      if (i >= 0) arr.splice(i, 1)
+      if (realHook) {
+        realHook.off(event, fn);
+        return;
+      }
+      const arr = stubListeners[event];
+      if (!arr) return;
+      const i = arr.indexOf(fn);
+      if (i >= 0) arr.splice(i, 1);
     },
 
     sub(event: string, fn: HookListener) {
-      stub.on(event, fn)
-      return () => stub.off(event, fn)
+      stub.on(event, fn);
+      return () => stub.off(event, fn);
     },
 
     inject(renderer: RendererInternals): number {
-      if (realHook) return realHook.inject(renderer) as number
+      if (realHook) return realHook.inject(renderer) as number;
       /** stub 阶段：暂存，等真 hook 就绪后 replay */
-      const id = ++stubUid
-      pendingRenderers.push({ id, renderer })
-      stub.renderers.set(id, renderer)
-      return id
+      const id = ++stubUid;
+      pendingRenderers.push({ id, renderer });
+      stub.renderers.set(id, renderer);
+      return id;
     },
 
     getFiberRoots(rendererID: number): Set<unknown> {
-      if (realHook) return realHook.getFiberRoots(rendererID)
-      return (stubFiberRoots[rendererID] ??= new Set())
+      if (realHook) return realHook.getFiberRoots(rendererID);
+      return (stubFiberRoots[rendererID] ??= new Set());
     },
 
     onCommitFiberRoot(rendererID: number, root: unknown, priorityLevel?: unknown) {
-      if (realHook) { realHook.onCommitFiberRoot(rendererID, root, priorityLevel); return }
+      if (realHook) {
+        realHook.onCommitFiberRoot(rendererID, root, priorityLevel);
+        return;
+      }
       /** stub 阶段把 root 记下来（react-dom 每次 commit 都会调，天然增量收集） */
-      stub.getFiberRoots(rendererID).add(root)
+      stub.getFiberRoots(rendererID).add(root);
     },
 
     onCommitFiberUnmount(rendererID: number, fiber: unknown) {
-      if (realHook) realHook.onCommitFiberUnmount(rendererID, fiber)
+      if (realHook) realHook.onCommitFiberUnmount(rendererID, fiber);
       /** stub 阶段无法处理 unmount 增量（没有 rendererInterface），激活后全量重建 */
     },
 
     onPostCommitFiberRoot(rendererID: number, root: unknown) {
-      if (realHook) realHook.onPostCommitFiberRoot?.(rendererID, root)
+      if (realHook) realHook.onPostCommitFiberRoot?.(rendererID, root);
     },
 
     setStrictMode(isStrictMode: boolean) {
-      if (realHook) realHook.setStrictMode?.(isStrictMode)
+      if (realHook) realHook.setStrictMode?.(isStrictMode);
     },
-  }
+  };
 
-  Object.defineProperty(target, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
+  Object.defineProperty(target, "__REACT_DEVTOOLS_GLOBAL_HOOK__", {
     configurable: false,
     enumerable: false,
     get() {
-      return stub
+      return stub;
     },
-  })
+  });
 }
 
 /** backend bundle 加载 Promise（防重复 fetch） */
-let backendLoadPromise: Promise<BackendModule> | null = null
+let backendLoadPromise: Promise<BackendModule> | null = null;
 
 /**
  * 后注入恢复：DOM 扫描已存在的 React root，合成 renderer 注册进 stub
@@ -231,35 +243,37 @@ let backendLoadPromise: Promise<BackendModule> | null = null
  * 当未知类型跳过显示，树仍可用）。
  */
 function recoverReactRoots(): void {
-  const target = window as unknown as Record<string, unknown>
+  const target = window as unknown as Record<string, unknown>;
   /** stub 已有 renderer（react-dom 在 stub 之后加载，inject 走到了）则无需恢复 */
-  if (stubRenderersRecovered) return
-  if (pendingRenderers.length > 0) return
+  if (stubRenderersRecovered) return;
+  if (pendingRenderers.length > 0) return;
 
-  const roots = new Set<unknown>()
-  for (const el of document.querySelectorAll('*')) {
+  const roots = new Set<unknown>();
+  for (const el of document.querySelectorAll("*")) {
     for (const key of Object.getOwnPropertyNames(el)) {
-      if (!key.startsWith('__reactContainer$')) continue
-      const container = (el as unknown as Record<string, unknown>)[key]
-      if (!container) continue
+      if (!key.startsWith("__reactContainer$")) continue;
+      const container = (el as unknown as Record<string, unknown>)[key];
+      if (!container) continue;
       /** 容器上挂的是 HostRoot fiber（tag=3）：其 stateNode 恒指向真实 FiberRoot
        *  （alternate fiber 克隆时 stateNode 一并复制，不受 double buffering 影响）。
        *  注意不能用 `stateNode.current === fiber` 做身份校验——commit 后 root.current
        *  切到 alternate，容器标记仍是初始 fiber，恒 false。backend 的 recordMount
        *  按 fiber.stateNode 做 map key，必须注册真实 FiberRoot 而非合成包装 */
-      const fiber = container as { stateNode?: { current?: unknown } }
-      const fiberRoot = fiber.stateNode && typeof fiber.stateNode === 'object' && 'current' in fiber.stateNode
-        ? fiber.stateNode
-        : { current: container }
-      if ((fiberRoot as { current?: unknown }).current) roots.add(fiberRoot)
+      const fiber = container as { stateNode?: { current?: unknown } };
+      const fiberRoot =
+        fiber.stateNode && typeof fiber.stateNode === "object" && "current" in fiber.stateNode
+          ? fiber.stateNode
+          : { current: container };
+      if ((fiberRoot as { current?: unknown }).current) roots.add(fiberRoot);
     }
   }
-  if (roots.size === 0) return
+  if (roots.size === 0) return;
 
   /** 探测 React 版本（页面全局可能有 React 挂载信息） */
   const reactGlobal = (target.React ?? target.__REACT__) as
-    (Record<string, unknown> & { version?: string }) | undefined
-  const version = reactGlobal?.version ?? '18.0.0'
+    | (Record<string, unknown> & { version?: string })
+    | undefined;
+  const version = reactGlobal?.version ?? "18.0.0";
 
   /** hooks 重放需要页面 react 的 ReactCurrentDispatcher：inspect 时 backend 会把
    *  它的 H 换成 DispatcherProxy 后重放组件函数。UMD 页面拿得到（挂 window）；
@@ -268,9 +282,11 @@ function recoverReactRoots(): void {
    *  能拿到可安全升级 bundleType）。React 18 UMD:
    *  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED；React 19:
    *  __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE */
-  const internals = reactGlobal?.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
-    ?? reactGlobal?.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
-  const dispatcherRef = (internals as { ReactCurrentDispatcher?: object } | undefined)?.ReactCurrentDispatcher
+  const internals =
+    reactGlobal?.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE ??
+    reactGlobal?.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+  const dispatcherRef = (internals as { ReactCurrentDispatcher?: object } | undefined)
+    ?.ReactCurrentDispatcher;
 
   const syntheticRenderer: RendererInternals = {
     version,
@@ -283,31 +299,31 @@ function recoverReactRoots(): void {
      *  InspectedElementContextController 崩溃、右侧面板白屏。
      *  bundleType: 0 = 不重放，直接读 fiber.memoizedState 链展示 hooks 值 */
     bundleType: 0,
-    rendererPackageName: 'react-dom',
+    rendererPackageName: "react-dom",
     /** 真实 inject 时 react-dom 会传这个字段；hooks 检查/改写全靠它 */
     currentDispatcherRef: dispatcherRef,
     findFiberByHostInstance(instance: unknown) {
       /** hostInstance 上的 __reactFiber$ 属性即所属 fiber（React 17+ 恒有） */
-      if (!instance || typeof instance !== 'object') return null
+      if (!instance || typeof instance !== "object") return null;
       for (const key of Object.getOwnPropertyNames(instance)) {
-        if (key.startsWith('__reactFiber$')) {
-          return (instance as Record<string, unknown>)[key] ?? null
+        if (key.startsWith("__reactFiber$")) {
+          return (instance as Record<string, unknown>)[key] ?? null;
         }
       }
-      return null
+      return null;
     },
-  }
+  };
 
   /** 注入 stub（与 react-dom 主动 inject 同路径），fiberRoots 一并登记 */
-  const rendererID = stubInjectForRecovery(syntheticRenderer)
-  if (rendererID == null) return
-  const fiberRoots = stubFiberRoots[rendererID] ??= new Set()
-  for (const root of roots) fiberRoots.add(root)
-  stubRenderersRecovered = true
+  const rendererID = stubInjectForRecovery(syntheticRenderer);
+  if (rendererID == null) return;
+  const fiberRoots = (stubFiberRoots[rendererID] ??= new Set());
+  for (const root of roots) fiberRoots.add(root);
+  stubRenderersRecovered = true;
 }
 
 /** 恢复是否已执行过（一个页面生命周期只做一次 DOM 全扫） */
-let stubRenderersRecovered = false
+let stubRenderersRecovered = false;
 
 /**
  * 恢复路径专用 inject：绕过 realHook 判断（恢复可能发生在激活之后）
@@ -316,12 +332,16 @@ let stubRenderersRecovered = false
  */
 function stubInjectForRecovery(renderer: RendererInternals): number | null {
   /** 激活后直接走真 hook（backend 立即 attachRenderer + 从 fiberRoots 建树） */
-  if (realHook) return realHook.inject(renderer)
-  const stub = (window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: { inject?: (r: RendererInternals) => number } }).__REACT_DEVTOOLS_GLOBAL_HOOK__
-  if (!stub?.inject) return null
-  const id = stub.inject(renderer)
-  pendingRenderers.push({ id, renderer })
-  return id
+  if (realHook) return realHook.inject(renderer);
+  const stub = (
+    window as unknown as {
+      __REACT_DEVTOOLS_GLOBAL_HOOK__?: { inject?: (r: RendererInternals) => number };
+    }
+  ).__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (!stub?.inject) return null;
+  const id = stub.inject(renderer);
+  pendingRenderers.push({ id, renderer });
+  return id;
 }
 
 /**
@@ -333,14 +353,16 @@ function stubInjectForRecovery(renderer: RendererInternals): number | null {
  * 3. 空字符串（同源部署，直接用相对路径 /plugins/...）
  */
 function resolveServerOrigin(): string {
-  const target = window as unknown as Record<string, unknown>
-  const fromInit = target.__SILKPULSE_SERVER__
-  if (typeof fromInit === 'string' && fromInit) return fromInit
+  const target = window as unknown as Record<string, unknown>;
+  const fromInit = target.__SILKPULSE_SERVER__;
+  if (typeof fromInit === "string" && fromInit) return fromInit;
   try {
-    const script = document.currentScript as HTMLScriptElement | null
-    if (script?.src) return new URL(script.src).origin
-  } catch { /** script.src 解析失败忽略 */ }
-  return ''
+    const script = document.currentScript as HTMLScriptElement | null;
+    if (script?.src) return new URL(script.src).origin;
+  } catch {
+    /** script.src 解析失败忽略 */
+  }
+  return "";
 }
 
 /**
@@ -352,36 +374,38 @@ function resolveServerOrigin(): string {
  * 失败静默（React devtools 是可选功能，不阻塞 SDK），但打 error 日志方便排查。
  */
 function loadBackendBundle(): Promise<BackendModule> {
-  if (backendLoadPromise) return backendLoadPromise
+  if (backendLoadPromise) return backendLoadPromise;
   backendLoadPromise = (async () => {
-    const target = window as unknown as Record<string, unknown>
-    const existing = target[BACKEND_GLOBAL]
-    if (existing) return existing as BackendModule
+    const target = window as unknown as Record<string, unknown>;
+    const existing = target[BACKEND_GLOBAL];
+    if (existing) return existing as BackendModule;
 
-    const url = resolveServerOrigin() + BACKEND_URL
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`React DevTools backend 加载失败: HTTP ${resp.status}`)
-    const code = await resp.text()
+    const url = resolveServerOrigin() + BACKEND_URL;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`React DevTools backend 加载失败: HTTP ${resp.status}`);
+    const code = await resp.text();
 
-    const mod = new Function(`${code}\n;return typeof ReactDevToolsBackend !== 'undefined' ? ReactDevToolsBackend : undefined`).call(window)
-    if (!mod) throw new Error('React DevTools backend bundle 未导出全局')
-    target[BACKEND_GLOBAL] = mod
-    return mod as BackendModule
-  })()
-  return backendLoadPromise
+    const mod = new Function(
+      `${code}\n;return typeof ReactDevToolsBackend !== 'undefined' ? ReactDevToolsBackend : undefined`,
+    ).call(window);
+    if (!mod) throw new Error("React DevTools backend bundle 未导出全局");
+    target[BACKEND_GLOBAL] = mod;
+    return mod as BackendModule;
+  })();
+  return backendLoadPromise;
 }
 
 /** backend 是否已激活（Agent 只启动一次） */
-let backendActivated = false
+let backendActivated = false;
 
 /** 激活后绑定的「控制台消息 → backend Wall」转发函数 */
-let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | null = null
+let frontendToBackend: ((msg: { event: string; payload: unknown }) => void) | null = null;
 
 /** 当前活跃的 Bridge（reactivate 时 shutdown 旧的，避免双 agent 重复发消息） */
-let activeBridge: { shutdown: () => void } | null = null
+let activeBridge: { shutdown: () => void } | null = null;
 
 /** 当前活跃 wall 的静音函数（reactivate 时先吞掉旧 bridge 的 shutdown 广播） */
-let muteActiveWall: (() => void) | null = null
+let muteActiveWall: (() => void) | null = null;
 
 /**
  * 自定义 Relay Wall：backend Bridge ↔ SilkPulse WS
@@ -393,35 +417,37 @@ let muteActiveWall: (() => void) | null = null
  * 吞掉，旧 agent 的本地清理（摘 hook 监听防双发）不受影响。
  */
 function createRelayWall() {
-  let muted = false
-  const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = []
+  let muted = false;
+  const wallListeners: Array<(msg: { event: string; payload: unknown }) => void> = [];
   const wall = {
     listen(fn: (msg: { event: string; payload: unknown }) => void) {
-      wallListeners.push(fn)
+      wallListeners.push(fn);
       return () => {
-        const i = wallListeners.indexOf(fn)
-        if (i >= 0) wallListeners.splice(i, 1)
-      }
+        const i = wallListeners.indexOf(fn);
+        if (i >= 0) wallListeners.splice(i, 1);
+      };
     },
     send(event: string, payload: unknown) {
       /** 静音后丢弃（旧 agent 的残余消息不再到达任何 frontend） */
-      if (muted) return
+      if (muted) return;
       send({
-        type: 'devtools-relay',
-        plugin: 'react',
+        type: "devtools-relay",
+        plugin: "react",
         payload: { event, payload, fromBackend: true },
-      })
+      });
     },
-  }
+  };
   return {
     wall,
     /** 控制台 frontend → backend：把路由层消息分发给当前 wall 的 listeners */
     dispatch(msg: { event: string; payload: unknown }) {
-      for (const fn of wallListeners) fn(msg)
+      for (const fn of wallListeners) fn(msg);
     },
     /** 后续 send 全部丢弃（listen 不动，bridge.shutdown 会自己 removeAllListeners） */
-    mute() { muted = true },
-  }
+    mute() {
+      muted = true;
+    },
+  };
 }
 
 /**
@@ -434,9 +460,11 @@ function createRelayWall() {
  * 到达的真实回包因监听已被消耗而被忽略，无副作用（过滤项后续可通过
  * overrideComponentFilters 动态更新）。
  */
-function completeActivationHandshake(dispatch: (msg: { event: string; payload: unknown }) => void): void {
+function completeActivationHandshake(
+  dispatch: (msg: { event: string; payload: unknown }) => void,
+): void {
   dispatch({
-    event: 'savedPreferences',
+    event: "savedPreferences",
     payload: {
       appendComponentStack: true,
       breakOnConsoleErrors: false,
@@ -445,11 +473,11 @@ function completeActivationHandshake(dispatch: (msg: { event: string; payload: u
       showInlineWarningsAndErrors: true,
       hideConsoleLogsInStrictMode: false,
     },
-  })
+  });
 }
 
 /** reactivate 防抖（多次 activate 请求合并为一次重建） */
-let reactivatePromise: Promise<void> | null = null
+let reactivatePromise: Promise<void> | null = null;
 
 /**
  * reactivate 的 renderer id 映射（oldId → newId）
@@ -458,7 +486,7 @@ let reactivatePromise: Promise<void> | null = null
  * rendererInterfaces 只保留 newId 单 entry（防 initBackend 的 forEach 双 flush），
  * oldId 的 commit 调用由 hook 方法包装层转发到 newId。
  */
-const rendererIdRemap = new Map<number, number>()
+const rendererIdRemap = new Map<number, number>();
 
 /**
  * 包装 realHook 的按 rendererID 寻址的方法：oldId 调用透明转发到 newId
@@ -471,21 +499,22 @@ const rendererIdRemap = new Map<number, number>()
  */
 function installRendererIdRemap(hook: RealHook, remap: Map<number, number>): void {
   /** 单个 id 重写（映射未命中时透传原 id） */
-  const rewrite = (id: number): number => remap.get(id) ?? id
+  const rewrite = (id: number): number => remap.get(id) ?? id;
 
-  const origCommitRoot = hook.onCommitFiberRoot.bind(hook)
-  hook.onCommitFiberRoot = (id, root, priorityLevel) => origCommitRoot(rewrite(id), root, priorityLevel)
+  const origCommitRoot = hook.onCommitFiberRoot.bind(hook);
+  hook.onCommitFiberRoot = (id, root, priorityLevel) =>
+    origCommitRoot(rewrite(id), root, priorityLevel);
 
-  const origCommitUnmount = hook.onCommitFiberUnmount.bind(hook)
-  hook.onCommitFiberUnmount = (id, fiber) => origCommitUnmount(rewrite(id), fiber)
+  const origCommitUnmount = hook.onCommitFiberUnmount.bind(hook);
+  hook.onCommitFiberUnmount = (id, fiber) => origCommitUnmount(rewrite(id), fiber);
 
   if (hook.onPostCommitFiberRoot) {
-    const origPostCommit = hook.onPostCommitFiberRoot.bind(hook)
-    hook.onPostCommitFiberRoot = (id, root) => origPostCommit(rewrite(id), root)
+    const origPostCommit = hook.onPostCommitFiberRoot.bind(hook);
+    hook.onPostCommitFiberRoot = (id, root) => origPostCommit(rewrite(id), root);
   }
 
-  const origGetRoots = hook.getFiberRoots.bind(hook)
-  hook.getFiberRoots = (id) => origGetRoots(rewrite(id))
+  const origGetRoots = hook.getFiberRoots.bind(hook);
+  hook.getFiberRoots = (id) => origGetRoots(rewrite(id));
 }
 
 /**
@@ -503,58 +532,60 @@ async function activateBackend(): Promise<void> {
      * 旧 agent 的初始 operations 只发给旧 frontend，新 frontend 收不到，树会永远 Loading。
      * 重建 bridge+agent → initBackend → flushInitialOperations 重发初始树。 */
     if (!reactivatePromise) {
-      reactivatePromise = reactivateBackend().finally(() => { reactivatePromise = null })
+      reactivatePromise = reactivateBackend().finally(() => {
+        reactivatePromise = null;
+      });
     }
-    return reactivatePromise
+    return reactivatePromise;
   }
-  backendActivated = true
+  backendActivated = true;
   try {
     /** 后注入兜底：react-dom 早于 SDK 加载时（stub 没收到 inject），
      *  DOM 扫描合成 renderer——必须在 loadBackendBundle 之前，
      *  让 replay 与真实 inject 走同一条路 */
-    recoverReactRoots()
-    const backend = await loadBackendBundle()
+    recoverReactRoots();
+    const backend = await loadBackendBundle();
 
     /** shadow target：一个空对象，installHook 会把真 hook defineProperty 到它上面 */
-    const shadowTarget: Record<string, unknown> = {}
-    backend.initialize(shadowTarget as unknown as Window)
-    const hook = shadowTarget.__REACT_DEVTOOLS_GLOBAL_HOOK__ as RealHook | undefined
-    if (!hook) throw new Error('installHook 未在 shadow target 上创建 hook')
+    const shadowTarget: Record<string, unknown> = {};
+    backend.initialize(shadowTarget as unknown as Window);
+    const hook = shadowTarget.__REACT_DEVTOOLS_GLOBAL_HOOK__ as RealHook | undefined;
+    if (!hook) throw new Error("installHook 未在 shadow target 上创建 hook");
 
     /** replay stub 阶段的 renderer 注册（react-dom 早已调过 stub.inject） */
     for (const { renderer } of pendingRenderers) {
-      hook.inject(renderer)
+      hook.inject(renderer);
     }
 
     /** 合并 stub 收集的 fiberRoots（真 hook 的 attachRenderer 会读它们重建树） */
     for (const [rendererID, roots] of Object.entries(stubFiberRoots)) {
-      const realRoots = hook.getFiberRoots(Number(rendererID))
-      for (const root of roots) realRoots.add(root)
+      const realRoots = hook.getFiberRoots(Number(rendererID));
+      for (const root of roots) realRoots.add(root);
     }
 
     /** 合并 stub 阶段的事件订阅（若有） */
     for (const [event, fns] of Object.entries(stubListeners)) {
-      for (const fn of fns) hook.on(event, fn)
+      for (const fn of fns) hook.on(event, fn);
     }
 
     /** 自定义 Wall：backend ↔ SilkPulse WS（dispatch 即「控制台消息 → backend」路由） */
-    const { wall, dispatch, mute } = createRelayWall()
-    muteActiveWall = mute
-    frontendToBackend = dispatch
+    const { wall, dispatch, mute } = createRelayWall();
+    muteActiveWall = mute;
+    frontendToBackend = dispatch;
 
     /** 激活：Agent 创建 + initBackend（读 hook.rendererInterfaces → flushInitialOperations） */
-    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
-    backend.activate(shadowTarget as unknown as Window, { bridge })
-    activeBridge = bridge as unknown as { shutdown: () => void }
-    completeActivationHandshake(dispatch)
+    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall);
+    backend.activate(shadowTarget as unknown as Window, { bridge });
+    activeBridge = bridge as unknown as { shutdown: () => void };
+    completeActivationHandshake(dispatch);
 
     /** stub 从此委托给真 hook（window 上的 stub 对象引用不变） */
-    realHook = hook
+    realHook = hook;
   } catch (e) {
-    backendActivated = false
+    backendActivated = false;
     /** React devtools 是可选增强功能，激活失败不阻塞 SDK 其他能力；
      *  打日志方便线上排查（catch 静默会让后注入问题难定位） */
-    console.error('[silkpulse] React backend 激活失败:', e)
+    console.error("[silkpulse] React backend 激活失败:", e);
   }
 }
 
@@ -575,14 +606,18 @@ async function activateBackend(): Promise<void> {
  */
 async function reactivateBackend(): Promise<void> {
   try {
-    if (!realHook) return
-    const backend = await loadBackendBundle()
+    if (!realHook) return;
+    const backend = await loadBackendBundle();
 
     /** 旧 agent 停摆：先静音 wall（吞掉 shutdown 广播，防新 frontend 的 Store 摘监听），
      * 再 shutdown（agent 本地清理：摘 hook 监听防双发） */
-    muteActiveWall?.()
-    try { activeBridge?.shutdown() } catch { /** 已关闭忽略 */ }
-    activeBridge = null
+    muteActiveWall?.();
+    try {
+      activeBridge?.shutdown();
+    } catch {
+      /** 已关闭忽略 */
+    }
+    activeBridge = null;
 
     /** 旧 renderer 的 [id, internals]（inject 分配的 id 被 react-dom 终身持有，
      *  commit 时用它查 rendererInterfaces）。
@@ -591,24 +626,24 @@ async function reactivateBackend(): Promise<void> {
      *  注入（树 ×2^n）；而 react-dom 终身持有的恰是 Map 保序的第一个（最老）id，
      *  保留它才能让 onCommitFiberRoot(oldId) 继续命中新 interface。
      *  renderers 本身无读者（仅 inject 写入），累积无害，故不 clear */
-    const seenRenderers = new Set<RendererInternals>()
-    const oldRenderers = [...realHook.renderers.entries()].filter(
-      ([, renderer]) => (seenRenderers.has(renderer) ? false : (seenRenderers.add(renderer), true)),
-    )
+    const seenRenderers = new Set<RendererInternals>();
+    const oldRenderers = [...realHook.renderers.entries()].filter(([, renderer]) =>
+      seenRenderers.has(renderer) ? false : (seenRenderers.add(renderer), true),
+    );
 
     /** 清旧 interface：新 agent initBackend 的 rendererInterfaces.forEach 才不会
      *  复用旧闭包状态（pseudo key 冻结的根因） */
-    realHook.rendererInterfaces.clear()
+    realHook.rendererInterfaces.clear();
 
-    const { wall, dispatch, mute } = createRelayWall()
-    muteActiveWall = mute
-    frontendToBackend = dispatch
+    const { wall, dispatch, mute } = createRelayWall();
+    muteActiveWall = mute;
+    frontendToBackend = dispatch;
 
-    const shadowTarget = { __REACT_DEVTOOLS_GLOBAL_HOOK__: realHook } as Record<string, unknown>
-    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall)
-    backend.activate(shadowTarget as unknown as Window, { bridge })
+    const shadowTarget = { __REACT_DEVTOOLS_GLOBAL_HOOK__: realHook } as Record<string, unknown>;
+    const bridge = backend.createBridge(shadowTarget as unknown as Window, wall);
+    backend.activate(shadowTarget as unknown as Window, { bridge });
 
-/** 重新 attach：inject → attachRenderer 造全新 interface → emit
+    /** 重新 attach：inject → attachRenderer 造全新 interface → emit
      *  renderer-attached → agent 注册回调自动 flushInitialOperations（官方
      *  时序，与扩展 reload 场景一致）。
      *
@@ -619,30 +654,30 @@ async function reactivateBackend(): Promise<void> {
      *  mount 两棵树（树 ×2 的直接根因）。
      *  react-dom 持有的 oldId 增量路由改由下方 hook 级 id 映射转发兜住 */
     for (const [oldId, renderer] of oldRenderers) {
-      const newId = realHook.inject(renderer)
-      const newInterface = realHook.rendererInterfaces.get(newId)
-      if (newInterface == null) continue
+      const newId = realHook.inject(renderer);
+      const newInterface = realHook.rendererInterfaces.get(newId);
+      if (newInterface == null) continue;
 
       /** fiberRoots 迁移 oldId → newId：flushInitialOperations 按 interface 闭包
        *  固化的 newId 读 getFiberRoots(newId)，不迁移则初始树为空 */
-      const oldRoots = realHook.getFiberRoots(oldId)
-      const newRoots = realHook.getFiberRoots(newId)
-      for (const root of oldRoots) newRoots.add(root)
+      const oldRoots = realHook.getFiberRoots(oldId);
+      const newRoots = realHook.getFiberRoots(newId);
+      for (const root of oldRoots) newRoots.add(root);
 
       /** oldId → newId 映射：react-dom 终身持有 oldId（inject 返回值已缓存），
        *  onCommitFiberRoot(oldId) 等 hook 方法必须重写到 newId 才能命中
        *  rendererInterfaces 里唯一的 newId entry，否则增量永久丢失 */
-      rendererIdRemap.set(oldId, newId)
+      rendererIdRemap.set(oldId, newId);
     }
 
     /** hook 级 id 映射转发：包装 realHook 的四个按 rendererID 寻址的方法，
      *  oldId 调用透明转发到 newId（bundle 内部与 react-dom 都通过属性访问
      *  调这些方法，包装稳定生效）。幂等：多次 reactivate 只重包一次
      *  （包装函数检查映射未命中时透传原 id） */
-    installRendererIdRemap(realHook, rendererIdRemap)
+    installRendererIdRemap(realHook, rendererIdRemap);
 
-    activeBridge = bridge as unknown as { shutdown: () => void }
-    completeActivationHandshake(dispatch)
+    activeBridge = bridge as unknown as { shutdown: () => void };
+    completeActivationHandshake(dispatch);
   } catch {
     /** 重建失败保留旧状态（下次 activate 再试） */
   }
@@ -655,13 +690,13 @@ async function reactivateBackend(): Promise<void> {
  * bridge 发出的消息经 WS 透传无人接收，无副作用。
  */
 export async function ensureReactBackendActive(): Promise<void> {
-  if (backendActivated && realHook) return
-  await activateBackend()
+  if (backendActivated && realHook) return;
+  await activateBackend();
 }
 
 /** Agent DevTools 能力用：拿激活后的真 hook（含 rendererInterfaces / reactDevtoolsAgent） */
 export function getActiveReactHook(): RealHook | null {
-  return realHook
+  return realHook;
 }
 
 /**
@@ -670,35 +705,46 @@ export function getActiveReactHook(): RealHook | null {
  * 同步装 hook stub（react-dom 加载前），异步注册 server 消息处理。
  */
 export function initReactDevToolsBridge(): void {
-  installDelegatingHookStub()
+  installDelegatingHookStub();
 
   /** 后注入兜底：react-dom 已加载（inject 已飞走）时立即恢复一次。
    *  react-dom 在 SDK 之后加载的场景由 stub.inject 自然覆盖 */
-  recoverReactRoots()
+  recoverReactRoots();
 
   registerServerMessageHandler((msg) => {
-    if (msg.type !== 'devtools-relay' || msg.plugin !== 'react') return
-    const data = msg.payload as { event?: string; payload?: unknown; activate?: boolean; refresh?: boolean; fromBackend?: boolean }
+    if (msg.type !== "devtools-relay" || msg.plugin !== "react") return;
+    const data = msg.payload as {
+      event?: string;
+      payload?: unknown;
+      activate?: boolean;
+      refresh?: boolean;
+      fromBackend?: boolean;
+    };
 
     /** 控制台打开面板时请求激活（幂等，backendActivated 守卫）
      *
      * payload 可能是 SuperJSON 信封字符串（vue 串扰）或普通对象，只认对象形态 */
-    if (typeof data === 'object' && data?.activate === true) {
-      void activateBackend()
-      return
+    if (typeof data === "object" && data?.activate === true) {
+      void activateBackend();
+      return;
     }
 
     /** 控制台「刷新」指令：reactivate 重建 bridge → flushInitialOperations
      *  重发全量树事件 → frontend 原地更新（保留选中/展开状态，不重载 iframe）。
      *  生产构建无 onCommitFiberRoot 推送，这是官方等价的「拉新」路径 */
-    if (typeof data === 'object' && data?.refresh === true) {
-      void reactivateBackend()
-      return
+    if (typeof data === "object" && data?.refresh === true) {
+      void reactivateBackend();
+      return;
     }
 
     /** 控制台 frontend 发来的消息 → 转给 backend 的 Wall listener */
-    if (frontendToBackend && typeof data === 'object' && data?.fromBackend !== true && typeof data?.event === 'string') {
-      frontendToBackend({ event: data.event, payload: data.payload })
+    if (
+      frontendToBackend &&
+      typeof data === "object" &&
+      data?.fromBackend !== true &&
+      typeof data?.event === "string"
+    ) {
+      frontendToBackend({ event: data.event, payload: data.payload });
     }
-  })
+  });
 }

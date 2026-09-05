@@ -30,6 +30,7 @@ node scripts/sync-devtools-clients.mjs --plugin react
 ```
 
 脚本会：
+
 1. 从 npm 下载最新版 `vite-plugin-vue-devtools` / `react-devtools-inline`
 2. 拷贝打包好的 client 静态文件到对应目录
 3. 记录版本号到 `plugins/*/version.json`

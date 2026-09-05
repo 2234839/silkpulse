@@ -9,11 +9,11 @@
  * 解析失败静默（map 不公开 / 跨域 / 无 map 时），绝不阻塞错误采集主流程
  */
 
-import type { SourceMapPosition } from '@silkpulse/shared'
-import { parseSourceMap, originalPositionFor, type SourceMapData } from './source-map-consumer.js'
+import type { SourceMapPosition } from "@silkpulse/shared";
+import { parseSourceMap, originalPositionFor, type SourceMapData } from "./source-map-consumer.js";
 
 /** source map 缓存：mapUrl → 解析结果（避免重复 fetch + 解析同一文件） */
-const mapCache = new Map<string, SourceMapData | null>()
+const mapCache = new Map<string, SourceMapData | null>();
 
 /**
  * 带超时的 fetch
@@ -22,14 +22,14 @@ const mapCache = new Map<string, SourceMapData | null>()
  * 服务器无响应而无限期 pending——错误风暴时每个错误都触发一次解析，挂起的 promise 会累积泄漏。
  * 超时后 AbortController 中止请求，fetch 抛 AbortError，由调用方 catch 走静默回退。
  */
-const FETCH_TIMEOUT_MS = 8000
+const FETCH_TIMEOUT_MS = 8000;
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal })
+    return await fetch(url, { ...init, signal: controller.signal });
   } finally {
-    clearTimeout(timer)
+    clearTimeout(timer);
   }
 }
 
@@ -40,7 +40,7 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
  * 2. 若 URL 含 query，保留 query 前加 .map
  */
 function guessMapUrl(sourceUrl: string): string {
-  return `${sourceUrl}.map`
+  return `${sourceUrl}.map`;
 }
 
 /**
@@ -48,12 +48,12 @@ function guessMapUrl(sourceUrl: string): string {
  * 返回绝对 URL（相对脚本 URL 解析）
  */
 function extractSourceMappingUrl(scriptText: string, scriptUrl: string): string | null {
-  const match = scriptText.match(/\/\/[#@]\s*sourceMappingURL=(\S+)/)
-  if (!match) return null
+  const match = scriptText.match(/\/\/[#@]\s*sourceMappingURL=(\S+)/);
+  if (!match) return null;
   try {
-    return new URL(match[1], scriptUrl).href
+    return new URL(match[1], scriptUrl).href;
   } catch {
-    return match[1]
+    return match[1];
   }
 }
 
@@ -62,26 +62,26 @@ function extractSourceMappingUrl(scriptText: string, scriptUrl: string): string 
  * 返回 null 表示无法获取（跨域/404/无 map）
  */
 async function loadSourceMap(mapUrl: string): Promise<SourceMapData | null> {
-  if (mapCache.has(mapUrl)) return mapCache.get(mapUrl) ?? null
+  if (mapCache.has(mapUrl)) return mapCache.get(mapUrl) ?? null;
   try {
-    const res = await fetchWithTimeout(mapUrl)
+    const res = await fetchWithTimeout(mapUrl);
     if (!res.ok) {
-      mapCache.set(mapUrl, null)
-      return null
+      mapCache.set(mapUrl, null);
+      return null;
     }
-    const raw = await res.json() as {
-      sources?: string[]
-      names?: string[]
-      mappings?: string
-      sourceRoot?: string
-    }
-    const data = parseSourceMap(raw)
-    mapCache.set(mapUrl, data)
-    return data
+    const raw = (await res.json()) as {
+      sources?: string[];
+      names?: string[];
+      mappings?: string;
+      sourceRoot?: string;
+    };
+    const data = parseSourceMap(raw);
+    mapCache.set(mapUrl, data);
+    return data;
   } catch {
     /** 跨域 / 网络错误 / JSON 解析失败 —— 静默，缓存 null 避免重试 */
-    mapCache.set(mapUrl, null)
-    return null
+    mapCache.set(mapUrl, null);
+    return null;
   }
 }
 
@@ -94,32 +94,32 @@ export async function resolveOriginalPosition(
   /** 1-based 行号 */
   line: number,
   /** 0-based 列号 */
-  column: number
+  column: number,
 ): Promise<SourceMapPosition | null> {
   /** 先尝试从脚本内容读 sourceMappingURL 注释（最准确），失败则用 .map 猜测 */
-  let mapUrl: string | null = null
+  let mapUrl: string | null = null;
   try {
-    const res = await fetchWithTimeout(sourceUrl)
+    const res = await fetchWithTimeout(sourceUrl);
     if (res.ok) {
-      const text = await res.text()
-      mapUrl = extractSourceMappingUrl(text, sourceUrl)
+      const text = await res.text();
+      mapUrl = extractSourceMappingUrl(text, sourceUrl);
     }
   } catch {
     /** 跨域无法读脚本内容 / 超时 —— 回退到 .map 猜测 */
   }
-  if (!mapUrl) mapUrl = guessMapUrl(sourceUrl)
+  if (!mapUrl) mapUrl = guessMapUrl(sourceUrl);
 
-  const map = await loadSourceMap(mapUrl)
-  if (!map) return null
+  const map = await loadSourceMap(mapUrl);
+  if (!map) return null;
 
-  const pos = originalPositionFor(map, line, column)
-  if (!pos) return null
+  const pos = originalPositionFor(map, line, column);
+  if (!pos) return null;
   return {
     source: pos.source,
     line: pos.line,
     column: pos.column,
     name: pos.name,
-  }
+  };
 }
 
 /**
@@ -127,17 +127,17 @@ export async function resolveOriginalPosition(
  * 返回紧凑文本（AI 直接读）
  */
 export async function resolveStack(
-  frames: Array<{ url: string; line: number; col: number }>
+  frames: Array<{ url: string; line: number; col: number }>,
 ): Promise<string[]> {
-  const results: string[] = []
+  const results: string[] = [];
   for (const f of frames) {
-    const pos = await resolveOriginalPosition(f.url, f.line, f.col)
+    const pos = await resolveOriginalPosition(f.url, f.line, f.col);
     if (pos) {
-      const name = pos.name ? ` ${pos.name}` : ''
-      results.push(`${f.url}:${f.line}:${f.col} → ${pos.source}:${pos.line}:${pos.column}${name}`)
+      const name = pos.name ? ` ${pos.name}` : "";
+      results.push(`${f.url}:${f.line}:${f.col} → ${pos.source}:${pos.line}:${pos.column}${name}`);
     } else {
-      results.push(`${f.url}:${f.line}:${f.col} →（无 source map 或解析失败）`)
+      results.push(`${f.url}:${f.line}:${f.col} →（无 source map 或解析失败）`);
     }
   }
-  return results
+  return results;
 }

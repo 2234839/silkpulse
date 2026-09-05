@@ -19,10 +19,11 @@ catalog:
   puppeteer-core: ^25.5.0
   modern-screenshot: ^4.7.0
   snapdom: ^0.1.2
-  '@zumer/snapdom': ^2.23.2
+  "@zumer/snapdom": ^2.23.2
   vue-router: ^5.2.0
   superjson: 2.2.2
   uWebSockets.js: github:uNetworking/uWebSockets.js#v20.52.0
+  "@vueuse/core": ^14.4.0
 overrides:
   vite: "catalog:"
 peerDependencyRules:

@@ -49,3 +49,6 @@ plugins/vue-devtools/assets/
 plugins/vue-devtools/index.html
 plugins/react-devtools/assets/
 packages/server/public/plugins/
+
+# dev 编排器的本地构建产物（dev-watch 自动生成）
+packages/server/dist-bin/

@@ -30,16 +30,16 @@
 └──────────────┘
 ```
 
-| 模块 | 复用度 | 说明 |
-|---|---|---|
-| server `devtools-relay` | ✅ 零改动 | 纯透传，`DevToolsPluginId` 加 `'react-native'` 即可 |
-| shared 协议类型 | ⚠️ 小改 | `DeviceInfo` 的 `url/title/icon/viewport` 在 RN 无意义，加 `platform` 字段并放宽 |
-| `ws-client.ts` | ⚠️ 大部分复用 | RN 有 `WebSocket/setTimeout`；`sessionStorage`（deviceId 持久化）、`bufferedAmount`（背压）不存在，需条件分支 |
-| `log-collector` | ✅ 直接复用 | 纯 console hook，RN 的 console 是 polyfill 同样可 hook |
-| `network-collector` | ⚠️ 需审查 | RN 有 `fetch/XMLHttpRequest` 可 hook；**Hermes 无 `URL` 类**，URL 解析需 polyfill |
-| `error-catcher` | ❌ 重写 | `window.onerror` → RN 用 `ErrorUtils.setGlobalHandler` |
-| snapshot / dom-watcher / mouse-tracker / screen-capture | ❌ 不可用 | RN 无 DOM、无 `getDisplayMedia`（截图可选依赖 `react-native-view-shot`） |
-| `exec-runner` | ❌ 根本性障碍 | 见下文 Hermes 无 eval |
+| 模块                                                    | 复用度        | 说明                                                                                                          |
+| ------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| server `devtools-relay`                                 | ✅ 零改动     | 纯透传，`DevToolsPluginId` 加 `'react-native'` 即可                                                           |
+| shared 协议类型                                         | ⚠️ 小改       | `DeviceInfo` 的 `url/title/icon/viewport` 在 RN 无意义，加 `platform` 字段并放宽                              |
+| `ws-client.ts`                                          | ⚠️ 大部分复用 | RN 有 `WebSocket/setTimeout`；`sessionStorage`（deviceId 持久化）、`bufferedAmount`（背压）不存在，需条件分支 |
+| `log-collector`                                         | ✅ 直接复用   | 纯 console hook，RN 的 console 是 polyfill 同样可 hook                                                        |
+| `network-collector`                                     | ⚠️ 需审查     | RN 有 `fetch/XMLHttpRequest` 可 hook；**Hermes 无 `URL` 类**，URL 解析需 polyfill                             |
+| `error-catcher`                                         | ❌ 重写       | `window.onerror` → RN 用 `ErrorUtils.setGlobalHandler`                                                        |
+| snapshot / dom-watcher / mouse-tracker / screen-capture | ❌ 不可用     | RN 无 DOM、无 `getDisplayMedia`（截图可选依赖 `react-native-view-shot`）                                      |
+| `exec-runner`                                           | ❌ 根本性障碍 | 见下文 Hermes 无 eval                                                                                         |
 
 ## 三、三个硬约束
 
@@ -50,7 +50,7 @@
 - JSC 可 eval，但只是"已有代码"的能力——RN 没有 script/bookmarklet/userscript 这类运行时加载点，bundle 编译期锁定，**eval IIFE 注入这条路在 RN 上是死的**
 - **exec 通道出路**：降级为注册制受限 API——App 侧主动注册诊断函数，AI 按名调用：
   ```ts
-  silkpulse.registerApi('getCartState', () => useCartStore.getState())
+  silkpulse.registerApi("getCartState", () => useCartStore.getState());
   ```
   与项目 AI-native 定位吻合：暴露有语义的业务诊断接口，且 release 构建更安全。
 
@@ -69,16 +69,16 @@ DeviceInfo RN 化：`Dimensions.get('window')` + `Platform.OS` + `expo-constants
 
 对照 Web 版 `react-devtools-bridge.ts` 的三大难题：
 
-| Web 方案的难题 | RN 场景 |
-|---|---|
-| hook 必须在 react-dom 加载前同步存在（stub 方案） | ❌ 不需要——RN renderer（dev 模式）自己装 hook |
-| backend 700KB 异步 fetch + new Function 加载 | ❌ 不需要——metro 静态打包 `react-devtools-core` |
-| stub 收集 renderer/fiberRoots 再 replay | ❌ 不需要——renderer 早已 attach 到 hook |
+| Web 方案的难题                                    | RN 场景                                         |
+| ------------------------------------------------- | ----------------------------------------------- |
+| hook 必须在 react-dom 加载前同步存在（stub 方案） | ❌ 不需要——RN renderer（dev 模式）自己装 hook   |
+| backend 700KB 异步 fetch + new Function 加载      | ❌ 不需要——metro 静态打包 `react-devtools-core` |
+| stub 收集 renderer/fiberRoots 再 replay           | ❌ 不需要——renderer 早已 attach 到 hook         |
 
 RN SDK 只需调 `react-devtools-core` 的：
 
 ```ts
-connectToDevTools({ socket: 自定义代理, resolveRNStyle, isAppCommand })
+connectToDevTools({ socket: 自定义代理, resolveRNStyle, isAppCommand });
 ```
 
 把它的 WebSocket 消息代理到 silkpulse 的 `devtools-relay`（`plugin: 'react-native'`）。
@@ -89,11 +89,11 @@ connectToDevTools({ socket: 自定义代理, resolveRNStyle, isAppCommand })
 
 ## 五、"运行时注入"在 RN 世界的真实等价物
 
-| 路径 | 原理 | 等效于 Web 的 | 覆盖面 |
-|---|---|---|---|
-| **OTA 热更新**（CodePush / Expo Updates / Sophix） | 下发含探针的新 bundle 整体替换 | 最接近 userscript（事后补装探针） | 装了 OTA 框架的 App |
-| **CDP 调试通道**（`Runtime.evaluate`） | 真正意义的运行时 eval 任意 IIFE | 最接近 devtools console | 仅 dev/可调试构建 |
-| **编译期打包**（npm 依赖 + 远程开关） | 探针随 App 发版 | 不等效，但最可靠 | 全量 |
+| 路径                                               | 原理                            | 等效于 Web 的                     | 覆盖面              |
+| -------------------------------------------------- | ------------------------------- | --------------------------------- | ------------------- |
+| **OTA 热更新**（CodePush / Expo Updates / Sophix） | 下发含探针的新 bundle 整体替换  | 最接近 userscript（事后补装探针） | 装了 OTA 框架的 App |
+| **CDP 调试通道**（`Runtime.evaluate`）             | 真正意义的运行时 eval 任意 IIFE | 最接近 devtools console           | 仅 dev/可调试构建   |
+| **编译期打包**（npm 依赖 + 远程开关）              | 探针随 App 发版                 | 不等效，但最可靠                  | 全量                |
 
 - Hermes 无 eval 指 JS 层无 eval；但 Hermes inspector 协议的 `Runtime.evaluate` 可运行时注入执行任意 JS（metro 调试即靠它），**这是唯一能"eval IIFE"的通道**
 - 若 silkpulse 做一层 CDP 中继（server 转发 CDP 消息，绕过"metro 必须在开发者本机"），可对用户设备上的 debug 包远程注入探针——与远程诊断定位契合，但只覆盖 debug 包
@@ -105,14 +105,14 @@ react-native-debugger 是本地 Electron 调试器（装在开发者电脑，通
 
 ## 七、工作量估算（若立项）
 
-| 部分 | 内容 | 规模 |
-|---|---|---|
+| 部分                      | 内容                                                                                | 规模         |
+| ------------------------- | ----------------------------------------------------------------------------------- | ------------ |
 | `packages/rn-sdk`（新包） | ws-client 复用改造 + console/error/network 采集 + devtools socket 代理 + 注册制 API | ~800–1200 行 |
-| `packages/shared` | `DeviceInfo` 加 `platform`、`DevToolsPluginId` 加值 | ~30 行 |
-| `packages/server` | 类型联动，透传逻辑零改动 | ~0 行 |
-| `apps/console` | `DevToolsPanel.vue` 注册插件 + RN 设备卡片微调 | ~100 行 |
-| `plugins/react-native/` | 多版本 frontend + `sync-devtools-clients.mjs` 扩展 | ~100 行 |
-| 验证 | examples 最小 Expo app；headless 测试不可复用（无 DOM），需 RN 侧手测 | — |
+| `packages/shared`         | `DeviceInfo` 加 `platform`、`DevToolsPluginId` 加值                                 | ~30 行       |
+| `packages/server`         | 类型联动，透传逻辑零改动                                                            | ~0 行        |
+| `apps/console`            | `DevToolsPanel.vue` 注册插件 + RN 设备卡片微调                                      | ~100 行      |
+| `plugins/react-native/`   | 多版本 frontend + `sync-devtools-clients.mjs` 扩展                                  | ~100 行      |
+| 验证                      | examples 最小 Expo app；headless 测试不可复用（无 DOM），需 RN 侧手测               | —            |
 
 ## 八、风险与开放问题
 

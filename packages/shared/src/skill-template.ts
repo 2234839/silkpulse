@@ -11,8 +11,8 @@
  */
 
 /** 控制台地址用于 dashboard 链接等场景 */
-const PLACEHOLDER_SERVER_URL = '__SERVER_URL__'
-const PLACEHOLDER_API_KEY = '__API_KEY__'
+const PLACEHOLDER_SERVER_URL = "__SERVER_URL__";
+const PLACEHOLDER_API_KEY = "__API_KEY__";
 
 /**
  * 完整的 agent 提示词模板（含占位符）
@@ -115,7 +115,7 @@ select #9 check=bj:北京 <bj:北京|sh:上海>  ← 下拉框（setValue 传 va
 4. \`GET /<id>/screenshot\` → 截图看页面真实渲染效果（传 \`?idx=N\` 截指定元素）
 5. \`POST /<id>/exec?snapshot=0\` → 执行诊断代码定位问题
 
-exec 超时 10 秒，长任务需拆分。`
+exec 超时 10 秒，长任务需拆分。`;
 
 /**
  * 渐进式加载的系统提示词模板（极短）
@@ -131,7 +131,7 @@ export const SKILL_SYSTEM_PROMPT_TEMPLATE = `你有一个远程调试工具 Silk
 curl -s "${PLACEHOLDER_SERVER_URL}/api/skill/silkpulse?key=${PLACEHOLDER_API_KEY}"
 
 拉取后按文档中的 API 列表操作即可（查看在线设备、快照、日志、错误、网络请求、执行代码等）。
-不需要时忽略此工具。`
+不需要时忽略此工具。`;
 
 /**
  * 渲染完整 skill 提示词：替换占位符为实际值
@@ -141,9 +141,10 @@ curl -s "${PLACEHOLDER_SERVER_URL}/api/skill/silkpulse?key=${PLACEHOLDER_API_KEY
  * @returns 替换占位符后的完整提示词
  */
 export function renderSkillPrompt(serverUrl: string, apiKey: string): string {
-  return SKILL_PROMPT_TEMPLATE
-    .split(PLACEHOLDER_SERVER_URL).join(serverUrl)
-    .split(PLACEHOLDER_API_KEY).join(apiKey)
+  return SKILL_PROMPT_TEMPLATE.split(PLACEHOLDER_SERVER_URL)
+    .join(serverUrl)
+    .split(PLACEHOLDER_API_KEY)
+    .join(apiKey);
 }
 
 /**
@@ -154,7 +155,8 @@ export function renderSkillPrompt(serverUrl: string, apiKey: string): string {
  * @returns 替换占位符后的极短系统提示词
  */
 export function renderSkillSystemPrompt(serverUrl: string, apiKey: string): string {
-  return SKILL_SYSTEM_PROMPT_TEMPLATE
-    .split(PLACEHOLDER_SERVER_URL).join(serverUrl)
-    .split(PLACEHOLDER_API_KEY).join(apiKey)
+  return SKILL_SYSTEM_PROMPT_TEMPLATE.split(PLACEHOLDER_SERVER_URL)
+    .join(serverUrl)
+    .split(PLACEHOLDER_API_KEY)
+    .join(apiKey);
 }

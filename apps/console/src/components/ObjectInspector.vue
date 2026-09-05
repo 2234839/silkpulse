@@ -22,9 +22,11 @@
  * - StoragePanel localStorage 编辑（可编辑 JSON / 文本）
  * - StoragePanel IndexedDB 记录（只读）
  */
-import { ref, computed, watch, provide, inject } from "vue";
+import { ref, computed, watch, provide, inject, triggerRef } from "vue";
 import type { Ref } from "vue";
 import type { SerializedValue } from "@silkpulse/shared";
+import { diffText, type TextDiffSegment } from "@silkpulse/renderer";
+import { onClickOutside } from "@vueuse/core";
 
 /* ==================== 右键菜单：展开控制广播通道 ==================== */
 
@@ -73,11 +75,17 @@ const props = withDefaults(
     editable?: boolean;
     /** 子节点索引（用于构建唯一 path，右键菜单展开控制用） */
     childIndex?: number;
+    /** Diff 模式：对侧的 raw 树（与本侧对比），仅根实例需要传 */
+    diffRaw?: unknown;
+    /** Diff 模式：本侧角色（old=红/删除，new=绿/新增），仅根实例需要传 */
+    diffSide?: "old" | "new";
   }>(),
   {
     depth: 0,
     editable: false,
     childIndex: 0,
+    diffRaw: undefined,
+    diffSide: undefined,
   },
 );
 
@@ -115,6 +123,281 @@ function normalizeToSerialized(input: {
     }
   }
   return { type: "undefined", preview: "undefined" };
+}
+
+/* ==================== Diff 模式：raw 树对比 ==================== */
+
+/**
+ * 单个节点的 diff 状态
+ *
+ * - equal：两侧值完全一致（含所有后代）
+ * - added：仅 new 侧有（整棵子树新增）
+ * - removed：仅 old 侧有（整棵子树删除）
+ * - modified：叶子值变化（如 1→2、"a"→"b"）
+ * - children-changed：容器节点的后代有变化，但自身 key 存在两侧
+ */
+type DiffStatus = "equal" | "added" | "removed" | "modified" | "children-changed";
+
+/** Diff 模式下根实例 provide 的上下文 */
+interface DiffContext {
+  /** 本侧角色 */
+  side: "old" | "new";
+  /** path（逗号 join 的 childIndex 链）→ 节点 diff 状态（响应式 ref，增量更新时触发视图刷新） */
+  statusMap: Ref<Map<string, DiffStatus>>;
+  /** modified 节点的对侧值（字符级 diff 用）：path → 对侧叶子值 */
+  otherValueMap: Ref<Map<string, unknown>>;
+  /** 有变化的祖先路径集合（这些路径的容器节点需要默认展开） */
+  changedAncestors: Ref<Set<string>>;
+  /** 对侧树的 raw 引用（增量更新时按路径取对侧值对比） */
+  otherRaw: unknown;
+  /** 根路径字符串（computeDiffMap 的 rootPath） */
+  rootPath: string;
+  /**
+   * 编辑链路标记：updateDiffPath 已同步增量更新过 diff 状态，
+   * 随后 emit 冒泡导致 props.raw 变化触发的 watch 应跳过全量重算（避免抵消增量）。
+   */
+  skipNextRawWatch: boolean;
+  /**
+   * 增量更新受影响路径的 diff 状态
+   * @param path 逗号 join 的 childIndex 路径（如 "0,2,1"）
+   * @param newSelfValue 本侧该路径的新值
+   */
+  updateDiffPath(path: string, newSelfValue: unknown): void;
+}
+
+/**
+ * 深比较两个 raw 值是否完全相等（用于 diff 的 equal 判定）
+ *
+ * 只处理 JSON 兼容类型（object/array/基本类型），
+ * 这是 diff 场景的输入约束（diffRaw 来自 JSON.parse）。
+ */
+function rawDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  const aArr = Array.isArray(a);
+  const bArr = Array.isArray(b);
+  if (aArr !== bArr) return false;
+  if (aArr && bArr) {
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => rawDeepEqual(item, (b as unknown[])[i]));
+  }
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(
+    (k) =>
+      Object.prototype.hasOwnProperty.call(b, k) &&
+      rawDeepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  );
+}
+
+/**
+ * 计算单侧树的 diff 状态 map
+ *
+ * 递归对齐两侧的 raw 树（按 childIndex 路径），为每个节点标状态。
+ * 数组按下标对齐（不做 LCS，简单直观）；object 按 key 对齐。
+ */
+function computeDiffMap(
+  selfRaw: unknown,
+  otherRaw: unknown,
+  side: "old" | "new",
+  rootPath: string,
+): { statusMap: Map<string, DiffStatus>; otherValueMap: Map<string, unknown> } {
+  const statusMap = new Map<string, DiffStatus>();
+  /** modified 节点的对侧值（字符级 diff 用） */
+  const otherValueMap = new Map<string, unknown>();
+
+  function walk(self: unknown, other: unknown, path: string) {
+    /** 完全相等：整棵子树 equal，不再深入 */
+    if (rawDeepEqual(self, other)) {
+      statusMap.set(path, "equal");
+      return;
+    }
+
+    /** 类型不同或都是叶子：modified，记录对侧值用于字符级 diff */
+    const selfObj = self !== null && typeof self === "object";
+    const otherObj = other !== null && typeof other === "object";
+    if (!selfObj || !otherObj) {
+      statusMap.set(path, "modified");
+      otherValueMap.set(path, other);
+      return;
+    }
+
+    const selfArr = Array.isArray(self);
+    const otherArr = Array.isArray(other);
+    if (selfArr !== otherArr) {
+      statusMap.set(path, "modified");
+      otherValueMap.set(path, other);
+      return;
+    }
+
+    /** 容器节点：自身 key 存在两侧，标 children-changed，递归子节点 */
+    statusMap.set(path, "children-changed");
+
+    if (selfArr && otherArr) {
+      const maxLen = Math.max(self.length, other.length);
+      for (let i = 0; i < maxLen; i++) {
+        const childPath = `${path},${i}`;
+        const inSelf = i < self.length;
+        const inOther = i < other.length;
+        if (inSelf && inOther) {
+          walk(self[i], other[i], childPath);
+        } else if (inSelf) {
+          /** 仅本侧有：added/removed 整棵子树 */
+          markSubtree(self[i], childPath, side === "new" ? "added" : "removed");
+        }
+        /** 仅对侧有：本侧没有对应节点，不标（对侧的 added 会自己标） */
+      }
+    } else {
+      const selfObj2 = self as Record<string, unknown>;
+      const otherObj2 = other as Record<string, unknown>;
+      const allKeys = new Set([...Object.keys(selfObj2), ...Object.keys(otherObj2)]);
+      /** 需要把 key 映射到 childIndex：rawToSerialized 用 Object.keys 顺序 */
+      const selfKeys = Object.keys(selfObj2);
+      const otherKeys = Object.keys(otherObj2);
+      for (const k of allKeys) {
+        const inSelf = k in selfObj2;
+        const inOther = k in otherObj2;
+        if (inSelf && inOther) {
+          const idx = selfKeys.indexOf(k);
+          walk(selfObj2[k], otherObj2[k], `${path},${idx}`);
+        } else if (inSelf) {
+          const idx = selfKeys.indexOf(k);
+          markSubtree(selfObj2[k], `${path},${idx}`, side === "new" ? "added" : "removed");
+        } else {
+          /** 仅对侧有的 key：本侧没有节点，但对侧需要知道自己的 childIndex 是 added。
+           * 由于 childIndex 由各自树的 Object.keys 顺序决定，对侧新增 key 的 idx
+           * 在对侧树里是独立计算的（otherKeys.indexOf(k)），所以这里无需处理。 */
+          void otherKeys;
+        }
+      }
+    }
+  }
+
+  /** 给整棵子树标同一状态（用于 added/removed 分支） */
+  function markSubtree(val: unknown, path: string, status: DiffStatus) {
+    statusMap.set(path, status);
+    if (val !== null && typeof val === "object") {
+      if (Array.isArray(val)) {
+        val.forEach((item, i) => markSubtree(item, `${path},${i}`, status));
+      } else {
+        Object.keys(val as Record<string, unknown>).forEach((k, i) =>
+          markSubtree((val as Record<string, unknown>)[k], `${path},${i}`, status),
+        );
+      }
+    }
+  }
+
+  walk(selfRaw, otherRaw, rootPath);
+  return { statusMap, otherValueMap };
+}
+
+/**
+ * 按路径从树中取值
+ *
+ * path 是逗号 join 的 childIndex 链（如 "0,2,1"），rootPath 是起始路径。
+ * 数组按下标取，object 按 Object.keys 顺序的第 idx 个 key 取。
+ */
+function getValueByPath(tree: unknown, path: string, rootPath: string): unknown {
+  /** 去掉 rootPath 前缀，得到相对路径 */
+  const relPath = path.startsWith(rootPath) ? path.slice(rootPath.length) : path;
+  const segments = relPath.split(",").filter(Boolean);
+  let cur = tree;
+  for (const seg of segments) {
+    const idx = Number(seg);
+    if (cur === null || cur === undefined) return undefined;
+    if (Array.isArray(cur)) {
+      cur = cur[idx];
+    } else if (typeof cur === "object") {
+      const keys = Object.keys(cur as Record<string, unknown>);
+      cur = (cur as Record<string, unknown>)[keys[idx]];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+/**
+ * 计算单个节点的 diff 状态（增量更新用）
+ *
+ * 只做一层比较，不递归——调用方保证只在叶子值变化时调用。
+ */
+function computeNodeDiffStatus(self: unknown, other: unknown, side: "old" | "new"): DiffStatus {
+  if (rawDeepEqual(self, other)) return "equal";
+  const selfObj = self !== null && typeof self === "object";
+  const otherObj = other !== null && typeof other === "object";
+  if (!selfObj || !otherObj) return "modified";
+  if (Array.isArray(self) !== Array.isArray(other)) return "modified";
+  /** 容器节点：如果之前是 children-changed，现在可能变成 equal（由调用方判断） */
+  return "children-changed";
+}
+
+/**
+ * 更新受影响路径的祖先链状态
+ *
+ * 从 path 往上遍历所有祖先，重新计算每个祖先的 changedAncestors 成员资格。
+ * 规则：如果祖先的所有子节点都 equal → 祖先从 changedAncestors 移除；
+ *      否则 → 祖先加入 changedAncestors。
+ */
+function updateAncestorsForPath(
+  statusMap: Map<string, DiffStatus>,
+  changedAncestors: Set<string>,
+  path: string,
+  rootPath: string,
+) {
+  const segments = path.split(",");
+  /** 从 path 的父级开始往上（不含 path 本身，因为 path 的状态已经单独更新） */
+  for (let i = segments.length - 1; i >= 1; i--) {
+    const ancestorPath = segments.slice(0, i).join(",");
+    if (ancestorPath === rootPath) continue;
+    /** 检查该祖先的所有子节点是否都 equal */
+    const hasChangedChild = Array.from(statusMap.entries()).some(([p, s]) => {
+      if (s === "equal") return false;
+      /** p 是 ancestorPath 的直接子节点（不多不少正好深一层） */
+      if (!p.startsWith(ancestorPath + ",")) return false;
+      const rel = p.slice(ancestorPath.length + 1);
+      return !rel.includes(",");
+    });
+    if (hasChangedChild) {
+      changedAncestors.add(ancestorPath);
+      statusMap.set(ancestorPath, "children-changed");
+    } else {
+      changedAncestors.delete(ancestorPath);
+      statusMap.set(ancestorPath, "equal");
+    }
+  }
+  /** 根节点单独处理：检查是否有任何非根节点有变化 */
+  const rootHasChanges = Array.from(statusMap.entries()).some(
+    ([p, s]) => p !== rootPath && s !== "equal",
+  );
+  if (rootHasChanges) {
+    statusMap.set(rootPath, "children-changed");
+  } else {
+    statusMap.set(rootPath, "equal");
+  }
+}
+
+/**
+ * 收集有变化的祖先路径（用于自动展开）
+ *
+ * 从 statusMap 里所有非 equal 节点的 path 推导祖先链，
+ * 这些路径的容器节点需要默认展开才能看到变化。
+ */
+function collectChangedAncestorPaths(
+  statusMap: Map<string, DiffStatus>,
+  rootPath: string,
+): Set<string> {
+  const result = new Set<string>();
+  for (const [path, status] of statusMap) {
+    if (status === "equal" || path === rootPath) continue;
+    /** 把 "0,2,1" 拆成 ["0", "0,2", "0,2,1"]，所有祖先都加入 */
+    const segs = path.split(",");
+    for (let i = 1; i < segs.length; i++) {
+      result.add(segs.slice(0, i).join(","));
+    }
+  }
+  return result;
 }
 
 /**
@@ -241,11 +524,22 @@ const protoChildren = computed(() => (node.value.properties ?? []).filter((p) =>
 /** [[Prototype]] 分组是否展开（独立于 expandOverride 通道，保持简单） */
 const protoExpanded = ref(false);
 
+/**
+ * 分批渲染：当前可见的子节点条数（每批 50 条）
+ *
+ * 大数组/大对象下避免一次渲染全部子节点导致 DOM 爆炸。
+ * 点「更多」按钮 +50，双击直接展开全部。
+ */
+const visibleCount = ref(50);
+
 watch(
   () => [props.value, props.raw, props.json],
   () => {
-    /** 外部数据变化时重置展开状态 + 清除 override */
-    manualExpanded.value = props.depth < 1;
+    /**
+     * 外部数据变化时：
+     * - 不重置 manualExpanded（保留用户的展开/折叠状态，避免文本框每次输入都折叠整棵树）
+     * - 仅清除根实例的 expandOverride（override 是基于旧路径的，新树下可能失效）
+     */
     if (isRoot) expandOverride.value = null;
   },
 );
@@ -280,6 +574,157 @@ const expandOverride = isRoot
 provide("oi-path", nodePath.value);
 provide("oi-expand-override", expandOverride as Ref<ExpandOverride>);
 
+/* ==================== Diff 模式：raw 树对比 ==================== */
+
+/** 当前节点 path 的字符串形式（diff map 查询用） */
+const nodePathStr = computed(() => nodePath.value.join(","));
+
+/** 根实例：计算 diff map 并 provide；非根：inject */
+const diffCtx = (() => {
+  if (isRoot && props.diffSide && props.raw !== undefined && props.diffRaw !== undefined) {
+    const { statusMap, otherValueMap } = computeDiffMap(
+      props.raw,
+      props.diffRaw,
+      props.diffSide,
+      nodePathStr.value,
+    );
+    const changedAncestors = collectChangedAncestorPaths(statusMap, nodePathStr.value);
+    const ctx: DiffContext = {
+      side: props.diffSide,
+      statusMap: ref(statusMap),
+      otherValueMap: ref(otherValueMap),
+      changedAncestors: ref(changedAncestors),
+      otherRaw: props.diffRaw,
+      rootPath: nodePathStr.value,
+      skipNextRawWatch: false,
+      updateDiffPath(path: string, newSelfValue: unknown) {
+        /** 按路径取对侧值 */
+        const otherValue = getValueByPath(ctx.otherRaw, path, ctx.rootPath);
+        /** 重新计算该路径的 diff 状态 */
+        const newStatus = computeNodeDiffStatus(newSelfValue, otherValue, ctx.side);
+        ctx.statusMap.value.set(path, newStatus);
+        /** 如果是 modified 且两侧都是叶子，更新 otherValueMap（字符级 diff 用） */
+        if (newStatus === "modified") {
+          ctx.otherValueMap.value.set(path, otherValue);
+        } else {
+          ctx.otherValueMap.value.delete(path);
+        }
+        /** 重新收集 changedAncestors（只针对受影响路径的祖先链） */
+        updateAncestorsForPath(ctx.statusMap.value, ctx.changedAncestors.value, path, ctx.rootPath);
+        /** 触发响应式更新 */
+        triggerRef(ctx.statusMap);
+        triggerRef(ctx.otherValueMap);
+        triggerRef(ctx.changedAncestors);
+        /** 标记：随后 emit 冒泡导致的 props.raw watch 应跳过全量重算 */
+        ctx.skipNextRawWatch = true;
+      },
+    };
+    /** 对侧树引用变化时同步更新（B 侧编辑后 A 侧的 otherRaw 要跟上） */
+    watch(
+      () => props.diffRaw,
+      (newDiffRaw) => {
+        ctx.otherRaw = newDiffRaw;
+        /** 对侧变了：全量重算 diff（因为无法知道对侧改了哪个路径） */
+        const { statusMap, otherValueMap } = computeDiffMap(
+          props.raw,
+          newDiffRaw,
+          ctx.side,
+          ctx.rootPath,
+        );
+        ctx.statusMap.value = statusMap;
+        ctx.otherValueMap.value = otherValueMap;
+        ctx.changedAncestors.value = collectChangedAncestorPaths(statusMap, ctx.rootPath);
+        triggerRef(ctx.statusMap);
+        triggerRef(ctx.otherValueMap);
+        triggerRef(ctx.changedAncestors);
+      },
+    );
+    /** 本侧树引用变化时全量重算（文本框输入等非编辑场景） */
+    watch(
+      () => props.raw,
+      (newRaw) => {
+        /** 编辑链路已增量更新过，跳过一次全量重算（避免抵消增量） */
+        if (ctx.skipNextRawWatch) {
+          ctx.skipNextRawWatch = false;
+          return;
+        }
+        const { statusMap, otherValueMap } = computeDiffMap(
+          newRaw,
+          ctx.otherRaw,
+          ctx.side,
+          ctx.rootPath,
+        );
+        ctx.statusMap.value = statusMap;
+        ctx.otherValueMap.value = otherValueMap;
+        ctx.changedAncestors.value = collectChangedAncestorPaths(statusMap, ctx.rootPath);
+        triggerRef(ctx.statusMap);
+        triggerRef(ctx.otherValueMap);
+        triggerRef(ctx.changedAncestors);
+      },
+    );
+    provide("oi-diff", ctx);
+    return ctx;
+  }
+  return inject<DiffContext | null>("oi-diff", null);
+})();
+
+/** 当前节点的 diff 状态（无 diff 上下文时为 equal） */
+const diffStatus = computed<DiffStatus>(() => {
+  if (!diffCtx) return "equal";
+  return diffCtx.statusMap.value.get(nodePathStr.value) ?? "equal";
+});
+
+/** 是否处于 diff 模式（决定行 class 是否生效） */
+const isDiffMode = computed(() => diffCtx !== null);
+
+/**
+ * modified 叶子的字符级 diff 分段
+ *
+ * 仅当当前节点是 modified 且两侧都是字符串时计算。
+ * old 侧渲染时只显示 equal+removed 段，new 侧只显示 equal+added 段。
+ */
+const diffCharSegments = computed<TextDiffSegment[] | null>(() => {
+  if (!diffCtx || diffStatus.value !== "modified") return null;
+  const other = diffCtx.otherValueMap.value.get(nodePathStr.value);
+  /**
+   * 本侧字符串值：raw 入口直接用 props.raw；value 入口从 SerializedValue 取。
+   * （子节点递归时是 value 路径，props.raw 会是 undefined）
+   */
+  const self =
+    props.raw !== undefined
+      ? props.raw
+      : node.value.type === "string"
+        ? node.value.value
+        : undefined;
+  /** 只对字符串做字符级 diff（数字/boolean 直接整行标色即可） */
+  if (typeof self !== "string" || typeof other !== "string") return null;
+  /** diffText(oldText, newText)：old 侧传 (self, other)，new 侧传 (other, self) */
+  return diffCtx.side === "old" ? diffText(self, other) : diffText(other, self);
+});
+
+/** 当前侧应该渲染的字符段（old=去掉 added 段，new=去掉 removed 段） */
+const diffCharVisible = computed<TextDiffSegment[] | null>(() => {
+  const segs = diffCharSegments.value;
+  if (!segs) return null;
+  const isOld = diffCtx?.side === "old";
+  return segs.filter((s) => s.op === "equal" || (isOld ? s.op === "removed" : s.op === "added"));
+});
+
+/**
+ * 子树内的差异条数（不含自身，折叠容器的「N 处差异」提示用）。
+ * 遍历 statusMap 前缀匹配；仅在折叠且有差异时才在模板中访问，开销可控。
+ */
+const diffDescendantCount = computed(() => {
+  if (!diffCtx) return 0;
+  const selfPath = nodePathStr.value;
+  const prefix = selfPath + ",";
+  let n = 0;
+  for (const [p, s] of diffCtx.statusMap.value) {
+    if (s !== "equal" && p !== selfPath && p.startsWith(prefix)) n++;
+  }
+  return n;
+});
+
 /** 判断 path A 是否为 path B 的子孙（或自身） */
 function isDescendantOrSelf(maybeChild: number[], ancestor: number[]): boolean {
   if (maybeChild.length < ancestor.length) return false;
@@ -287,7 +732,24 @@ function isDescendantOrSelf(maybeChild: number[], ancestor: number[]): boolean {
 }
 
 /** 用户手动 toggle 的展开状态（优先级低于 expandOverride） */
-const manualExpanded = ref(props.depth < 1);
+const manualExpanded = ref(
+  props.depth < 1 ||
+    /** diff 模式下，变化路径的祖先节点默认展开 */
+    (diffCtx?.changedAncestors.value.has(nodePathStr.value) ?? false),
+);
+
+/**
+ * diff 模式下，watch changedAncestors 变化：
+ * 当当前路径被加入 changedAncestors（增量更新或全量重算后）时自动展开。
+ * 只自动展开，不自动折叠——折叠由用户手动控制。
+ */
+if (diffCtx) {
+  watch(diffCtx.changedAncestors, (newSet) => {
+    if (newSet.has(nodePathStr.value) && !manualExpanded.value) {
+      manualExpanded.value = true;
+    }
+  });
+}
 
 /** 当前展开状态：expandOverride 覆盖 > 手动 toggle */
 const expanded = computed({
@@ -481,6 +943,8 @@ function closeMenu() {
 const editing = ref(false);
 /** 编辑草稿 */
 const editDraft = ref("");
+/** 编辑框 DOM 引用（失焦兜底用） */
+const editInputRef = ref<HTMLInputElement | null>(null);
 
 /** 当前叶子是否可编辑（只有 string/number/boolean/null 可编辑） */
 const isEditableLeaf = computed(() => {
@@ -503,6 +967,7 @@ function startEdit() {
 }
 
 function saveEdit() {
+  if (!editing.value) return;
   editing.value = false;
   const raw = editDraft.value.trim();
   const t = node.value.type;
@@ -519,12 +984,27 @@ function saveEdit() {
     if (raw !== "null") return;
     newValue = null;
   }
+  /** diff 模式：增量更新当前路径的 diff 状态 */
+  if (diffCtx) {
+    diffCtx.updateDiffPath(nodePathStr.value, newValue);
+  }
   emit("update:modelValue", newValue);
 }
 
 function cancelEdit() {
   editing.value = false;
 }
+
+/**
+ * 编辑中点击组件外部时兜底失焦保存
+ *
+ * 浏览器原生 blur 只在焦点转移到另一个 focusable 元素时触发；
+ * 点击 div/空白区域不会触发 blur，导致编辑框一直留着。
+ * onClickOutside 内部用 pointerdown 捕获阶段监听，点击目标不在编辑框内时主动 saveEdit。
+ */
+onClickOutside(editInputRef, () => {
+  if (editing.value) saveEdit();
+});
 
 /** 子节点编辑冒泡 */
 function onChildUpdate(childKey: string, newChildValue: unknown) {
@@ -536,10 +1016,18 @@ function onChildUpdate(childKey: string, newChildValue: unknown) {
     if (Array.isArray(props.raw)) {
       const arr = [...props.raw];
       arr[Number(childKey)] = newChildValue;
+      /** diff 模式：增量更新当前路径的 diff 状态 */
+      if (diffCtx) {
+        diffCtx.updateDiffPath(nodePathStr.value, arr);
+      }
       emit("update:modelValue", arr);
     } else if (props.raw !== null && typeof props.raw === "object") {
       const obj = { ...(props.raw as Record<string, unknown>) };
       obj[childKey] = newChildValue;
+      /** diff 模式：增量更新当前路径的 diff 状态 */
+      if (diffCtx) {
+        diffCtx.updateDiffPath(nodePathStr.value, obj);
+      }
       emit("update:modelValue", obj);
     }
   } else if (props.json !== undefined) {
@@ -554,6 +1042,25 @@ function onChildUpdate(childKey: string, newChildValue: unknown) {
     } catch {
       /* 忽略 */
     }
+  } else {
+    /**
+     * value 入口（SerializedValue）的中间层节点：把自身序列化树重建为 JS 值，
+     * 替换被编辑的子值后继续向上冒泡——否则编辑事件在中间层被吞掉，
+     * 深度 ≥3 的编辑永远到不了根实例（这是之前「编辑不生效」的根因）。
+     */
+    const selfJs = serializedToJson(node.value);
+    if (Array.isArray(selfJs)) {
+      selfJs[Number(childKey)] = newChildValue;
+    } else if (selfJs !== null && typeof selfJs === "object") {
+      (selfJs as Record<string, unknown>)[childKey] = newChildValue;
+    } else {
+      return;
+    }
+    /** diff 模式：增量更新当前路径的 diff 状态 */
+    if (diffCtx) {
+      diffCtx.updateDiffPath(nodePathStr.value, selfJs);
+    }
+    emit("update:modelValue", selfJs);
   }
 }
 
@@ -626,7 +1133,17 @@ function handleChildContextMenu(ctx: MenuContext) {
 <template>
   <div class="oi-node">
     <!-- 行：箭头 + key + 值预览 -->
-    <div class="oi-row" @click.stop="toggle" @contextmenu="onContextMenu">
+    <div
+      class="oi-row"
+      :class="{
+        'oi-diff-added': isDiffMode && diffStatus === 'added',
+        'oi-diff-removed': isDiffMode && diffStatus === 'removed',
+        'oi-diff-modified': isDiffMode && diffStatus === 'modified',
+        'oi-diff-children-changed': isDiffMode && diffStatus === 'children-changed',
+      }"
+      @click.stop="toggle"
+      @contextmenu="onContextMenu"
+    >
       <!-- 展开箭头 -->
       <span
         class="oi-arrow"
@@ -643,6 +1160,7 @@ function handleChildContextMenu(ctx: MenuContext) {
         <!-- 编辑模式 -->
         <input
           v-if="editing"
+          ref="editInputRef"
           v-model="editDraft"
           @keydown.enter.stop.prevent="saveEdit"
           @keydown.esc.stop.prevent="cancelEdit"
@@ -650,6 +1168,21 @@ function handleChildContextMenu(ctx: MenuContext) {
           @click.stop
           class="oi-edit-input"
         />
+        <!-- diff 模式 modified 叶子：字符级高亮 -->
+        <span
+          v-else-if="diffCharVisible"
+          class="oi-value"
+          :class="{ 'oi-clickable': isEditableLeaf }"
+          :style="{ color: typeColor(node.type) }"
+          @click.stop="startEdit"
+          ><template v-for="(seg, si) in diffCharVisible" :key="si"
+            ><span
+              v-if="seg.op !== 'equal'"
+              :class="seg.op === 'removed' ? 'oi-diff-char-removed' : 'oi-diff-char-added'"
+              >{{ seg.text }}</span
+            ><template v-else>{{ seg.text }}</template></template
+          ></span
+        >
         <!-- 只读/查看模式：字符串显示完整 value（不截断），其他类型用 preview -->
         <span
           v-else
@@ -666,13 +1199,27 @@ function handleChildContextMenu(ctx: MenuContext) {
         <span class="oi-badge" :style="{ color: typeColor(node.type) }">
           {{ typeBadge(node.type) }}
         </span>
-        <span :style="{ color: typeColor(node.type) }">{{ node.preview }}</span>
-        <span v-if="!expanded && node.type === 'function'" class="oi-collapsed-hint">
-          ({{ (node.value || "").split("\n").length }} lines)
+        <!-- 展开时完整 preview 冗余（子节点已列出），只显示数量提示 -->
+        <span v-if="expanded" class="oi-collapsed-hint">
+          ({{
+            node.type === "function"
+              ? (node.value || "").split("\n").length + " lines"
+              : children.length + (node.type === "array" ? " items" : " props")
+          }})
         </span>
-        <span v-else-if="!expanded && node.type !== 'function'" class="oi-collapsed-hint">
-          ({{ children.length }} {{ node.type === "array" ? "items" : "props" }})
-        </span>
+        <template v-else>
+          <span :style="{ color: typeColor(node.type) }">{{ node.preview }}</span>
+          <!-- 折叠容器看不到内部，用差异数提示里面有没有变化 -->
+          <span v-if="isDiffMode && diffDescendantCount > 0" class="oi-diff-count-hint"
+            >({{ diffDescendantCount }} 处差异)</span
+          >
+          <span v-if="node.type === 'function'" class="oi-collapsed-hint">
+            ({{ (node.value || "").split("\n").length }} lines)
+          </span>
+          <span v-else-if="node.type !== 'array'" class="oi-collapsed-hint">
+            ({{ children.length }} props)
+          </span>
+        </template>
       </span>
     </div>
 
@@ -682,10 +1229,10 @@ function handleChildContextMenu(ctx: MenuContext) {
       <template v-if="node.type === 'function' && node.value">
         <pre class="oi-fn-src">{{ node.value }}</pre>
       </template>
-      <!-- 普通对象/数组：递归子节点 -->
+      <!-- 普通对象/数组：递归子节点（分批渲染：每批 50 条，点「更多」加载下一批） -->
       <template v-else>
         <ObjectInspector
-          v-for="(child, idx) in children.slice(0, 50)"
+          v-for="(child, idx) in children.slice(0, visibleCount)"
           :key="idx"
           :value="child.value"
           :key-name="child.key"
@@ -695,7 +1242,11 @@ function handleChildContextMenu(ctx: MenuContext) {
           @update:model-value="onChildUpdate(child.key, $event)"
           @context-menu="handleChildContextMenu"
         />
-        <div v-if="children.length > 50" class="oi-more">… {{ children.length - 50 }} more</div>
+        <div v-if="children.length > visibleCount" class="oi-more">
+          … 还有 {{ children.length - visibleCount }} 条
+          <button class="oi-more-btn" @click.stop="visibleCount += 50">+50</button>
+          <button class="oi-more-btn" @click.stop="visibleCount = children.length">全部</button>
+        </div>
         <!-- 原型链继承属性分组：折叠进单个 [[Prototype]] 节点 -->
         <div v-if="protoChildren.length > 0" class="oi-proto">
           <div class="oi-row" @click.stop="protoExpanded = !protoExpanded">
@@ -705,7 +1256,7 @@ function handleChildContextMenu(ctx: MenuContext) {
           </div>
           <div v-if="protoExpanded" class="oi-children">
             <ObjectInspector
-              v-for="(child, idx) in protoChildren.slice(0, 50)"
+              v-for="(child, idx) in protoChildren.slice(0, visibleCount)"
               :key="'p' + idx"
               :value="child.value"
               :key-name="child.key"
@@ -714,6 +1265,13 @@ function handleChildContextMenu(ctx: MenuContext) {
               :editable="false"
               @context-menu="handleChildContextMenu"
             />
+            <div v-if="protoChildren.length > visibleCount" class="oi-more">
+              … 还有 {{ protoChildren.length - visibleCount }} 条
+              <button class="oi-more-btn" @click.stop="visibleCount += 50">+50</button>
+              <button class="oi-more-btn" @click.stop="visibleCount = protoChildren.length">
+                全部
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -777,6 +1335,39 @@ function handleChildContextMenu(ctx: MenuContext) {
 
 .oi-row:hover {
   background: var(--cs-oi-row-hover);
+}
+
+/* ════ Diff 模式行高亮 ════ */
+.oi-row.oi-diff-added {
+  background: rgba(34, 197, 94, 0.12);
+  border-left: 2px solid rgba(34, 197, 94, 0.6);
+}
+.oi-row.oi-diff-removed {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 2px solid rgba(239, 68, 68, 0.6);
+}
+.oi-row.oi-diff-modified {
+  background: rgba(234, 179, 8, 0.12);
+  border-left: 2px solid rgba(234, 179, 8, 0.6);
+}
+.oi-row.oi-diff-children-changed {
+  background: rgba(148, 163, 184, 0.12);
+  border-left: 2px solid rgba(148, 163, 184, 0.5);
+}
+/* 折叠容器的「N 处差异」提示：用 modified 同款黄色，醒目但不刺眼 */
+.oi-diff-count-hint {
+  color: #eab308;
+  font-size: 11px;
+  font-weight: 500;
+}
+/* 字符级 diff：变化的字符段加浓底色 */
+.oi-diff-char-removed {
+  background: rgba(239, 68, 68, 0.35);
+  border-radius: 2px;
+}
+.oi-diff-char-added {
+  background: rgba(34, 197, 94, 0.35);
+  border-radius: 2px;
 }
 
 .oi-arrow {
@@ -864,6 +1455,25 @@ function handleChildContextMenu(ctx: MenuContext) {
   font-style: italic;
   padding-left: 16px;
   font-size: 11px;
+}
+
+/** 「加载更多」按钮 */
+.oi-more-btn {
+  cursor: pointer;
+  border: 1px solid var(--cs-oi-hint);
+  border-radius: 3px;
+  padding: 0 6px;
+  margin-left: 6px;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--cs-oi-hint);
+  background: transparent;
+  line-height: 1.4;
+}
+
+.oi-more-btn:hover {
+  color: var(--cs-oi-string);
+  border-color: var(--cs-oi-string);
 }
 
 /** [[Prototype]] 分组容器（与自有属性间留呼吸感） */

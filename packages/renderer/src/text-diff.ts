@@ -19,7 +19,7 @@
  * - 变体选择器：❤️ = ❤ + VS16，1 个 grapheme
  * - 组合附标：é = e + combining accent（部分形式），1 个 grapheme
  */
-const segmenter = new Intl.Segmenter()
+const segmenter = new Intl.Segmenter();
 
 /**
  * 将字符串分割为 grapheme cluster 数组
@@ -32,23 +32,23 @@ const segmenter = new Intl.Segmenter()
  * splitGraphemes('👨‍👩‍👧‍👦')  // → ['👨‍👩‍👧‍👦']（1 个 grapheme，而非 11 个 code unit）
  */
 export function splitGraphemes(str: string): string[] {
-  if (!str) return []
-  const result: string[] = []
+  if (!str) return [];
+  const result: string[] = [];
   for (const seg of segmenter.segment(str)) {
-    result.push(seg.segment)
+    result.push(seg.segment);
   }
-  return result
+  return result;
 }
 
 /** 单个 diff 段的类型 */
-export type TextDiffOp = 'equal' | 'added' | 'removed'
+export type TextDiffOp = "equal" | "added" | "removed";
 
 /** 文本 diff 的一段（连续的 equal / added / removed 片段） */
 export interface TextDiffSegment {
   /** 段类型：equal=不变，added=新增，removed=删除 */
-  op: TextDiffOp
+  op: TextDiffOp;
   /** 段文本内容 */
-  text: string
+  text: string;
 }
 
 /**
@@ -62,17 +62,17 @@ export interface TextDiffSegment {
  * @returns diff 段数组（相邻同类型已合并）
  */
 function lcsDiff(oldSegs: string[], newSegs: string[]): TextDiffSegment[] {
-  const n = oldSegs.length
-  const m = newSegs.length
+  const n = oldSegs.length;
+  const m = newSegs.length;
 
   /** 两方都空 → 无段 */
-  if (n === 0 && m === 0) return []
+  if (n === 0 && m === 0) return [];
   /** 某一方为空 → 整体增/删 */
-  if (n === 0) return [{ op: 'added', text: newSegs.join('') }]
-  if (m === 0) return [{ op: 'removed', text: oldSegs.join('') }]
+  if (n === 0) return [{ op: "added", text: newSegs.join("") }];
+  if (m === 0) return [{ op: "removed", text: oldSegs.join("") }];
   /** 完全相同 → 整体 equal（快速路径，避免 dp 表分配） */
-  if (oldSegs.join('') === newSegs.join('')) {
-    return [{ op: 'equal', text: oldSegs.join('') }]
+  if (oldSegs.join("") === newSegs.join("")) {
+    return [{ op: "equal", text: oldSegs.join("") }];
   }
 
   /**
@@ -81,18 +81,18 @@ function lcsDiff(oldSegs: string[], newSegs: string[]): TextDiffSegment[] {
    * dp[i][j] = oldSegs[0..i-1] 与 newSegs[0..j-1] 的 LCS 长度。
    * 用 Uint32Array 降内存（行列各 +1）。
    */
-  const dp: Uint32Array[] = []
+  const dp: Uint32Array[] = [];
   for (let i = 0; i <= n; i++) {
-    dp.push(new Uint32Array(m + 1))
+    dp.push(new Uint32Array(m + 1));
   }
 
   /** 填表 */
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
       if (oldSegs[i - 1] === newSegs[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1
+        dp[i][j] = dp[i - 1][j - 1] + 1;
       } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
       }
     }
   }
@@ -104,35 +104,35 @@ function lcsDiff(oldSegs: string[], newSegs: string[]): TextDiffSegment[] {
    * - dp[i-1][j] >= dp[i][j-1] → oldSegs[i-1] 是 removed，i--
    * - 否则 → newSegs[j-1] 是 added，j--
    */
-  const rawSegments: TextDiffSegment[] = []
-  let i = n
-  let j = m
+  const rawSegments: TextDiffSegment[] = [];
+  let i = n;
+  let j = m;
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldSegs[i - 1] === newSegs[j - 1]) {
-      rawSegments.push({ op: 'equal', text: oldSegs[i - 1] })
-      i--
-      j--
+      rawSegments.push({ op: "equal", text: oldSegs[i - 1] });
+      i--;
+      j--;
     } else if (i > 0 && (j === 0 || dp[i - 1][j] >= dp[i][j - 1])) {
-      rawSegments.push({ op: 'removed', text: oldSegs[i - 1] })
-      i--
+      rawSegments.push({ op: "removed", text: oldSegs[i - 1] });
+      i--;
     } else {
-      rawSegments.push({ op: 'added', text: newSegs[j - 1] })
-      j--
+      rawSegments.push({ op: "added", text: newSegs[j - 1] });
+      j--;
     }
   }
 
   /** 回溯产生的是逆序段，翻转回来 */
-  rawSegments.reverse()
+  rawSegments.reverse();
 
   /** 合并相邻同类型段 */
-  const segments: TextDiffSegment[] = []
+  const segments: TextDiffSegment[] = [];
   for (const seg of rawSegments) {
-    const last = segments[segments.length - 1]
+    const last = segments[segments.length - 1];
     if (last && last.op === seg.op) {
-      last.text += seg.text
+      last.text += seg.text;
     } else {
-      segments.push({ ...seg })
+      segments.push({ ...seg });
     }
   }
 
@@ -143,26 +143,26 @@ function lcsDiff(oldSegs: string[], newSegs: string[]): TextDiffSegment[] {
    * 导致 added 段出现在 removed 段前面。标准 diff（git/VS Code）习惯
    * 先显示删除再显示新增，这里对每个变更块内做 stable 排序来纠正顺序。
    */
-  const result: TextDiffSegment[] = []
-  let buf: TextDiffSegment[] = []
+  const result: TextDiffSegment[] = [];
+  let buf: TextDiffSegment[] = [];
   for (const seg of segments) {
-    if (seg.op === 'equal') {
+    if (seg.op === "equal") {
       if (buf.length > 0) {
-        buf.sort((a, b) => (a.op === 'removed' ? -1 : b.op === 'removed' ? 1 : 0))
-        result.push(...buf)
-        buf = []
+        buf.sort((a, b) => (a.op === "removed" ? -1 : b.op === "removed" ? 1 : 0));
+        result.push(...buf);
+        buf = [];
       }
-      result.push(seg)
+      result.push(seg);
     } else {
-      buf.push(seg)
+      buf.push(seg);
     }
   }
   if (buf.length > 0) {
-    buf.sort((a, b) => (a.op === 'removed' ? -1 : b.op === 'removed' ? 1 : 0))
-    result.push(...buf)
+    buf.sort((a, b) => (a.op === "removed" ? -1 : b.op === "removed" ? 1 : 0));
+    result.push(...buf);
   }
 
-  return result
+  return result;
 }
 
 /**
@@ -185,14 +185,14 @@ function lcsDiff(oldSegs: string[], newSegs: string[]): TextDiffSegment[] {
 export function diffText(oldText: string, newText: string): TextDiffSegment[] {
   /** 两段文本完全相同 → 不需要 diff */
   if (oldText === newText) {
-    return oldText ? [{ op: 'equal', text: oldText }] : []
+    return oldText ? [{ op: "equal", text: oldText }] : [];
   }
 
   /**
    * 分割成 grapheme 数组，确保 emoji 等复杂字符不被拆碎。
    * 后续 LCS 以 grapheme 为最小单位操作。
    */
-  return lcsDiff(splitGraphemes(oldText), splitGraphemes(newText))
+  return lcsDiff(splitGraphemes(oldText), splitGraphemes(newText));
 }
 
 /**
@@ -211,9 +211,9 @@ export function diffText(oldText: string, newText: string): TextDiffSegment[] {
  */
 export function diffLines(oldText: string, newText: string): TextDiffSegment[] {
   if (oldText === newText) {
-    return oldText ? [{ op: 'equal', text: oldText }] : []
+    return oldText ? [{ op: "equal", text: oldText }] : [];
   }
-  return lcsDiff(splitLines(oldText), splitLines(newText))
+  return lcsDiff(splitLines(oldText), splitLines(newText));
 }
 
 /**
@@ -227,13 +227,13 @@ export function diffLines(oldText: string, newText: string): TextDiffSegment[] {
  * splitLines('a\nb\n') // → ['a\n', 'b\n']
  */
 export function splitLines(text: string): string[] {
-  if (!text) return []
+  if (!text) return [];
   /** 用正则把每行（含换行符）作为一个元素 */
-  const lines = text.match(/[^\n]*\n?/g)
-  if (!lines) return [text]
+  const lines = text.match(/[^\n]*\n?/g);
+  if (!lines) return [text];
   /** match 末尾会多出一个空字符串，去掉 */
-  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
-  return lines
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
 }
 
 /**
@@ -246,11 +246,16 @@ export function splitLines(text: string): string[] {
  * // → 'h[-e-]{+a+}llo'
  */
 export function formatTextDiff(segments: TextDiffSegment[]): string {
-  return segments.map((seg) => {
-    switch (seg.op) {
-      case 'equal': return seg.text
-      case 'added': return `{+${seg.text}+}`
-      case 'removed': return `[-${seg.text}-]`
-    }
-  }).join('')
+  return segments
+    .map((seg) => {
+      switch (seg.op) {
+        case "equal":
+          return seg.text;
+        case "added":
+          return `{+${seg.text}+}`;
+        case "removed":
+          return `[-${seg.text}-]`;
+      }
+    })
+    .join("");
 }

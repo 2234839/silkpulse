@@ -8,9 +8,22 @@
  * - **截图叠加**：支持 getDisplayMedia 截图作为底图 + DOM 框叠加交互层
  */
 
-export { elementStyle, elementColor, isContainer, elementLabel, canShowLabel } from './styles.js'
-export { diffSnapshots, type SnapshotDiff, type ElementPatch } from './diff.js'
-export { diffText, diffLines, splitGraphemes, splitLines, formatTextDiff, type TextDiffSegment, type TextDiffOp } from './text-diff.js'
-export { computeScale, filterRectElements, computeCanvasSize, type PreviewLayout } from './preview.js'
-export { SCREENSHOT_QUALITY, compressScreenshot, type ScreenshotData } from './screenshot.js'
-export { FrameCompositor } from './compositor.js'
+export { elementStyle, elementColor, isContainer, elementLabel, canShowLabel } from "./styles.js";
+export { diffSnapshots, type SnapshotDiff, type ElementPatch } from "./diff.js";
+export {
+  diffText,
+  diffLines,
+  splitGraphemes,
+  splitLines,
+  formatTextDiff,
+  type TextDiffSegment,
+  type TextDiffOp,
+} from "./text-diff.js";
+export {
+  computeScale,
+  filterRectElements,
+  computeCanvasSize,
+  type PreviewLayout,
+} from "./preview.js";
+export { SCREENSHOT_QUALITY, compressScreenshot, type ScreenshotData } from "./screenshot.js";
+export { FrameCompositor } from "./compositor.js";

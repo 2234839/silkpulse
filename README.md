@@ -45,15 +45,15 @@ Vue / React 组件树 · console · network · errors · source map · exec · A
 
 > 一句话定位：PageSpy 的远程多端调试能力 + vite-plugin-pilot 的 AI-native 注入式哲学。
 
-| | PageSpy | chii | vite-plugin-pilot | **silkpulse** |
-|---|---|---|---|---|
-| 远程设备调试 | ✅ | ✅ | ❌（仅本地 dev server） | ✅ |
-| 远程组件树（Vue/React） | ❌（DOM 树） | ❌（DOM 树） | ❌ | ✅ 官方 DevTools 面板内嵌 |
-| AI-native | ❌ | ❌ | ✅ | ✅ |
-| AI 接入方式 | 无 | 无 | MCP | **skill + HTTP API** |
-| 多设备并发 | ✅ | ✅ | ❌ | ✅ |
-| 断线重连 | — | — | — | ✅（历史保留） |
-| 前端依赖 | 自研控制台 | fork DevTools | 无控制台 | 自研轻量控制台 |
+|                         | PageSpy      | chii          | vite-plugin-pilot       | **silkpulse**             |
+| ----------------------- | ------------ | ------------- | ----------------------- | ------------------------- |
+| 远程设备调试            | ✅           | ✅            | ❌（仅本地 dev server） | ✅                        |
+| 远程组件树（Vue/React） | ❌（DOM 树） | ❌（DOM 树）  | ❌                      | ✅ 官方 DevTools 面板内嵌 |
+| AI-native               | ❌           | ❌            | ✅                      | ✅                        |
+| AI 接入方式             | 无           | 无            | MCP                     | **skill + HTTP API**      |
+| 多设备并发              | ✅           | ✅            | ❌                      | ✅                        |
+| 断线重连                | —            | —             | —                       | ✅（历史保留）            |
+| 前端依赖                | 自研控制台   | fork DevTools | 无控制台                | 自研轻量控制台            |
 
 ## 核心能力
 
@@ -68,13 +68,16 @@ Vue / React 组件树 · console · network · errors · source map · exec · A
 - **官方面板内嵌**：vue-devtools / react-devtools 官方 frontend 走 iframe 隔离加载，树形浏览、搜索、展开、选中体验与本地 DevTools 一致
 
 ### 远程采集
+
 - **console 劫持**：info/warn/error/debug 全级别采集，安全序列化（限深限长防卡死），**日志限流**（滑动窗口 50 条/秒，防 log 爆炸打爆 WS/server；error 级不限流）
 - **network 采集**：fetch + XHR 劫持，HAR 风格（URL/方法/状态/**关键请求头/响应头**/请求体/响应体/耗时）。headers 只采诊断关键头（content-type/authorization/cookie/自定义 x-* 等），鉴权/cookie 脱敏保留类型。**请求体双路采集**（init.body + `fetch(new Request(url, {body}))` 场景从 Request.clone() 读取，不丢失 body）。**FormData body 字段名采集**（列出字段名 + 文件字段文件名，如 `[FormData: username, avatar=<profile.png>]`，诊断表单提交/文件上传不丢字段信息）。**XHR responseType 全模式兼容**（json/arraybuffer/blob/document 模式下 responseText 抛 InvalidStateError，改用 response 读取——json 序列化、二进制标记类型+大小，不丢失响应体）
 - **error 捕获**：window.onerror + unhandledrejection，含堆栈 + **自动 source map 解析**（压缩位置 → 原始源码位置，让 AI 能定位压缩代码的真实出错点）。**资源加载失败不计入 errorCount**（404 图片/脚本降级为快照附带提示，避免红条误导诊断）。**错误风暴去重**（循环错误——rAF/setInterval 里持续抛同一个错——首现立即上报，后续相同错误聚合计数，2s 窗口结束发一条"重复 N 次"汇总；不同错误全量实时上报。errorCount 始终反映真实总数，errors 条目保持精简，防 WS/server 被错误风暴打爆）
 - **compact 快照**：移植自 pilot 的 AI 友好文本格式，稳定索引，~400 字符压缩整页状态，穿透 shadow DOM + 同源 iframe。**头部含视口尺寸**（`# viewport: 375×667`，AI 诊断响应式/布局错乱时知道当前可视区域是手机/平板/桌面）。**全量表单状态**（disabled/readonly/required/indeterminate/aria-disabled/aria-expanded/**当前聚焦元素 focus**）—— AI 诊断"按钮点不了""表单提交失败""光标在哪"时能直接定位根因。**select 选项 value:text 双标注**（`<bj:北京|sh:上海|gz:广州>`，AI 知道每个选项的 value 用于操作 + label 用于语义理解）
 
 ### AI 操作（exec 通道）
+
 AI 在远程设备执行任意诊断 JS，内置辅助函数：
+
 - `__silkpulse_click(idx)` — 点击快照中的元素（触发完整鼠标事件序列，覆盖监听 mousedown 的自定义组件）
 - `__silkpulse_setValue(idx, val)` — 设置表单值（框架兼容，**支持 input/textarea/select/checkbox/radio**；checkbox 传 `true`/`false` 勾选/取消，radio 选中并自动取消同组互斥）
 - `__silkpulse_type(idx, text)` — 模拟键盘逐字输入（触发 keydown/keyup，**React/Vue 受控组件兼容**——用原生 setter 累加 value，绕过框架对 `el.value` 的 setter 覆盖）
@@ -89,18 +92,22 @@ AI 在远程设备执行任意诊断 JS，内置辅助函数：
 - `__silkpulse_storage(type?)` — 查询 localStorage/sessionStorage/cookie（返回 `{key:value}`，诊断登录态/会话/配置异常）
 
 ### 多形态接入
+
 - **script 标签**：能改源码时
 - **bookmarklet**：线上站不便改源码时，拖到书签栏点击即接入
 - **userscript**：Tampermonkey/Greasemonkey，自动匹配所有页面
 
 ### 设备标签 / 备注
+
 多设备场景下区分"哪台是哪台"：
+
 - **接入时预设**：`<script src=".../sdk.js" data-tags="生产,用户A" data-note="iPhone 15"></script>`
 - **运行时修改**：控制台 UI 内联编辑（选中设备点 🏷️），或 `POST /api/devices/:id/tags`
 - **AI 可用**：`silkpulse tag <id> "标签1,标签2" 备注内容`
 - **持久保留**：SPA 路由变化、断线重连都不覆盖 server 侧标签
 
 ### 可靠性
+
 - **断线重连**：指数退避（1s/2s/4s...30s），重连后历史缓冲区完整保留；**重连定时器跟踪 + disconnect 清理**（页面卸载/重新初始化时 clearTimeout，防止已调度的重连在卸载后建立幽灵 WS 连接）
 - **SDK 离线缓冲**：启动期间（采集器装好到 WS 连上）和断线期间产生的日志/错误/网络请求，暂存 SDK 内存队列（上限 200 条），重连后 flush，不丢失早期错误
 - **SPA 路由感知**：pushState/replaceState/popstate 上报 URL 变化
@@ -151,6 +158,7 @@ vp run start    # 默认端口 8080
 ### 部署到生产
 
 构建后只需要三个产物目录，无需 `node_modules`（ws 等依赖已通过 `vite.config.ts` 的 `pack.deps.alwaysBundle` 打包进 bundle）：
+
 - `packages/server/dist/` — server bundle（含 `bin/silkpulse.mjs` 入口）
 - `packages/server/public/` — 控制台 UI + SDK（`sdk.js`）
 - `examples/test-page.html` — demo 测试页
@@ -192,11 +200,11 @@ CMD ["node", "/app/dist/bin/silkpulse.mjs", "--port", "8080"]
 
 #### 环境变量
 
-| 变量 | 说明 |
-|---|---|
+| 变量                  | 说明                         |
+| --------------------- | ---------------------------- |
 | `SILKPULSE_ADMIN_KEY` | 超管密钥（鉴权用，**必设**） |
-| `SILKPULSE_DATA_DIR` | 数据目录（默认 `/data`） |
-| `--port` | 监听端口（默认 `8080`） |
+| `SILKPULSE_DATA_DIR`  | 数据目录（默认 `/data`）     |
+| `--port`              | 监听端口（默认 `8080`）      |
 
 #### 反向代理
 
@@ -290,18 +298,18 @@ silkpulse/
 
 ## HTTP API
 
-| 方法 | 路径 | 作用 |
-|---|---|---|
-| GET | `/api/devices` | 在线设备 + 最近下线设备（`{ devices, recentlyOffline }`） |
-| GET | `/api/devices/:id/snapshot` | compact 快照（text/plain，AI 直接读） |
-| POST | `/api/devices/:id/exec` | 在设备页面执行 JS（`{code: "..."}`） |
-| GET | `/api/devices/:id/logs?since=N` | console 日志（游标分页） |
-| GET | `/api/devices/:id/network?since=N` | network 记录（HAR 风格，游标分页） |
-| GET | `/api/devices/:id/errors?since=N` | 错误记录（游标分页） |
-| POST | `/api/devices/:id/tags` | 修改设备标签/备注（`{tags?: string[], note?: string}`） |
-| GET | `/inject/bookmarklet` | 生成 bookmarklet 注入片段 |
-| GET | `/inject/userscript` | 生成 userscript 注入片段 |
-| POST | `/api/echo` | 回显端点（测试 POST body 采集） |
+| 方法 | 路径                               | 作用                                                      |
+| ---- | ---------------------------------- | --------------------------------------------------------- |
+| GET  | `/api/devices`                     | 在线设备 + 最近下线设备（`{ devices, recentlyOffline }`） |
+| GET  | `/api/devices/:id/snapshot`        | compact 快照（text/plain，AI 直接读）                     |
+| POST | `/api/devices/:id/exec`            | 在设备页面执行 JS（`{code: "..."}`）                      |
+| GET  | `/api/devices/:id/logs?since=N`    | console 日志（游标分页）                                  |
+| GET  | `/api/devices/:id/network?since=N` | network 记录（HAR 风格，游标分页）                        |
+| GET  | `/api/devices/:id/errors?since=N`  | 错误记录（游标分页）                                      |
+| POST | `/api/devices/:id/tags`            | 修改设备标签/备注（`{tags?: string[], note?: string}`）   |
+| GET  | `/inject/bookmarklet`              | 生成 bookmarklet 注入片段                                 |
+| GET  | `/inject/userscript`               | 生成 userscript 注入片段                                  |
+| POST | `/api/echo`                        | 回显端点（测试 POST body 采集）                           |
 
 ## 端到端测试
 
@@ -318,7 +326,7 @@ SILKPULSE_SERVER=http://localhost:8083 vp test
 
 CI（GitHub Actions）在每次 push/PR 时自动运行类型检查 + 构建 + 94 项无头测试，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
-73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**__silkpulse_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select + checkbox/radio，radio 选中时手动取消同组互斥**——合成事件不触发浏览器 pre-click 默认行为，互斥需自行实现；快照 options value:text 双标注）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、**连续重复日志聚合**（循环/spam 相同日志聚合成一条 + repeat 计数，避免占满缓冲区挤掉有价值的诊断日志，与 Chrome DevTools ⓧN 一致）、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集** + **FormData body 字段名采集**（字段名 + 文件名，诊断表单/文件上传不丢字段信息）+ **WebSocket 采集**（劫持 WS 构造函数，连接/send/recv/close 帧时间线，Blob 消息异步读取文本，对齐 DevTools WS Messages 面板））、**echo 端点非 JSON body 不崩溃**（FormData multipart 等非 JSON body 优雅返回文本而非 crash server）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、**复制全部错误**（聚合当前过滤后的错误为文本，对齐 inspect CLI 格式）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**network 详情 JSON body 格式化**（请求体/响应体为 JSON 时自动美化缩进，压缩 JSON 可读性极差）、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合含日志段 + **WebSocket 连接段**（WS 条目独立展示，状态/收发帧数/error 事件，不再被误归入失败网络） + **失败请求响应体**（诊断 4xx/5xx 的错误原因））、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）、**exec 编辑器 Tab/Shift+Tab**（单行缩进/反缩进 + 多行选区批量缩进/反缩进，v-model 双向绑定下用 nextTick 恢复光标/选区）、**exec pressKey 键盘交互**（Enter 提交 / Escape 清空 / idx<0 对 activeElement 按键，派发 keydown+keyup 覆盖主流框架）、**快照序列化截断阈值提升**（serializeResult 4K→20K，页面元素增多后完整快照 JSON 不再被截断导致解析失败，同时仍挡住 `return document` 失误）。
+73 项测试覆盖：控制台 UI 渲染、SDK 连接、设备类型识别、SPA 路由上报、exec/snapshot/click/type（**\__silkpulse_type 用原生 setter 兼容 React 受控组件**）/setValue（**支持 select + checkbox/radio，radio 选中时手动取消同组互斥**——合成事件不触发浏览器 pre-click 默认行为，互斥需自行实现；快照 options value:text 双标注）/scroll/scrollIntoView/hover、快照表单状态采集（含当前聚焦元素）、**快照头部含视口尺寸**（viewport W×H，诊断响应式布局）、exec 错误含 stack、exec 异步超时保护（永不 resolve 的代码 9s 兜底）、**exec 日志截断保护**（海量日志保留头尾 + 省略标注，防 WS 消息撑爆）、**设备掉线时 pending exec 立即失败**（server 不等超时直接 reject + 定时器清理）、console 采集、日志限流、**连续重复日志聚合**（循环/spam 相同日志聚合成一条 + repeat 计数，避免占满缓冲区挤掉有价值的诊断日志，与 Chrome DevTools ⓧN 一致）、network 采集（含 POST body + 关键请求头/响应头 + **XHR responseType=json 响应体兼容** + **Request 对象 body 采集** + **FormData body 字段名采集**（字段名 + 文件名，诊断表单/文件上传不丢字段信息）+ **WebSocket 采集**（劫持 WS 构造函数，连接/send/recv/close 帧时间线，Blob 消息异步读取文本，对齐 DevTools WS Messages 面板））、**echo 端点非 JSON body 不崩溃**（FormData multipart 等非 JSON body 优雅返回文本而非 crash server）、HTTP body 上限保护（超大 POST 返回 413）、error 采集、资源加载失败不计入 errorCount、**错误风暴去重**（循环错误首现秒到、后续聚合"重复 N 次"汇总，不同错误全量上报，与 log 限流形成两道防线）、WS 实时推送、多设备并发、设备搜索、AI 诊断上下文、bookmarklet 注入、断线重连（历史保留）、**连续断线重连稳定性**（定时器泄漏回归）、WS broadcast 背压保护（慢客户端不拖垮 server）、SDK 离线缓冲（断线期间数据不丢失）、最近下线设备历史（AI 区分"没接入"vs"接入过但掉了"）、设备标签/备注、source map 解析、iframe 元素采集、错误堆栈折叠 + 搜索过滤、**单条错误一键复制**（格式化 message + 源码位置 + stack）、**复制全部错误**（聚合当前过滤后的错误为文本，对齐 inspect CLI 格式）、Tab 数量徽标（Errors 红色高亮）、exec 执行历史、复制为 cURL、network 列表时间戳列、**network 详情 JSON body 格式化**（请求体/响应体为 JSON 时自动美化缩进，压缩 JSON 可读性极差）、**skill CLI errors/logs/network --tail**（三数据通道统一范围参数，AI 省 token）、skill CLI（network headers + inspect 聚合含日志段 + **WebSocket 连接段**（WS 条目独立展示，状态/收发帧数/error 事件，不再被误归入失败网络） + **失败请求响应体**（诊断 4xx/5xx 的错误原因））、深色模式、Network 状态筛选（全部/成功/失败三态隔离异常请求）、Console 清空视图（隐藏当前日志，新日志正常出现）、**Console 日志点击复制单条**（hover 高亮 + ✓ 反馈 + 长消息自动换行）、SDK 视口变化上报（resize/旋转后 server 收到新 viewport）、Snapshot 面板搜索过滤 + 一键复制、设备在线时长展示（UI + skill CLI）、Console 级别筛选语义色 + 计数、Network 耗时排序（三态切换 + 慢请求高亮）、AI 诊断上下文含慢请求段（控制台按钮与 inspect CLI 输出对齐）、**exec 编辑器 Tab/Shift+Tab**（单行缩进/反缩进 + 多行选区批量缩进/反缩进，v-model 双向绑定下用 nextTick 恢复光标/选区）、**exec pressKey 键盘交互**（Enter 提交 / Escape 清空 / idx<0 对 activeElement 按键，派发 keydown+keyup 覆盖主流框架）、**快照序列化截断阈值提升**（serializeResult 4K→20K，页面元素增多后完整快照 JSON 不再被截断导致解析失败，同时仍挡住 `return document` 失误）。
 
 ## 社区
 

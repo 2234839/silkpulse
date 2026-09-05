@@ -14,93 +14,92 @@
  * - 定时密钥比较（timingSafeEqual 防时序攻击）
  */
 
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { maybeGzipResponse } from './gzip.js'
-import type { Ctx } from './uws/http-helpers.js'
-
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { maybeGzipResponse } from "./gzip.js";
+import type { Ctx } from "./uws/http-helpers.js";
 
 // ─── 类型定义 ─────────────────────────────────────────────
 
 /** 项目信息（存储结构，apiKey 已哈希） */
 export interface Project {
   /** 项目唯一标识（cs_ 开头 + 随机 hex） */
-  id: string
+  id: string;
   /** 项目名称（人类可读） */
-  name: string
+  name: string;
   /** 项目描述（可选） */
-  description?: string
+  description?: string;
   /** API 密钥的哈希值（scryptSync） */
-  apiKeyHash: string
+  apiKeyHash: string;
   /** 密钥盐值 */
-  apiKeySalt: string
+  apiKeySalt: string;
   /** 创建时间（ISO） */
-  createdAt: string
+  createdAt: string;
   /** 最近更新时间（ISO） */
-  updatedAt: string
+  updatedAt: string;
   /** 是否启用（禁用后 SDK 无法接入） */
-  enabled: boolean
+  enabled: boolean;
   /** 游客自建项目（公网服务上游客创建，最长存活 5 天） */
-  guest?: boolean
+  guest?: boolean;
   /** 过期时间（ISO，guest 项目到期后销毁） */
-  expiresAt?: string
+  expiresAt?: string;
 }
 
 /** 项目信息（对外展示，不含密钥哈希） */
-export type ProjectPublic = Omit<Project, 'apiKeyHash' | 'apiKeySalt'>
+export type ProjectPublic = Omit<Project, "apiKeyHash" | "apiKeySalt">;
 
 /** 鉴权上下文（附加到 req 上） */
 export interface AuthContext {
   /** 鉴权身份类型：admin=超管 | project=项目密钥 | device=设备WS（无密钥，可被管理端查看） | anonymous=未鉴权 */
-  role: 'admin' | 'project' | 'device' | 'anonymous'
+  role: "admin" | "project" | "device" | "anonymous";
   /** 项目 ID（role='project' 时有值，admin 可访问所有项目） */
-  projectId?: string
+  projectId?: string;
 }
 
 // ─── 密钥工具 ─────────────────────────────────────────────
 
 /** 生成随机 ID（指定前缀 + hex 长度） */
 function generateId(prefix: string, hexLen = 16): string {
-  return `${prefix}_${randomBytes(hexLen).toString('hex')}`
+  return `${prefix}_${randomBytes(hexLen).toString("hex")}`;
 }
 
 /** 生成随机 API Key 明文（返回给用户，只一次） */
 export function generateApiKey(): string {
-  return `cs_live_${randomBytes(24).toString('hex')}`
+  return `cs_live_${randomBytes(24).toString("hex")}`;
 }
 
 /** 哈希密钥（scryptSync + 随机 salt） */
 function hashApiKey(plainKey: string): { hash: string; salt: string } {
-  const salt = randomBytes(16)
-  const hash = scryptSync(plainKey, salt, 64)
-  return { hash: hash.toString('hex'), salt: salt.toString('hex') }
+  const salt = randomBytes(16);
+  const hash = scryptSync(plainKey, salt, 64);
+  return { hash: hash.toString("hex"), salt: salt.toString("hex") };
 }
 
 /** 验证明文密钥是否匹配哈希（timingSafeEqual 防时序攻击） */
 function verifyApiKey(plainKey: string, hash: string, salt: string): boolean {
-  const expectedHash = Buffer.from(hash, 'hex')
-  const actualHash = scryptSync(plainKey, Buffer.from(salt, 'hex'), 64)
-  if (expectedHash.length !== actualHash.length) return false
-  return timingSafeEqual(expectedHash, actualHash)
+  const expectedHash = Buffer.from(hash, "hex");
+  const actualHash = scryptSync(plainKey, Buffer.from(salt, "hex"), 64);
+  if (expectedHash.length !== actualHash.length) return false;
+  return timingSafeEqual(expectedHash, actualHash);
 }
 
 /** 定时安全比较超管密钥 */
 function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a)
-  const bufB = Buffer.from(b)
-  if (bufA.length !== bufB.length) return false
-  return timingSafeEqual(bufA, bufB)
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 /** 游客自建项目的最长存活时间：5 天 */
-export const GUEST_PROJECT_TTL_MS = 5 * 24 * 60 * 60 * 1000
+export const GUEST_PROJECT_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 /** 游客项目过期清理扫描间隔：10 分钟 */
-const GUEST_CLEANUP_INTERVAL_MS = 10 * 60 * 1000
+const GUEST_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 /** 游客创建限流窗口：1 小时 */
-const GUEST_RATE_WINDOW_MS = 60 * 60 * 1000
+const GUEST_RATE_WINDOW_MS = 60 * 60 * 1000;
 /** 游客创建限流：窗口内每 IP 最多创建数 */
-const GUEST_RATE_MAX = 5
+const GUEST_RATE_MAX = 5;
 
 // ─── 项目存储（JSON 文件持久化） ──────────────────────────
 
@@ -111,27 +110,27 @@ const GUEST_RATE_MAX = 5
  * 适合个人/小团队场景，无需数据库依赖。
  */
 export class ProjectStore {
-  private projects: Map<string, Project> = new Map()
-  private filePath: string
+  private projects: Map<string, Project> = new Map();
+  private filePath: string;
   /** apiKey 前缀 → projectId 的反查索引（加速密钥验证） */
-  private keyPrefixIndex: Map<string, string> = new Map()
+  private keyPrefixIndex: Map<string, string> = new Map();
 
   constructor(filePath: string) {
-    this.filePath = filePath
-    this.load()
+    this.filePath = filePath;
+    this.load();
   }
 
   /** 从 JSON 文件加载项目数据 */
   private load(): void {
-    if (!existsSync(this.filePath)) return
+    if (!existsSync(this.filePath)) return;
     try {
-      const raw = readFileSync(this.filePath, 'utf-8')
-      const arr: Project[] = JSON.parse(raw)
+      const raw = readFileSync(this.filePath, "utf-8");
+      const arr: Project[] = JSON.parse(raw);
       for (const p of arr) {
-        this.projects.set(p.id, p)
+        this.projects.set(p.id, p);
         // 用 apiKey 前 16 字符做索引加速验证（不用完整 key，安全）
         // 注意：存储中没有明文 key，索引基于 hash 前缀
-        this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), p.id)
+        this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), p.id);
       }
     } catch {
       /** 文件损坏时从空开始 */
@@ -140,10 +139,10 @@ export class ProjectStore {
 
   /** 保存到 JSON 文件 */
   private save(): void {
-    const dir = dirname(this.filePath)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const arr = Array.from(this.projects.values())
-    writeFileSync(this.filePath, JSON.stringify(arr, null, 2), 'utf-8')
+    const dir = dirname(this.filePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const arr = Array.from(this.projects.values());
+    writeFileSync(this.filePath, JSON.stringify(arr, null, 2), "utf-8");
   }
 
   /**
@@ -156,10 +155,10 @@ export class ProjectStore {
     description?: string,
     opts?: { guest?: boolean },
   ): { project: ProjectPublic; apiKey: string } {
-    const id = generateId('cs', 12)
-    const apiKey = generateApiKey()
-    const { hash, salt } = hashApiKey(apiKey)
-    const now = new Date().toISOString()
+    const id = generateId("cs", 12);
+    const apiKey = generateApiKey();
+    const { hash, salt } = hashApiKey(apiKey);
+    const now = new Date().toISOString();
     const project: Project = {
       id,
       name,
@@ -170,94 +169,99 @@ export class ProjectStore {
       updatedAt: now,
       enabled: true,
       guest: opts?.guest,
-      expiresAt: opts?.guest ? new Date(Date.now() + GUEST_PROJECT_TTL_MS).toISOString() : undefined,
-    }
-    this.projects.set(id, project)
-    this.keyPrefixIndex.set(hash.slice(0, 16), id)
-    this.save()
-    const { apiKeyHash, apiKeySalt, ...publicInfo } = project
-    return { project: publicInfo, apiKey }
+      expiresAt: opts?.guest
+        ? new Date(Date.now() + GUEST_PROJECT_TTL_MS).toISOString()
+        : undefined,
+    };
+    this.projects.set(id, project);
+    this.keyPrefixIndex.set(hash.slice(0, 16), id);
+    this.save();
+    const { apiKeyHash, apiKeySalt, ...publicInfo } = project;
+    return { project: publicInfo, apiKey };
   }
 
   /** 项目是否已过期（非 guest 永不过期） */
   isExpired(p: Project): boolean {
-    return !!p.guest && !!p.expiresAt && Date.now() > Date.parse(p.expiresAt)
+    return !!p.guest && !!p.expiresAt && Date.now() > Date.parse(p.expiresAt);
   }
 
   /** 清理所有已过期的游客项目，返回被清理的 projectId 列表 */
   cleanupExpired(): string[] {
-    const expired: string[] = []
+    const expired: string[] = [];
     for (const [id, p] of this.projects) {
-      if (!this.isExpired(p)) continue
-      expired.push(id)
-      this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
-      this.projects.delete(id)
+      if (!this.isExpired(p)) continue;
+      expired.push(id);
+      this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
+      this.projects.delete(id);
     }
-    if (expired.length > 0) this.save()
-    return expired
+    if (expired.length > 0) this.save();
+    return expired;
   }
 
   /** 列出所有项目（不含密钥） */
   list(): ProjectPublic[] {
-    return Array.from(this.projects.values()).map(p => {
-      const { apiKeyHash, apiKeySalt, ...rest } = p
-      return rest
-    })
+    return Array.from(this.projects.values()).map((p) => {
+      const { apiKeyHash, apiKeySalt, ...rest } = p;
+      return rest;
+    });
   }
 
   /** 获取项目（不含密钥） */
   get(projectId: string): ProjectPublic | undefined {
-    const p = this.projects.get(projectId)
-    if (!p) return undefined
-    const { apiKeyHash, apiKeySalt, ...rest } = p
-    return rest
+    const p = this.projects.get(projectId);
+    if (!p) return undefined;
+    const { apiKeyHash, apiKeySalt, ...rest } = p;
+    return rest;
   }
 
   /** 获取项目原始数据（含密钥哈希，仅供内部使用） */
   getRaw(projectId: string): Project | undefined {
-    return this.projects.get(projectId)
+    return this.projects.get(projectId);
   }
 
   /** 直接写入项目原始数据（供 Playground 项目初始化使用） */
   setRaw(projectId: string, project: Project): void {
-    this.projects.set(projectId, project)
-    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId)
-    this.save()
+    this.projects.set(projectId, project);
+    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId);
+    this.save();
   }
 
   /** 更新项目密钥哈希（供 Playground key 变更时同步） */
   updateRaw(projectId: string, patch: { apiKeyHash: string; apiKeySalt: string }): void {
-    const p = this.projects.get(projectId)
-    if (!p) return
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
-    p.apiKeyHash = patch.apiKeyHash
-    p.apiKeySalt = patch.apiKeySalt
-    p.updatedAt = new Date().toISOString()
-    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId)
-    this.save()
+    const p = this.projects.get(projectId);
+    if (!p) return;
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
+    p.apiKeyHash = patch.apiKeyHash;
+    p.apiKeySalt = patch.apiKeySalt;
+    p.updatedAt = new Date().toISOString();
+    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId);
+    this.save();
   }
 
   /** 删除项目 */
   delete(projectId: string): boolean {
-    const p = this.projects.get(projectId)
-    if (!p) return false
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
-    this.projects.delete(projectId)
-    this.save()
-    return true
+    const p = this.projects.get(projectId);
+    if (!p) return false;
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
+    this.projects.delete(projectId);
+    this.save();
+    return true;
   }
 
   /** 更新项目信息 */
-  update(projectId: string, patch: { name?: string; description?: string; enabled?: boolean }): ProjectPublic | undefined {
-    const p = this.projects.get(projectId)
-    if (!p) return undefined
-    if (patch.name !== undefined) p.name = patch.name
-    if (patch.description !== undefined) p.description = patch.description
-    if (patch.enabled !== undefined) p.enabled = patch.enabled
-    p.updatedAt = new Date().toISOString()
-    this.save()
-    const { apiKeyHash, apiKeySalt, ...rest } = p
-    return rest
+  update(
+    projectId: string,
+    patch: { name?: string; description?: string; enabled?: boolean },
+  ): ProjectPublic | undefined {
+    const p = this.projects.get(projectId);
+    if (!p) return undefined;
+    if (patch.name !== undefined) p.name = patch.name;
+    if (patch.description !== undefined) p.description = patch.description;
+    if (patch.enabled !== undefined) p.enabled = patch.enabled;
+    p.updatedAt = new Date().toISOString();
+    this.save();
+    const { apiKeyHash, apiKeySalt, ...rest } = p;
+    return rest;
   }
 
   /**
@@ -265,17 +269,17 @@ export class ProjectStore {
    * @returns 新的明文密钥（只返回这一次）
    */
   rotateKey(projectId: string): string | undefined {
-    const p = this.projects.get(projectId)
-    if (!p) return undefined
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16))
-    const newKey = generateApiKey()
-    const { hash, salt } = hashApiKey(newKey)
-    p.apiKeyHash = hash
-    p.apiKeySalt = salt
-    p.updatedAt = new Date().toISOString()
-    this.keyPrefixIndex.set(hash.slice(0, 16), projectId)
-    this.save()
-    return newKey
+    const p = this.projects.get(projectId);
+    if (!p) return undefined;
+    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
+    const newKey = generateApiKey();
+    const { hash, salt } = hashApiKey(newKey);
+    p.apiKeyHash = hash;
+    p.apiKeySalt = salt;
+    p.updatedAt = new Date().toISOString();
+    this.keyPrefixIndex.set(hash.slice(0, 16), projectId);
+    this.save();
+    return newKey;
   }
 
   /**
@@ -286,13 +290,13 @@ export class ProjectStore {
     // 遍历所有项目尝试验证（因为密钥是哈希的，不能直接反查）
     // 对于少量项目（通常 <100）性能可接受
     for (const [id, p] of this.projects) {
-      if (!p.enabled) continue
-      if (this.isExpired(p)) continue
+      if (!p.enabled) continue;
+      if (this.isExpired(p)) continue;
       if (verifyApiKey(plainKey, p.apiKeyHash, p.apiKeySalt)) {
-        return id
+        return id;
       }
     }
-    return undefined
+    return undefined;
   }
 }
 
@@ -300,21 +304,21 @@ export class ProjectStore {
 
 /** 从请求中提取 Bearer token */
 function extractBearerToken(ctx: Ctx): string | undefined {
-  const auth = ctx.headers['authorization']
-  if (auth && auth.startsWith('Bearer ')) {
-    return auth.slice(7).trim()
+  const auth = ctx.headers["authorization"];
+  if (auth && auth.startsWith("Bearer ")) {
+    return auth.slice(7).trim();
   }
   /** 回退：?key= query 参数（skill 文档拉取等场景，方便 agent 直接 curl） */
-  return extractQueryParam(ctx.url, 'key')
+  return extractQueryParam(ctx.url, "key");
 }
 
 /** 从 URL query 中提取参数 */
 function extractQueryParam(url: string, key: string): string | undefined {
   try {
-    const u = new URL(url, 'http://localhost')
-    return u.searchParams.get(key) ?? undefined
+    const u = new URL(url, "http://localhost");
+    return u.searchParams.get(key) ?? undefined;
   } catch {
-    return undefined
+    return undefined;
   }
 }
 
@@ -327,85 +331,88 @@ function extractQueryParam(url: string, key: string): string | undefined {
  */
 export class AuthManager {
   /** 超管密钥（环境变量配置） */
-  private adminKey: string | undefined
+  private adminKey: string | undefined;
   /** 项目存储 */
-  readonly projects: ProjectStore
+  readonly projects: ProjectStore;
   /** 游客项目过期清理回调（通知控制台刷新设备列表） */
-  private onProjectsExpired: (projectIds: string[]) => void
+  private onProjectsExpired: (projectIds: string[]) => void;
 
   /** 游客自建项目限流：IP → 滑动窗口内的时间戳 */
-  private guestCreateWindow = new Map<string, number[]>()
+  private guestCreateWindow = new Map<string, number[]>();
 
   constructor(
     projectStore: ProjectStore,
     onProjectsExpired: (projectIds: string[]) => void = () => {},
   ) {
-    this.adminKey = process.env.SILKPULSE_ADMIN_KEY
-    this.projects = projectStore
-    this.onProjectsExpired = onProjectsExpired
+    this.adminKey = process.env.SILKPULSE_ADMIN_KEY;
+    this.projects = projectStore;
+    this.onProjectsExpired = onProjectsExpired;
 
     /** Playground 游客模式：初始化时创建/确保存在一个真实的公开项目 */
-    this.ensurePlaygroundProject()
+    this.ensurePlaygroundProject();
 
     /** 启动即清一次（进程停摆期间过期的），之后周期性清理过期游客项目 */
-    this.fireExpired()
-    this.cleanupTimer = setInterval(() => this.fireExpired(), GUEST_CLEANUP_INTERVAL_MS)
-    this.cleanupTimer.unref?.()
+    this.fireExpired();
+    this.cleanupTimer = setInterval(() => this.fireExpired(), GUEST_CLEANUP_INTERVAL_MS);
+    this.cleanupTimer.unref?.();
   }
 
   /** 定时清理句柄 */
-  private cleanupTimer: ReturnType<typeof setInterval> | undefined
+  private cleanupTimer: ReturnType<typeof setInterval> | undefined;
 
   /** 执行一次过期清理，有清理到项目时触发回调 */
   private fireExpired(): void {
-    const expired = this.projects.cleanupExpired()
-    if (expired.length > 0) this.onProjectsExpired(expired)
+    const expired = this.projects.cleanupExpired();
+    if (expired.length > 0) this.onProjectsExpired(expired);
   }
 
   /** 游客创建限流：每 IP 每小时最多 5 次，返回是否放行（路由层调用） */
   checkGuestRateLimit(ip: string): boolean {
-    const now = Date.now()
-    const window = (this.guestCreateWindow.get(ip) ?? []).filter((t) => now - t < GUEST_RATE_WINDOW_MS)
+    const now = Date.now();
+    const window = (this.guestCreateWindow.get(ip) ?? []).filter(
+      (t) => now - t < GUEST_RATE_WINDOW_MS,
+    );
     if (window.length >= GUEST_RATE_MAX) {
-      this.guestCreateWindow.set(ip, window)
-      return false
+      this.guestCreateWindow.set(ip, window);
+      return false;
     }
-    window.push(now)
-    this.guestCreateWindow.set(ip, window)
+    window.push(now);
+    this.guestCreateWindow.set(ip, window);
     /** 窗口条目数帽住，防 map 无限膨胀 */
     if (this.guestCreateWindow.size > 10000) {
       for (const [key, entries] of this.guestCreateWindow) {
-        if (entries.every((t) => now - t >= GUEST_RATE_WINDOW_MS)) this.guestCreateWindow.delete(key)
+        if (entries.every((t) => now - t >= GUEST_RATE_WINDOW_MS))
+          this.guestCreateWindow.delete(key);
       }
     }
-    return true
+    return true;
   }
 
   /** 是否启用了鉴权（配置了超管密钥或至少一个项目） */
   isAuthEnabled(): boolean {
-    return !!this.adminKey || this.projects.list().length > 0
+    return !!this.adminKey || this.projects.list().length > 0;
   }
 
   /** 检查是否配置了超管密钥 */
   hasAdminKey(): boolean {
-    return !!this.adminKey
+    return !!this.adminKey;
   }
 
   /** Playground 密钥（环境变量 SILKPULSE_PLAYGROUND_KEY 配置） */
   get playgroundKey(): string | undefined {
-    return process.env.SILKPULSE_PLAYGROUND_KEY
+    return process.env.SILKPULSE_PLAYGROUND_KEY;
   }
 
   /** 是否启用了 Playground（游客访问）模式 */
   isPlaygroundEnabled(): boolean {
-    return !!this.playgroundKey
+    return !!this.playgroundKey;
   }
 
   /** Playground 项目的固定 ID（真实项目，不是虚拟 ID） */
-  static readonly PLAYGROUND_PROJECT_ID = 'cs_playground'
+  static readonly PLAYGROUND_PROJECT_ID = "cs_playground";
 
   /** Playground 项目名称 */
-  static readonly PLAYGROUND_PROJECT_NAME = 'Playground'
+  static readonly PLAYGROUND_PROJECT_NAME = "Playground";
 
   /**
    * 确保 Playground 项目存在：如果配置了 SILKPULSE_PLAYGROUND_KEY，
@@ -414,29 +421,29 @@ export class AuthManager {
    * 这样游客的权限隔离、设备归属、接入代码全部复用现有项目逻辑，零特殊处理。
    */
   private ensurePlaygroundProject(): void {
-    const key = this.playgroundKey
-    if (!key) return
-    const pid = AuthManager.PLAYGROUND_PROJECT_ID
+    const key = this.playgroundKey;
+    if (!key) return;
+    const pid = AuthManager.PLAYGROUND_PROJECT_ID;
     /** 已存在则检查 key 是否需要更新（用户可能改了环境变量） */
-    const existing = this.projects.getRaw(pid)
-    const { hash, salt } = hashApiKey(key)
+    const existing = this.projects.getRaw(pid);
+    const { hash, salt } = hashApiKey(key);
     if (existing) {
       /** key 没变就跳过 */
-      if (verifyApiKey(key, existing.apiKeyHash, existing.apiKeySalt)) return
-      this.projects.updateRaw(pid, { apiKeyHash: hash, apiKeySalt: salt })
-      return
+      if (verifyApiKey(key, existing.apiKeyHash, existing.apiKeySalt)) return;
+      this.projects.updateRaw(pid, { apiKeyHash: hash, apiKeySalt: salt });
+      return;
     }
-    const now = new Date().toISOString()
+    const now = new Date().toISOString();
     this.projects.setRaw(pid, {
       id: pid,
       name: AuthManager.PLAYGROUND_PROJECT_NAME,
-      description: '游客公开体验项目（环境变量自动创建）',
+      description: "游客公开体验项目（环境变量自动创建）",
       apiKeyHash: hash,
       apiKeySalt: salt,
       createdAt: now,
       updatedAt: now,
       enabled: true,
-    })
+    });
   }
 
   /**
@@ -444,26 +451,26 @@ export class AuthManager {
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
   authorizeHttpRequest(ctx: Ctx): AuthContext {
-    const token = extractBearerToken(ctx)
+    const token = extractBearerToken(ctx);
 
     // 无 token：检查是否匿名可用（未启用鉴权时）
     if (!token) {
-      if (!this.isAuthEnabled()) return { role: 'admin' }
-      return { role: 'anonymous' }
+      if (!this.isAuthEnabled()) return { role: "admin" };
+      return { role: "anonymous" };
     }
 
     // 尝试超管密钥
     if (this.adminKey && safeEqual(token, this.adminKey)) {
-      return { role: 'admin' }
+      return { role: "admin" };
     }
 
     // 尝试项目密钥（包括 Playground 项目）
-    const projectId = this.projects.verifyKey(token)
+    const projectId = this.projects.verifyKey(token);
     if (projectId) {
-      return { role: 'project', projectId }
+      return { role: "project", projectId };
     }
 
-    return { role: 'anonymous' }
+    return { role: "anonymous" };
   }
 
   /**
@@ -471,50 +478,50 @@ export class AuthManager {
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
   authorizeWsConnection(url: string, wsPath: string): AuthContext {
-    const projectId = extractQueryParam(url, 'projectId')
+    const projectId = extractQueryParam(url, "projectId");
 
     // 未启用鉴权：允许匿名
-    if (!this.isAuthEnabled()) return { role: 'admin' }
+    if (!this.isAuthEnabled()) return { role: "admin" };
 
     // 控制台 WebSocket：需要超管密钥或项目密钥
-    if (wsPath === '/ws/console') {
-      const token = extractQueryParam(url, 'token')
-      if (!token) return { role: 'anonymous' }
+    if (wsPath === "/ws/console") {
+      const token = extractQueryParam(url, "token");
+      if (!token) return { role: "anonymous" };
       // 超管密钥
       if (this.adminKey && safeEqual(token, this.adminKey)) {
-        return { role: 'admin' }
+        return { role: "admin" };
       }
       // 项目密钥（包括 Playground 项目）
-      const pid = this.projects.verifyKey(token)
-      if (pid) return { role: 'project', projectId: pid }
-      return { role: 'anonymous' }
+      const pid = this.projects.verifyKey(token);
+      if (pid) return { role: "project", projectId: pid };
+      return { role: "anonymous" };
     }
 
     // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
     // 连接数天然受 server 容量约束（WS 每连接有内存开销，超载时背压机制兜底）
-    if (wsPath === '/ws/device') {
+    if (wsPath === "/ws/device") {
       /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
       if (projectId) {
         /** 验证 projectId 是否存在、启用且未过期（游客项目到期后设备同样拒接） */
-        const proj = this.projects.getRaw(projectId)
+        const proj = this.projects.getRaw(projectId);
         if (proj?.enabled && !this.projects.isExpired(proj)) {
-          return { role: 'project', projectId }
+          return { role: "project", projectId };
         }
       }
       /** 无 projectId 的设备也允许接入（role=device，可被所有管理员看到） */
-      return { role: 'device' }
+      return { role: "device" };
     }
 
-    return { role: 'anonymous' }
+    return { role: "anonymous" };
   }
 
   /**
    * 检查鉴权上下文是否有权限访问指定项目
    */
   canAccessProject(ctx: AuthContext, projectId: string): boolean {
-    if (ctx.role === 'admin') return true
-    if (ctx.role === 'project') return ctx.projectId === projectId
-    return false
+    if (ctx.role === "admin") return true;
+    if (ctx.role === "project") return ctx.projectId === projectId;
+    return false;
   }
 
   /**
@@ -525,9 +532,9 @@ export class AuthManager {
    * @param deviceProjectId 设备所属项目 ID（undefined 表示公共设备，无项目归属）
    */
   canAccessDevice(ctx: AuthContext, deviceProjectId?: string): boolean {
-    if (ctx.role === 'admin') return true
-    if (ctx.role === 'project') return ctx.projectId === deviceProjectId
-    return false
+    if (ctx.role === "admin") return true;
+    if (ctx.role === "project") return ctx.projectId === deviceProjectId;
+    return false;
   }
 }
 
@@ -536,32 +543,30 @@ export class AuthManager {
 /** 安全响应头（注入 sendJson 的 headers） */
 function securityHeaders(): Record<string, string> {
   return {
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-    'Referrer-Policy': 'no-referrer',
-  }
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+  };
 }
 
 /** JSON 响应（安全头 + gzip） */
 function jsonResponse(ctx: Ctx, status: number, body: unknown): void {
-  const json = JSON.stringify(body)
-  const { body: respBody, headers } = maybeGzipResponse(
-    { headers: ctx.headers },
-    json,
-    {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...securityHeaders(),
-    },
-  )
-  if (ctx.responded || ctx.aborted) return
-  ctx.responded = true
+  const json = JSON.stringify(body);
+  const { body: respBody, headers } = maybeGzipResponse({ headers: ctx.headers }, json, {
+    "Content-Type": "application/json; charset=utf-8",
+    ...securityHeaders(),
+  });
+  if (ctx.responded || ctx.aborted) return;
+  ctx.responded = true;
   ctx.res.cork(() => {
-    ctx.res.writeStatus(`${status} ${status === 204 ? 'No Content' : status === 200 ? 'OK' : status === 201 ? 'Created' : status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : status === 404 ? 'Not Found' : status === 400 ? 'Bad Request' : 'Unknown'}`)
+    ctx.res.writeStatus(
+      `${status} ${status === 204 ? "No Content" : status === 200 ? "OK" : status === 201 ? "Created" : status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : status === 404 ? "Not Found" : status === 400 ? "Bad Request" : "Unknown"}`,
+    );
     for (const [k, v] of Object.entries(headers)) {
-      ctx.res.writeHeader(k, v)
+      ctx.res.writeHeader(k, v);
     }
-    ctx.res.end(respBody)
-  })
+    ctx.res.end(respBody);
+  });
 }
 
 /**
@@ -578,57 +583,54 @@ function jsonResponse(ctx: Ctx, status: number, body: unknown): void {
  *
  * @returns true=已处理, false=不匹配
  */
-export function handleProjectApiRoute(
-  ctx: Ctx,
-  auth: AuthManager,
-): boolean {
-  const url = ctx.url.split('?')[0]
-  const method = ctx.method
+export function handleProjectApiRoute(ctx: Ctx, auth: AuthManager): boolean {
+  const url = ctx.url.split("?")[0];
+  const method = ctx.method;
 
   /** CORS 预检 */
-  if (url.startsWith('/api/projects') && method === 'OPTIONS') {
-    if (ctx.responded) return true
-    ctx.responded = true
+  if (url.startsWith("/api/projects") && method === "OPTIONS") {
+    if (ctx.responded) return true;
+    ctx.responded = true;
     ctx.res.cork(() => {
-      ctx.res.writeStatus('204 No Content')
+      ctx.res.writeStatus("204 No Content");
       for (const [k, v] of Object.entries(securityHeaders())) {
-        ctx.res.writeHeader(k, v)
+        ctx.res.writeHeader(k, v);
       }
-      ctx.res.endWithoutBody()
-    })
-    return true
+      ctx.res.endWithoutBody();
+    });
+    return true;
   }
 
   /** 鉴权状态查询（公开） */
-  if (url === '/api/auth/status' && method === 'GET') {
+  if (url === "/api/auth/status" && method === "GET") {
     jsonResponse(ctx, 200, {
       authEnabled: auth.isAuthEnabled(),
       hasAdminKey: auth.hasAdminKey(),
       playgroundEnabled: auth.isPlaygroundEnabled(),
       /** 游客可自建项目 Key（仅在 Playground 开启时） */
       guestProjectsEnabled: auth.isPlaygroundEnabled(),
-    })
-    return true
+    });
+    return true;
   }
 
   /** 验证密钥并返回角色信息（前端登录后调用，拿 role + projectId） */
-  if (url === '/api/auth/verify' && method === 'GET') {
-    const verifyCtx = auth.authorizeHttpRequest(ctx)
-    if (verifyCtx.role === 'anonymous') {
-      jsonResponse(ctx, 401, { error: '密钥无效或已过期' })
-      return true
+  if (url === "/api/auth/verify" && method === "GET") {
+    const verifyCtx = auth.authorizeHttpRequest(ctx);
+    if (verifyCtx.role === "anonymous") {
+      jsonResponse(ctx, 401, { error: "密钥无效或已过期" });
+      return true;
     }
     /** 项目密钥：附带项目名称供前端展示 */
-    let projectName: string | undefined
-    let isPlayground = false
-    let isGuestProject = false
-    let expiresAt: string | undefined
-    if (verifyCtx.role === 'project' && verifyCtx.projectId) {
-      const proj = auth.projects.get(verifyCtx.projectId)
-      projectName = proj?.name
-      isPlayground = verifyCtx.projectId === AuthManager.PLAYGROUND_PROJECT_ID
-      isGuestProject = !!proj?.guest
-      expiresAt = proj?.expiresAt
+    let projectName: string | undefined;
+    let isPlayground = false;
+    let isGuestProject = false;
+    let expiresAt: string | undefined;
+    if (verifyCtx.role === "project" && verifyCtx.projectId) {
+      const proj = auth.projects.get(verifyCtx.projectId);
+      projectName = proj?.name;
+      isPlayground = verifyCtx.projectId === AuthManager.PLAYGROUND_PROJECT_ID;
+      isGuestProject = !!proj?.guest;
+      expiresAt = proj?.expiresAt;
     }
     jsonResponse(ctx, 200, {
       role: verifyCtx.role,
@@ -637,8 +639,8 @@ export function handleProjectApiRoute(
       isPlayground,
       isGuestProject,
       expiresAt,
-    })
-    return true
+    });
+    return true;
   }
 
   /**
@@ -648,184 +650,186 @@ export function handleProjectApiRoute(
    * - 项目最长存活 5 天，到期自动销毁，设备也会被拒接
    * - 需要 Playground 开启；限流：每 IP 每小时最多 5 个
    */
-  if (url === '/api/guest/projects' && method === 'POST') {
+  if (url === "/api/guest/projects" && method === "POST") {
     if (!auth.isPlaygroundEnabled()) {
-      jsonResponse(ctx, 403, { error: '游客模式未开启' })
-      return true
+      jsonResponse(ctx, 403, { error: "游客模式未开启" });
+      return true;
     }
-    const ip = remoteIp(ctx)
+    const ip = remoteIp(ctx);
     if (!auth.checkGuestRateLimit(ip)) {
-      jsonResponse(ctx, 429, { error: '创建太频繁，请 1 小时后再试' })
-      return true
+      jsonResponse(ctx, 429, { error: "创建太频繁，请 1 小时后再试" });
+      return true;
     }
-    let body: { name?: string }
+    let body: { name?: string };
     try {
-      body = JSON.parse(readBodySync(ctx))
+      body = JSON.parse(readBodySync(ctx));
     } catch {
-      body = {}
+      body = {};
     }
-    const name = (body.name ?? '').trim() || `游客项目-${randomBytes(2).toString('hex').toUpperCase()}`
-    const result = auth.projects.create(name, '游客自建（5 天后自动销毁）', { guest: true })
+    const name =
+      (body.name ?? "").trim() || `游客项目-${randomBytes(2).toString("hex").toUpperCase()}`;
+    const result = auth.projects.create(name, "游客自建（5 天后自动销毁）", { guest: true });
     jsonResponse(ctx, 201, {
       ...result,
       expiresInDays: 5,
-      notice: '这是对游客的限制：密钥仅展示这一次，请立即复制保存；项目最长存活 5 天，到期自动销毁。有长期需要建议自己部署一份（开源地址见 GitHub）',
-    })
-    return true
+      notice:
+        "这是对游客的限制：密钥仅展示这一次，请立即复制保存；项目最长存活 5 天，到期自动销毁。有长期需要建议自己部署一份（开源地址见 GitHub）",
+    });
+    return true;
   }
 
   /**
    * 游客一键登录：返回 playground key 作为 token，
    * 前端保存后用作后续请求的 Authorization。
    */
-  if (url === '/api/auth/playground' && method === 'POST') {
+  if (url === "/api/auth/playground" && method === "POST") {
     if (!auth.isPlaygroundEnabled()) {
-      jsonResponse(ctx, 403, { error: 'Playground 未开启' })
-      return true
+      jsonResponse(ctx, 403, { error: "Playground 未开启" });
+      return true;
     }
-    const key = auth.playgroundKey!
-    const pid = AuthManager.PLAYGROUND_PROJECT_ID
+    const key = auth.playgroundKey!;
+    const pid = AuthManager.PLAYGROUND_PROJECT_ID;
     jsonResponse(ctx, 200, {
-      role: 'project',
+      role: "project",
       projectId: pid,
       projectName: AuthManager.PLAYGROUND_PROJECT_NAME,
       isPlayground: true,
       /** 前端保存此 key 作为后续请求的 token */
       token: key,
-    })
-    return true
+    });
+    return true;
   }
 
   // 项目管理路由需要超管权限
-  if (!url.startsWith('/api/projects')) return false
+  if (!url.startsWith("/api/projects")) return false;
 
-  const authResult = auth.authorizeHttpRequest(ctx)
-  if (authResult.role !== 'admin') {
-    jsonResponse(ctx, 403, { error: '需要超管权限' })
-    return true
+  const authResult = auth.authorizeHttpRequest(ctx);
+  if (authResult.role !== "admin") {
+    jsonResponse(ctx, 403, { error: "需要超管权限" });
+    return true;
   }
 
   /** 列出项目 */
-  if (url === '/api/projects' && method === 'GET') {
-    jsonResponse(ctx, 200, { projects: auth.projects.list() })
-    return true
+  if (url === "/api/projects" && method === "GET") {
+    jsonResponse(ctx, 200, { projects: auth.projects.list() });
+    return true;
   }
 
   /** 创建项目 */
-  if (url === '/api/projects' && method === 'POST') {
-    let body: { name?: string; description?: string }
+  if (url === "/api/projects" && method === "POST") {
+    let body: { name?: string; description?: string };
     try {
-      body = JSON.parse(readBodySync(ctx))
+      body = JSON.parse(readBodySync(ctx));
     } catch {
-      jsonResponse(ctx, 400, { error: '请求体格式错误' })
-      return true
+      jsonResponse(ctx, 400, { error: "请求体格式错误" });
+      return true;
     }
     if (!body.name) {
-      jsonResponse(ctx, 400, { error: '项目名称必填' })
-      return true
+      jsonResponse(ctx, 400, { error: "项目名称必填" });
+      return true;
     }
-    const result = auth.projects.create(body.name, body.description)
-    jsonResponse(ctx, 201, result)
-    return true
+    const result = auth.projects.create(body.name, body.description);
+    jsonResponse(ctx, 201, result);
+    return true;
   }
 
   /** 单项目操作 /api/projects/:id... */
-  const match = url.match(/^\/api\/projects\/([^/]+)(\/.*)?$/)
+  const match = url.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
   if (!match) {
-    jsonResponse(ctx, 404, { error: '路由不匹配' })
-    return true
+    jsonResponse(ctx, 404, { error: "路由不匹配" });
+    return true;
   }
 
-  const [, projectId, subPath] = match
+  const [, projectId, subPath] = match;
 
   /**
    * Playground 项目由环境变量管理，禁止轮换密钥、禁用、删除。
    * 只允许 GET（查看）。
    */
-  const isPlaygroundProject = projectId === AuthManager.PLAYGROUND_PROJECT_ID
-  if (isPlaygroundProject && method !== 'GET') {
-    jsonResponse(ctx, 403, { error: 'Playground 项目由环境变量管理，不支持此操作' })
-    return true
+  const isPlaygroundProject = projectId === AuthManager.PLAYGROUND_PROJECT_ID;
+  if (isPlaygroundProject && method !== "GET") {
+    jsonResponse(ctx, 403, { error: "Playground 项目由环境变量管理，不支持此操作" });
+    return true;
   }
 
   /** 重新生成密钥 */
-  if (subPath === '/rotate' && method === 'POST') {
-    const newKey = auth.projects.rotateKey(projectId)
+  if (subPath === "/rotate" && method === "POST") {
+    const newKey = auth.projects.rotateKey(projectId);
     if (!newKey) {
-      jsonResponse(ctx, 404, { error: '项目不存在' })
-      return true
+      jsonResponse(ctx, 404, { error: "项目不存在" });
+      return true;
     }
-    jsonResponse(ctx, 200, { apiKey: newKey })
-    return true
+    jsonResponse(ctx, 200, { apiKey: newKey });
+    return true;
   }
 
   /** 获取项目详情 */
-  if (!subPath && method === 'GET') {
-    const project = auth.projects.get(projectId)
+  if (!subPath && method === "GET") {
+    const project = auth.projects.get(projectId);
     if (!project) {
-      jsonResponse(ctx, 404, { error: '项目不存在' })
-      return true
+      jsonResponse(ctx, 404, { error: "项目不存在" });
+      return true;
     }
-    jsonResponse(ctx, 200, { project })
-    return true
+    jsonResponse(ctx, 200, { project });
+    return true;
   }
 
   /** 更新项目 */
-  if (!subPath && method === 'PATCH') {
-    let body: { name?: string; description?: string; enabled?: boolean }
+  if (!subPath && method === "PATCH") {
+    let body: { name?: string; description?: string; enabled?: boolean };
     try {
-      body = JSON.parse(readBodySync(ctx))
+      body = JSON.parse(readBodySync(ctx));
     } catch {
-      jsonResponse(ctx, 400, { error: '请求体格式错误' })
-      return true
+      jsonResponse(ctx, 400, { error: "请求体格式错误" });
+      return true;
     }
-    const project = auth.projects.update(projectId, body)
+    const project = auth.projects.update(projectId, body);
     if (!project) {
-      jsonResponse(ctx, 404, { error: '项目不存在' })
-      return true
+      jsonResponse(ctx, 404, { error: "项目不存在" });
+      return true;
     }
-    jsonResponse(ctx, 200, { project })
-    return true
+    jsonResponse(ctx, 200, { project });
+    return true;
   }
 
   /** 删除项目 */
-  if (!subPath && method === 'DELETE') {
-    const deleted = auth.projects.delete(projectId)
+  if (!subPath && method === "DELETE") {
+    const deleted = auth.projects.delete(projectId);
     if (!deleted) {
-      jsonResponse(ctx, 404, { error: '项目不存在' })
-      return true
+      jsonResponse(ctx, 404, { error: "项目不存在" });
+      return true;
     }
-    jsonResponse(ctx, 200, { ok: true })
-    return true
+    jsonResponse(ctx, 200, { ok: true });
+    return true;
   }
 
-  jsonResponse(ctx, 404, { error: '未知路由' })
-  return true
+  jsonResponse(ctx, 404, { error: "未知路由" });
+  return true;
 }
 
 /**
  * 同步读取请求体（项目管理 API 用，body 已由前置 readBody 缓存到 ctx.bodyBuf）
  */
 function readBodySync(ctx: Ctx): string {
-  return ctx.bodyBuf ? ctx.bodyBuf.toString('utf-8') : ''
+  return ctx.bodyBuf ? ctx.bodyBuf.toString("utf-8") : "";
 }
 
 /** 提取客户端 IP（限流用）：反向代理场景优先 x-forwarded-for，缺失时用 'unknown' 兜底（Ctx 不缓存直连地址，同步阶段之外 req 已失效） */
 function remoteIp(ctx: Ctx): string {
-  const fwd = ctx.headers['x-forwarded-for']
-  if (fwd) return fwd.split(',')[0].trim()
-  const real = ctx.headers['x-real-ip']
-  if (real) return real.trim()
-  return 'unknown'
+  const fwd = ctx.headers["x-forwarded-for"];
+  if (fwd) return fwd.split(",")[0].trim();
+  const real = ctx.headers["x-real-ip"];
+  if (real) return real.trim();
+  return "unknown";
 }
 
 /** 从缓存的请求体中读取 JSON */
 export function getCachedBody<T = unknown>(ctx: Ctx): T | undefined {
-  const buf = ctx.bodyBuf
-  if (!buf || buf.length === 0) return undefined
+  const buf = ctx.bodyBuf;
+  if (!buf || buf.length === 0) return undefined;
   try {
-    return JSON.parse(buf.toString('utf-8')) as T
+    return JSON.parse(buf.toString("utf-8")) as T;
   } catch {
-    return undefined
+    return undefined;
   }
 }

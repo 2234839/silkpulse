@@ -1,89 +1,104 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <title>React DevTools</title>
-  <style>
-    html, body { margin: 0; height: 100%; background: transparent; }
-    #root { height: 100%; }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-  <!-- esbuild 打包的 react-devtools-inline frontend（IIFE，全局名 ReactDevToolsFrontend） -->
-  <script src="./assets/frontend.bundle.js"></script>
-  <script>
-    /**
-     * React DevTools frontend 宿主页（SilkPulse 控制台 iframe 内运行）
-     *
-     * 通信链路：
-     *   本页（frontend） ←→ parent（Console DevToolsPanel） ←→ WS ←→ 目标页 backend
-     *
-     * Wall 协议：
-     *   - 本页发往 parent：window.parent.postMessage({ event, payload, fromFrontend: true }, '*')
-     *   - parent 发来本页：iframe.contentWindow.postMessage({ event, payload }, '*')
-     *   （DevToolsPanel 校验 source 后转发到 WS devtools-relay）
-     */
-    (function () {
-      var FE = window.ReactDevToolsFrontend
-      if (!FE) {
-        document.body.innerHTML = '<div style="font:13px monospace;color:red;padding:12px">React DevTools frontend.bundle.js 加载失败</div>'
-        return
+  <head>
+    <meta charset="UTF-8" />
+    <title>React DevTools</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
       }
-
-      /** 自定义 Wall：把 devtools Bridge 的消息转发给 parent（Console → WS → backend） */
-      var wall = {
-        listen: function (fn) {
-          window.addEventListener('message', function (e) {
-            /** 只处理 parent 发来的、带 event 字段的消息 */
-            if (e.source !== window.parent) return
-            var data = e.data
-            if (!data || typeof data.event !== 'string') return
-            fn({ event: data.event, payload: data.payload })
-          })
-          /** Wall 协议要求返回取消函数 */
-          return function () {}
-        },
-        send: function (event, payload) {
-          window.parent.postMessage({ event: event, payload: payload, fromFrontend: true }, '*')
-        },
+      #root {
+        height: 100%;
       }
-
-      /** 初始化：createBridge(window, wall) + createStore + forwardRef(DevTools) */
-      var bridge = FE.createBridge(window, wall)
-      var store = FE.createStore(bridge)
-      var DevTools = FE.initialize(window, { bridge: bridge, store: store })
-
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- esbuild 打包的 react-devtools-inline frontend（IIFE，全局名 ReactDevToolsFrontend） -->
+    <script src="./assets/frontend.bundle.js"></script>
+    <script>
       /**
-       * initialize 返回的 <DevTools /> 是 forwardRef 组件，必须用 bundle 内部
-       * 同一份 react 渲染（不同 react 实例的 hooks 会报错）。
-       * entry wrapper（build-react-devtools.mjs）额外导出了 react / react-dom/client，
-       * React 19 的 createRoot 在 react-dom/client 上（主入口已移除）。
+       * React DevTools frontend 宿主页（SilkPulse 控制台 iframe 内运行）
+       *
+       * 通信链路：
+       *   本页（frontend） ←→ parent（Console DevToolsPanel） ←→ WS ←→ 目标页 backend
+       *
+       * Wall 协议：
+       *   - 本页发往 parent：window.parent.postMessage({ event, payload, fromFrontend: true }, '*')
+       *   - parent 发来本页：iframe.contentWindow.postMessage({ event, payload }, '*')
+       *   （DevToolsPanel 校验 source 后转发到 WS devtools-relay）
        */
-      var React2 = FE.react
-      var ReactDOMClient = FE.reactDOMClient
-      if (!React2 || !ReactDOMClient) {
-        document.body.innerHTML = '<div style="font:13px monospace;color:red;padding:12px">bundle 未导出 react/reactDOMClient（需用 build-react-devtools.mjs 重新构建）</div>'
-        return
-      }
+      (function () {
+        var FE = window.ReactDevToolsFrontend;
+        if (!FE) {
+          document.body.innerHTML =
+            '<div style="font:13px monospace;color:red;padding:12px">React DevTools frontend.bundle.js 加载失败</div>';
+          return;
+        }
 
-      var root = ReactDOMClient.createRoot(document.getElementById('root'))
-      root.render(
-        React2.createElement(
-          function Wrapper() {
+        /** 自定义 Wall：把 devtools Bridge 的消息转发给 parent（Console → WS → backend） */
+        var wall = {
+          listen: function (fn) {
+            window.addEventListener("message", function (e) {
+              /** 只处理 parent 发来的、带 event 字段的消息 */
+              if (e.source !== window.parent) return;
+              var data = e.data;
+              if (!data || typeof data.event !== "string") return;
+              fn({ event: data.event, payload: data.payload });
+            });
+            /** Wall 协议要求返回取消函数 */
+            return function () {};
+          },
+          send: function (event, payload) {
+            window.parent.postMessage({ event: event, payload: payload, fromFrontend: true }, "*");
+          },
+        };
+
+        /** 初始化：createBridge(window, wall) + createStore + forwardRef(DevTools) */
+        var bridge = FE.createBridge(window, wall);
+        var store = FE.createStore(bridge);
+        var DevTools = FE.initialize(window, { bridge: bridge, store: store });
+
+        /**
+         * initialize 返回的 <DevTools /> 是 forwardRef 组件，必须用 bundle 内部
+         * 同一份 react 渲染（不同 react 实例的 hooks 会报错）。
+         * entry wrapper（build-react-devtools.mjs）额外导出了 react / react-dom/client，
+         * React 19 的 createRoot 在 react-dom/client 上（主入口已移除）。
+         */
+        var React2 = FE.react;
+        var ReactDOMClient = FE.reactDOMClient;
+        if (!React2 || !ReactDOMClient) {
+          document.body.innerHTML =
+            '<div style="font:13px monospace;color:red;padding:12px">bundle 未导出 react/reactDOMClient（需用 build-react-devtools.mjs 重新构建）</div>';
+          return;
+        }
+
+        var root = ReactDOMClient.createRoot(document.getElementById("root"));
+        root.render(
+          React2.createElement(function Wrapper() {
             return React2.createElement(DevTools, {
-              canViewElementSourceFunction: function () { return false },
-              browserTheme: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+              canViewElementSourceFunction: function () {
+                return false;
+              },
+              browserTheme:
+                window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                  ? "dark"
+                  : "light",
               showTabBar: true,
-              defaultTab: 'components',
-            })
-          }
-        )
-      )
+              defaultTab: "components",
+            });
+          }),
+        );
 
-      /** 通知 parent：frontend 已就绪（DevToolsPanel 可据此显示状态） */
-      window.parent.postMessage({ event: '__silkpulse_frontend_ready__', fromFrontend: true }, '*')
-    })()
-  </script>
-</body>
+        /** 通知 parent：frontend 已就绪（DevToolsPanel 可据此显示状态） */
+        window.parent.postMessage(
+          { event: "__silkpulse_frontend_ready__", fromFrontend: true },
+          "*",
+        );
+      })();
+    </script>
+  </body>
 </html>

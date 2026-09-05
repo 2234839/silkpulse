@@ -1,57 +1,78 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vue 3 dev 构建 - 后注入测试页</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 20px; }
-    .demo { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 16px 0; }
-    button { padding: 8px 16px; margin: 4px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
-    .counter { font-size: 32px; font-weight: bold; color: #42b883; }
-  </style>
-  <!-- Vue dev 构建（挂 __vueParentComponent，devtools 事件也全开）。
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vue 3 dev 构建 - 后注入测试页</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 560px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+      .demo {
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin: 16px 0;
+      }
+      button {
+        padding: 8px 16px;
+        margin: 4px;
+        border-radius: 4px;
+        border: 1px solid #d1d5db;
+        background: #fff;
+        cursor: pointer;
+      }
+      .counter {
+        font-size: 32px;
+        font-weight: bold;
+        color: #42b883;
+      }
+    </style>
+    <!-- Vue dev 构建（挂 __vueParentComponent，devtools 事件也全开）。
        不加载 sdk.js——app 启动后动态注入验证恢复 -->
-  <script src="/vendor/vue.global.js"></script>
-</head>
-<body>
-  <div id="app">
-    <h1>{{ title }}</h1>
-    <div class="demo">
-      <div class="counter">{{ count }}</div>
-      <button id="inc-btn" @click="count++">+1</button>
+    <script src="/vendor/vue.global.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <h1>{{ title }}</h1>
+      <div class="demo">
+        <div class="counter">{{ count }}</div>
+        <button id="inc-btn" @click="count++">+1</button>
+      </div>
+      <div class="demo">
+        <user-card :name="userName" :age="userAge"></user-card>
+      </div>
     </div>
-    <div class="demo">
-      <user-card :name="userName" :age="userAge"></user-card>
-    </div>
-  </div>
 
-  <script>
-    const { createApp, ref, defineComponent } = Vue
+    <script>
+      const { createApp, ref, defineComponent } = Vue;
 
-    const UserCard = defineComponent({
-      name: 'UserCard',
-      props: { name: String, age: Number },
-      template: `<div class="user-card" style="padding:12px;border:1px solid #ddd;border-radius:6px">
+      const UserCard = defineComponent({
+        name: "UserCard",
+        props: { name: String, age: Number },
+        template: `<div class="user-card" style="padding:12px;border:1px solid #ddd;border-radius:6px">
         <strong>{{ name }}</strong>（{{ age }} 岁）
       </div>`,
-    })
+      });
 
-    const app = createApp({
-      name: 'ProdApp',
-      components: { UserCard },
-      setup() {
-        const title = ref('Vue 3 dev 构建页面')
-        const count = ref(42)
-        const userName = ref('gs')
-        const userAge = ref(18)
-        return { title, count, userName, userAge }
-      },
-    })
+      const app = createApp({
+        name: "ProdApp",
+        components: { UserCard },
+        setup() {
+          const title = ref("Vue 3 dev 构建页面");
+          const count = ref(42);
+          const userName = ref("gs");
+          const userAge = ref(18);
+          return { title, count, userName, userAge };
+        },
+      });
 
-    app.mount('#app')
-    window.__TEST_PAGE_READY__ = true
-    window.__TEST_APP__ = app
-  </script>
-</body>
+      app.mount("#app");
+      window.__TEST_PAGE_READY__ = true;
+      window.__TEST_APP__ = app;
+    </script>
+  </body>
 </html>

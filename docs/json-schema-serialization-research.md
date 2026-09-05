@@ -9,14 +9,14 @@
 
 **不建议引入。** 实测数据表明：在本项目的消息形态下，schema 驱动序列化库不快反慢，收益为负。
 
-| 消息形态 | native | fast-json-stringify | 加速比 |
-|---|---:|---:|---:|
-| log（168B，高频小消息） | 391 ns | 254 ns | **1.54x ✓** |
-| network（631B，动态 headers） | 1128 ns | 2122 ns | 0.53x ✗ |
-| network 完整 schema（公平最佳情况） | 1128 ns | 1587 ns | 0.71x ✗ |
-| snapshot（20KB，200 元素） | 66µs | 71µs | 0.93x ✗ |
-| screen-frame（40KB dataURL） | 24µs | 33µs | 0.75x ✗ |
-| **混合负载（5 log + 1 network）** | 3144 ns | 3414 ns | **0.92x ✗** |
+| 消息形态                            |  native | fast-json-stringify |      加速比 |
+| ----------------------------------- | ------: | ------------------: | ----------: |
+| log（168B，高频小消息）             |  391 ns |              254 ns | **1.54x ✓** |
+| network（631B，动态 headers）       | 1128 ns |             2122 ns |     0.53x ✗ |
+| network 完整 schema（公平最佳情况） | 1128 ns |             1587 ns |     0.71x ✗ |
+| snapshot（20KB，200 元素）          |    66µs |                71µs |     0.93x ✗ |
+| screen-frame（40KB dataURL）        |    24µs |                33µs |     0.75x ✗ |
+| **混合负载（5 log + 1 network）**   | 3144 ns |             3414 ns | **0.92x ✗** |
 
 环境：Node 24.3.0 本机，fast-json-stringify@5。
 
@@ -28,12 +28,12 @@
 
 你记忆中的方案是这一类库：
 
-| 库 | 思路 | 状态 |
-|---|---|---|
+| 库                  | 思路                                                        | 状态                 |
+| ------------------- | ----------------------------------------------------------- | -------------------- |
 | fast-json-stringify | 编译期把 JSON Schema 编译成等价的 `JSON.stringify` 专用代码 | 活跃（Fastify 御用） |
-| slow-json-stringify | 同思路，社区仿品 | 不活跃 |
-| Ajv 序列化 | 同上，配 Fastify 使用 | 活跃 |
-| superjson / @podium | 超集序列化（Date/Map 等），目标不同 | 活跃 |
+| slow-json-stringify | 同思路，社区仿品                                            | 不活跃               |
+| Ajv 序列化          | 同上，配 Fastify 使用                                       | 活跃                 |
+| superjson / @podium | 超集序列化（Date/Map 等），目标不同                         | 活跃                 |
 
 共同原理：**运行时跳过类型检查与属性枚举，直接按 schema 生成拼字符串代码**——只在「schema 完全字面量化、键固定、值类型固定」时成立。
 
@@ -58,13 +58,13 @@
 
 2026-08-14 容量报告：4000 设备在线、6k msg/s、事件循环利用率 64%。分项拆解 6k msg/s 的时间预算：
 
-| 环节 | 估算占比 | 说明 |
-|---|---:|---|
-| WS 帧解包 + permessage-deflate 压缩 | ~35% | 报告已定位的大头 |
-| **JSON.parse 入站消息** | **~0.3%** | 实测 436ns×6k ≈ 2.6ms/s |
-| 业务逻辑（环形缓冲、registry、路由） | ~20% | |
-| broadcast stringify + send | ~8% | 多控制台扇出时线性放大 |
-| HTTP 路由 + agent-api 序列化 | 余量 | p99 ≤13.5ms，非瓶颈 |
+| 环节                                 |  估算占比 | 说明                    |
+| ------------------------------------ | --------: | ----------------------- |
+| WS 帧解包 + permessage-deflate 压缩  |      ~35% | 报告已定位的大头        |
+| **JSON.parse 入站消息**              | **~0.3%** | 实测 436ns×6k ≈ 2.6ms/s |
+| 业务逻辑（环形缓冲、registry、路由） |      ~20% |                         |
+| broadcast stringify + send           |       ~8% | 多控制台扇出时线性放大  |
+| HTTP 路由 + agent-api 序列化         |      余量 | p99 ≤13.5ms，非瓶颈     |
 
 **stringify+parse 合计 < 1% 事件循环。** 就算引入库把 log 类 stringify 提速 1.5x，对总吞吐影响 < 0.1%。这不是当前瓶颈，也不是近期会撞到的瓶颈。
 
@@ -107,14 +107,14 @@ mix(5log+1net) fast   3414 ns/op  ← 整体更慢
 
 typia 13.3.0（2026 年当前版），官方 `typia generate` 代码生成工作流（Go 原生编译器 + TS-Go），消息形态与前一轮 benchmark 完全同构：
 
-| 消息形态 | native | typia 生成代码 | 加速比 |
-|---|---:|---:|---:|
-| log（168B 固定字段） | 421 ns | 208 ns | **2.02x ✓** |
-| network（631B 动态 headers） | 1165 ns | 2588 ns | 0.45x ✗ |
-| snapshot（20KB 开放结构） | 70µs | 48µs | **1.46x ✓** |
-| screen-frame（40KB dataURL） | 26µs | 59µs | 0.44x ✗ |
-| parse log（校验式） | 571 ns | 591 ns | 0.97x ✗ |
-| **混合负载（5 log + 1 network）** | 3321 ns | 3903 ns | **0.85x ✗** |
+| 消息形态                          |  native | typia 生成代码 |      加速比 |
+| --------------------------------- | ------: | -------------: | ----------: |
+| log（168B 固定字段）              |  421 ns |         208 ns | **2.02x ✓** |
+| network（631B 动态 headers）      | 1165 ns |        2588 ns |     0.45x ✗ |
+| snapshot（20KB 开放结构）         |    70µs |           48µs | **1.46x ✓** |
+| screen-frame（40KB dataURL）      |    26µs |           59µs |     0.44x ✗ |
+| parse log（校验式）               |  571 ns |         591 ns |     0.97x ✗ |
+| **混合负载（5 log + 1 network）** | 3321 ns |        3903 ns | **0.85x ✗** |
 
 正确性：四类消息输出与 native 全部一致（含 optional 字段、动态键、中文字符串）。
 

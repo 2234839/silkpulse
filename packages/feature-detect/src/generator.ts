@@ -1,6 +1,6 @@
-import { FEATURE_CHECKS } from './checks.js'
-import type { FeatureResult, FeatureCategory, FeatureReport } from './types.js'
-import { CATEGORY_LABELS } from './types.js'
+import { FEATURE_CHECKS } from "./checks.js";
+import type { FeatureResult, FeatureCategory, FeatureReport } from "./types.js";
+import { CATEGORY_LABELS } from "./types.js";
 
 /**
  * 生成特性检测 exec 脚本
@@ -16,7 +16,14 @@ import { CATEGORY_LABELS } from './types.js'
 export function generateFeatureDetectScript(): string {
   return `return (function(){
   var checks = ${JSON.stringify(
-    FEATURE_CHECKS.map((c) => ({ id: c.id, label: c.label, category: c.category, test: c.test, mdn: c.mdn ?? '', desc: c.desc ?? '' })),
+    FEATURE_CHECKS.map((c) => ({
+      id: c.id,
+      label: c.label,
+      category: c.category,
+      test: c.test,
+      mdn: c.mdn ?? "",
+      desc: c.desc ?? "",
+    })),
   )};
   var results = [];
   for (var i = 0; i < checks.length; i++) {
@@ -32,7 +39,7 @@ export function generateFeatureDetectScript(): string {
     results.push({ id: c.id, label: c.label, category: c.category, value: value, mdn: c.mdn ? 'https://developer.mozilla.org/zh-CN/docs/' + c.mdn : '', desc: c.desc });
   }
   return results;
-})()`
+})()`;
 }
 
 /**
@@ -40,24 +47,27 @@ export function generateFeatureDetectScript(): string {
  *
  * exec 的 result 是序列化后的 JSON 字符串，这里 parse 后按 category 分组。
  */
-export function parseFeatureResults(deviceId: string, rawJson: string): FeatureReport['categories'] {
-  const results: FeatureResult[] = JSON.parse(rawJson)
+export function parseFeatureResults(
+  deviceId: string,
+  rawJson: string,
+): FeatureReport["categories"] {
+  const results: FeatureResult[] = JSON.parse(rawJson);
 
   /** 按 category 分组 */
-  const grouped = new Map<FeatureCategory, FeatureResult[]>()
+  const grouped = new Map<FeatureCategory, FeatureResult[]>();
   for (const r of results) {
-    const arr = grouped.get(r.category) ?? []
-    arr.push(r)
-    grouped.set(r.category, arr)
+    const arr = grouped.get(r.category) ?? [];
+    arr.push(r);
+    grouped.set(r.category, arr);
   }
 
   /** 按 FEATURE_CHECKS 定义顺序输出分类 */
-  const categoryOrder: FeatureCategory[] = [...new Set(FEATURE_CHECKS.map((c) => c.category))]
+  const categoryOrder: FeatureCategory[] = [...new Set(FEATURE_CHECKS.map((c) => c.category))];
   return categoryOrder
     .filter((cat) => grouped.has(cat))
     .map((cat) => ({
       category: cat,
       label: CATEGORY_LABELS[cat],
       results: grouped.get(cat)!,
-    }))
+    }));
 }

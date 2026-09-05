@@ -14,47 +14,52 @@
  * 依赖：临时目录 npm install vite@5 + @vitejs/plugin-react@4 +
  * react@18.3.1 + react-dom@18.3.1 + vite-plugin-singlefile（~117 包，8s）
  */
-import { execSync } from 'node:child_process'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-const ROOT = path.resolve(import.meta.dirname, '..')
-const SRC = path.join(ROOT, 'examples/react-vite-app')
-const OUT_DIR = path.join(ROOT, 'packages/server/public')
-const TMP = path.join(os.tmpdir(), `silkpulse-react-vite-${Date.now()}`)
+const ROOT = path.resolve(import.meta.dirname, "..");
+const SRC = path.join(ROOT, "examples/react-vite-app");
+const OUT_DIR = path.join(ROOT, "packages/server/public");
+const TMP = path.join(os.tmpdir(), `silkpulse-react-vite-${Date.now()}`);
 
-console.log('1. 准备临时构建目录…')
-fs.mkdirSync(TMP, { recursive: true })
-fs.cpSync(SRC, TMP, { recursive: true })
+console.log("1. 准备临时构建目录…");
+fs.mkdirSync(TMP, { recursive: true });
+fs.cpSync(SRC, TMP, { recursive: true });
 /** vite.config.mjs 引用 node_modules，index.html 的 /src/main.jsx 走 vite 约定 */
-process.chdir(TMP)
+process.chdir(TMP);
 
-console.log('2. 安装依赖（vite5 + react18 + singlefile）…')
+console.log("2. 安装依赖（vite5 + react18 + singlefile）…");
 execSync(
-  'npm install --no-fund --no-audit vite@5 @vitejs/plugin-react@4 react@18.3.1 react-dom@18.3.1 vite-plugin-singlefile@2',
-  { stdio: 'inherit' },
-)
+  "npm install --no-fund --no-audit vite@5 @vitejs/plugin-react@4 react@18.3.1 react-dom@18.3.1 vite-plugin-singlefile@2",
+  { stdio: "inherit" },
+);
 
-console.log('3. vite build…')
-execSync('npx vite build', { stdio: 'inherit' })
+console.log("3. vite build…");
+execSync("npx vite build", { stdio: "inherit" });
 
-const dist = path.join(TMP, 'dist/index.html')
-if (!fs.existsSync(dist)) throw new Error('构建产物缺失：dist/index.html')
+const dist = path.join(TMP, "dist/index.html");
+if (!fs.existsSync(dist)) throw new Error("构建产物缺失：dist/index.html");
 
-console.log('4. 部署到 server/public…')
-fs.mkdirSync(OUT_DIR, { recursive: true })
+console.log("4. 部署到 server/public…");
+fs.mkdirSync(OUT_DIR, { recursive: true });
 
 /** 先注入版：构建产物 head 里已有 sdk.js script（examples 源里带着） */
-fs.copyFileSync(dist, path.join(OUT_DIR, 'react-vite-post.html'))
+fs.copyFileSync(dist, path.join(OUT_DIR, "react-vite-post.html"));
 
 /** 后注入版：剥掉 sdk.js script */
-const html = fs.readFileSync(dist, 'utf8')
-const late = html.replace('<script src="/sdk.js" data-server="http://localhost:8080"></script>\n    ', '')
-if (late.includes('sdk.js')) throw new Error('后注入版剥离 sdk.js 失败：仍有残留')
-fs.writeFileSync(path.join(OUT_DIR, 'react-vite-late.html'), late)
+const html = fs.readFileSync(dist, "utf8");
+const late = html.replace(
+  '<script src="/sdk.js" data-server="http://localhost:8080"></script>\n    ',
+  "",
+);
+if (late.includes("sdk.js")) throw new Error("后注入版剥离 sdk.js 失败：仍有残留");
+fs.writeFileSync(path.join(OUT_DIR, "react-vite-late.html"), late);
 
-console.log(`✅ 完成：\n  ${path.join(OUT_DIR, 'react-vite-post.html')}（先注入）\n  ${path.join(OUT_DIR, 'react-vite-late.html')}（后注入）`)
+console.log(
+  `✅ 完成：\n  ${path.join(OUT_DIR, "react-vite-post.html")}（先注入）\n  ${path.join(OUT_DIR, "react-vite-late.html")}（后注入）`,
+);
 
 /** 清理临时目录（失败也无所谓，tmp 目录本来就会清） */
-fs.rmSync(TMP, { recursive: true, force: true })
+fs.rmSync(TMP, { recursive: true, force: true });

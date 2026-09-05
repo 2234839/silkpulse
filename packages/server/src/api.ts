@@ -5,15 +5,15 @@
  * exec 端点通过设备的 WS 下发指令并等待回传（内存 promise 模式）。
  */
 
-import type { DeviceRegistry } from './device-registry.js'
-import type { AuthManager, AuthContext } from './auth.js'
-import type { Ctx } from './uws/http-helpers.js'
-import { sendSnapshot } from './snapshot-text.js'
-import { generateFeatureDetectScript } from '@silkpulse/feature-detect'
-import { maybeGzipResponse } from './gzip.js'
-import { renderSkillPrompt } from '@silkpulse/shared'
-import { performance } from 'node:perf_hooks'
-import { fanoutStats } from './ws-relay.js'
+import type { DeviceRegistry } from "./device-registry.js";
+import type { AuthManager, AuthContext } from "./auth.js";
+import type { Ctx } from "./uws/http-helpers.js";
+import { sendSnapshot } from "./snapshot-text.js";
+import { generateFeatureDetectScript } from "@silkpulse/feature-detect";
+import { maybeGzipResponse } from "./gzip.js";
+import { renderSkillPrompt } from "@silkpulse/shared";
+import { performance } from "node:perf_hooks";
+import { fanoutStats } from "./ws-relay.js";
 
 /**
  * 事件循环利用率采样器（增量式单例）
@@ -22,23 +22,23 @@ import { fanoutStats } from './ws-relay.js'
  * （monitorEventLoopDelay 在部分容器/内核上 idle 也报 ≥resolution，不可信）。
  * 每次调用返回自上次调用以来的利用率 0~1，天然窗口化、无累计污染。
  */
-let _eluPrev: ReturnType<typeof performance.eventLoopUtilization> | null = null
+let _eluPrev: ReturnType<typeof performance.eventLoopUtilization> | null = null;
 function loopUtilization(): number {
-  const cur = performance.eventLoopUtilization()
+  const cur = performance.eventLoopUtilization();
   if (!_eluPrev) {
-    _eluPrev = cur
-    return 0
+    _eluPrev = cur;
+    return 0;
   }
-  const u = performance.eventLoopUtilization(cur, _eluPrev)
-  _eluPrev = cur
-  return u.utilization
+  const u = performance.eventLoopUtilization(cur, _eluPrev);
+  _eluPrev = cur;
+  return u.utilization;
 }
 
-export { readBody, sendJson, sendText } from './uws/http-helpers.js'
-import { readBody, sendJson, sendText, writeResponse } from './uws/http-helpers.js'
+export { readBody, sendJson, sendText } from "./uws/http-helpers.js";
+import { readBody, sendJson, sendText, writeResponse } from "./uws/http-helpers.js";
 
 /** exec 超时（ms） */
-const EXEC_TIMEOUT = 10000
+const EXEC_TIMEOUT = 10000;
 
 /**
  * 处理 /api/* 路由
@@ -52,11 +52,11 @@ export async function handleApiRoute(
   /** 鉴权管理器（可选，未传时不做项目过滤） */
   _auth?: AuthManager,
   /** 当前请求的鉴权上下文 */
-  authCtx: AuthContext = { role: 'admin' },
+  authCtx: AuthContext = { role: "admin" },
 ): Promise<boolean> {
   /** /api/health —— 压测/监控探针（无需鉴权：只暴露进程级指标，无业务数据） */
-  if (ctx.url.split('?')[0] === '/api/health') {
-    const mu = process.memoryUsage()
+  if (ctx.url.split("?")[0] === "/api/health") {
+    const mu = process.memoryUsage();
     sendJson(ctx, {
       ok: true,
       rssMB: +(mu.rss / 1048576).toFixed(1),
@@ -67,34 +67,46 @@ export async function handleApiRoute(
       fanoutSkippedProject: fanoutStats.skippedProject,
       fanoutBackpressureClosed: fanoutStats.backpressureClosed,
       uptimeSec: Math.round(process.uptime()),
-    })
-    return true
+    });
+    return true;
   }
-  const url = ctx.parsedUrl
-  const pathname = url.pathname
-  if (!pathname.startsWith('/api/')) return false
+  const url = ctx.parsedUrl;
+  const pathname = url.pathname;
+  if (!pathname.startsWith("/api/")) return false;
 
   /** CORS 预检 */
-  if (ctx.method === 'OPTIONS') {
-    writeResponse(ctx, 204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }, '')
-    return true
+  if (ctx.method === "OPTIONS") {
+    writeResponse(
+      ctx,
+      204,
+      {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+      "",
+    );
+    return true;
   }
 
   /** /api/echo —— 回显端点（测试 POST body 采集，返回接收到的 body） */
-  if (pathname === '/api/echo') {
-    const { body, oversize } = await readBody(ctx)
-    if (oversize) { sendJson(ctx, { error: 'body 超过 2MB 上限' }, 413); return true }
-    /** body 可能是任意格式（JSON / FormData multipart / 纯文本），非 JSON 时原样返回文本 */
-    let received: unknown = body || null
-    if (body) {
-      try { received = JSON.parse(body) } catch { /** 非 JSON，保留原始文本 */ }
+  if (pathname === "/api/echo") {
+    const { body, oversize } = await readBody(ctx);
+    if (oversize) {
+      sendJson(ctx, { error: "body 超过 2MB 上限" }, 413);
+      return true;
     }
-    sendJson(ctx, { ok: true, received, time: Date.now() })
-    return true
+    /** body 可能是任意格式（JSON / FormData multipart / 纯文本），非 JSON 时原样返回文本 */
+    let received: unknown = body || null;
+    if (body) {
+      try {
+        received = JSON.parse(body);
+      } catch {
+        /** 非 JSON，保留原始文本 */
+      }
+    }
+    sendJson(ctx, { ok: true, received, time: Date.now() });
+    return true;
   }
 
   /**
@@ -104,89 +116,92 @@ export async function handleApiRoute(
    * 需要时 curl 这个端点拉取完整 API 文档。
    * 支持 ?key= query 或 Authorization header 鉴权。
    */
-  const skillMatch = pathname.match(/^\/api\/skill\/([^/]+)$/)
-  if (skillMatch && ctx.method === 'GET') {
-    const [, skillName] = skillMatch
-    if (skillName !== 'silkpulse') {
-      sendJson(ctx, { error: `未知的 skill: ${skillName}` }, 404)
-      return true
+  const skillMatch = pathname.match(/^\/api\/skill\/([^/]+)$/);
+  if (skillMatch && ctx.method === "GET") {
+    const [, skillName] = skillMatch;
+    if (skillName !== "silkpulse") {
+      sendJson(ctx, { error: `未知的 skill: ${skillName}` }, 404);
+      return true;
     }
     /** 鉴权：匿名拒绝 */
-    if (authCtx.role === 'anonymous') {
-      sendJson(ctx, { error: '未授权' }, 401)
-      return true
+    if (authCtx.role === "anonymous") {
+      sendJson(ctx, { error: "未授权" }, 401);
+      return true;
     }
     /** 从请求 Host 推断服务地址 */
-    const host = ctx.headers['host'] || ''
-    const proto = ctx.headers['x-forwarded-proto'] || 'http'
-    const serverUrl = `${proto}://${host}`
+    const host = ctx.headers["host"] || "";
+    const proto = ctx.headers["x-forwarded-proto"] || "http";
+    const serverUrl = `${proto}://${host}`;
     /** 提取鉴权 token（header 或 query）作为 apiKey */
-    const apiKey = ctx.parsedUrl.searchParams.get('key') || ctx.headers['authorization']?.replace('Bearer ', '').trim() || ''
-    sendText(ctx, renderSkillPrompt(serverUrl, apiKey))
-    return true
+    const apiKey =
+      ctx.parsedUrl.searchParams.get("key") ||
+      ctx.headers["authorization"]?.replace("Bearer ", "").trim() ||
+      "";
+    sendText(ctx, renderSkillPrompt(serverUrl, apiKey));
+    return true;
   }
 
   /** /api/devices —— 列出所有在线设备 + 最近下线设备（供 AI 判断接入状态） */
-  if (pathname === '/api/devices' && ctx.method === 'GET') {
+  if (pathname === "/api/devices" && ctx.method === "GET") {
     /** 鉴权：匿名拒绝，项目级只看自己项目的设备 */
-    if (authCtx.role === 'anonymous') {
-      sendJson(ctx, { error: '未授权' }, 401)
-      return true
+    if (authCtx.role === "anonymous") {
+      sendJson(ctx, { error: "未授权" }, 401);
+      return true;
     }
-    const projectId = authCtx.role === 'project' ? authCtx.projectId : undefined
+    const projectId = authCtx.role === "project" ? authCtx.projectId : undefined;
     sendJson(ctx, {
       devices: registry.listByProject(projectId),
       recentlyOffline: registry.listOfflineByProject(projectId),
-    })
-    return true
+    });
+    return true;
   }
 
   /** 解析 /api/devices/:id/xxx */
-  const match = pathname.match(/^\/api\/devices\/([^/]+)(?:\/(.+))?$/)
+  const match = pathname.match(/^\/api\/devices\/([^/]+)(?:\/(.+))?$/);
   if (!match) {
-    sendJson(ctx, { error: 'Not found' }, 404)
-    return true
+    sendJson(ctx, { error: "Not found" }, 404);
+    return true;
   }
-  const [, deviceId, action] = match
-  const device = registry.get(deviceId)
+  const [, deviceId, action] = match;
+  const device = registry.get(deviceId);
   if (!device) {
-    sendJson(ctx, { error: `设备 ${deviceId} 不在线` }, 404)
-    return true
+    sendJson(ctx, { error: `设备 ${deviceId} 不在线` }, 404);
+    return true;
   }
 
   /** 鉴权：检查是否有权限访问此设备（项目隔离） */
-  if (authCtx.role === 'anonymous') {
-    sendJson(ctx, { error: '未授权' }, 401)
-    return true
+  if (authCtx.role === "anonymous") {
+    sendJson(ctx, { error: "未授权" }, 401);
+    return true;
   }
   if (!_auth?.canAccessDevice(authCtx, device.info.projectId)) {
-    sendJson(ctx, { error: '无权访问此设备' }, 403)
-    return true
+    sendJson(ctx, { error: "无权访问此设备" }, 403);
+    return true;
   }
 
   switch (action) {
     /** 设备详情 */
     case undefined: {
-      sendJson(ctx, device.info)
-      return true
+      sendJson(ctx, device.info);
+      return true;
     }
 
     /** /api/devices/:id/snapshot —— 页面快照（默认 text/plain，?format=json 返回原始 JSON） */
-    case 'snapshot': {
-      const result = await execOnDevice(registry, deviceId, 'return __silkpulse_snapshot()')
+    case "snapshot": {
+      const result = await execOnDevice(registry, deviceId, "return __silkpulse_snapshot()");
       if (!result.success) {
-        sendText(ctx, `[快照失败] ${result.error}`, 500)
-        return true
+        sendText(ctx, `[快照失败] ${result.error}`, 500);
+        return true;
       }
       /** ?format=json 返回原始 JSON（控制台预览模式用，含 rect 布局信息） */
-      if (url.searchParams.get('format') === 'json') {
-        sendJson(ctx, result.result ? JSON.parse(result.result) : {})
-        return true
+      if (url.searchParams.get("format") === "json") {
+        sendJson(ctx, result.result ? JSON.parse(result.result) : {});
+        return true;
       }
       /** 默认：序列化为 compact 文本（AI 直接读） */
-      const text = sendSnapshot(result.result)
-      sendText(ctx, text)
-      return true
+      const text = sendSnapshot(result.result);
+      sendText(ctx, text);
+      return true;
     }
 
     /**
@@ -201,43 +216,48 @@ export async function handleApiRoute(
      * 返回二进制图片（Content-Type: image/jpeg 等），Agent 可直接保存/查看。
      * 截图失败时返回 500 + text/plain 错误信息。
      */
-    case 'screenshot': {
-      if (ctx.method !== 'GET') {
-        sendText(ctx, '[错误] 需要 GET', 405)
-        return true
+    case "screenshot": {
+      if (ctx.method !== "GET") {
+        sendText(ctx, "[错误] 需要 GET", 405);
+        return true;
       }
-      const idx = url.searchParams.get('idx')
-      const format = url.searchParams.get('format') ?? 'jpg'
-      const quality = url.searchParams.get('quality') ?? '0.8'
-      const scale = url.searchParams.get('scale') ?? '1'
-      const idxArg = idx ? Number(idx) : 'undefined'
+      const idx = url.searchParams.get("idx");
+      const format = url.searchParams.get("format") ?? "jpg";
+      const quality = url.searchParams.get("quality") ?? "0.8";
+      const scale = url.searchParams.get("scale") ?? "1";
+      const idxArg = idx ? Number(idx) : "undefined";
       /** 构造 exec 代码调用 __silkpulse_screenshot */
-      const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`
-      const result = await execOnDevice(registry, deviceId, code)
+      const code = `return await __silkpulse_screenshot(${idxArg}, { format: '${format}', quality: ${quality}, scale: ${scale} })`;
+      const result = await execOnDevice(registry, deviceId, code);
       if (!result.success) {
-        sendText(ctx, `[截图失败] ${result.error}`, 500)
-        return true
+        sendText(ctx, `[截图失败] ${result.error}`, 500);
+        return true;
       }
       /** result.result 是 JSON.stringify 后的 dataURL（如 "data:image/jpeg;base64,..."） */
-      const dataUrl = result.result ? JSON.parse(result.result) : ''
-      if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-        sendText(ctx, `[截图失败] 返回数据格式异常`, 500)
-        return true
+      const dataUrl = result.result ? JSON.parse(result.result) : "";
+      if (!dataUrl || !dataUrl.startsWith("data:image/")) {
+        sendText(ctx, `[截图失败] 返回数据格式异常`, 500);
+        return true;
       }
       /** dataURL → binary：提取 base64 部分，解码后返回原始图片 */
-      const meta = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+      const meta = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
       if (!meta) {
-        sendText(ctx, `[截图失败] dataURL 解析失败`, 500)
-        return true
+        sendText(ctx, `[截图失败] dataURL 解析失败`, 500);
+        return true;
       }
-      const mimeType = meta[1] === 'jpg' ? 'jpeg' : meta[1]
-      const binary = Buffer.from(meta[2], 'base64')
-      writeResponse(ctx, 200, {
-        'Content-Type': `image/${mimeType}`,
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-cache',
-      }, binary)
-      return true
+      const mimeType = meta[1] === "jpg" ? "jpeg" : meta[1];
+      const binary = Buffer.from(meta[2], "base64");
+      writeResponse(
+        ctx,
+        200,
+        {
+          "Content-Type": `image/${mimeType}`,
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache",
+        },
+        binary,
+      );
+      return true;
     }
 
     /**
@@ -246,19 +266,19 @@ export async function handleApiRoute(
      * 通过 exec-bridge 在目标设备上执行检测脚本，返回各特性的支持情况。
      * 控制台 Feature 面板和 AI skill 都可调用，排查"目标设备是否不支持某特性"。
      */
-    case 'feature-detect': {
-      const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript())
+    case "feature-detect": {
+      const result = await execOnDevice(registry, deviceId, generateFeatureDetectScript());
       if (!result.success) {
-        sendJson(ctx, { error: result.error }, 500)
-        return true
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
       }
       /** result.result 是 JSON 字符串（检测项数组），解析后透传给前端 */
       if (!result.result) {
-        sendJson(ctx, { error: '检测结果为空' }, 500)
-        return true
+        sendJson(ctx, { error: "检测结果为空" }, 500);
+        return true;
       }
-      sendJson(ctx, JSON.parse(result.result))
-      return true
+      sendJson(ctx, JSON.parse(result.result));
+      return true;
     }
 
     /**
@@ -268,27 +288,27 @@ export async function handleApiRoute(
      * 每个元素通过 __silkpulse_ensureIdx 打稳定 idx，供后续 inspect/操作复用。
      * 返回 JSON：[{idx, tag, id, classes, childCount, text?}]
      */
-    case 'element/tree': {
-      const parentIdx = url.searchParams.get('idx')
+    case "element/tree": {
+      const parentIdx = url.searchParams.get("idx");
       /** shadow=1 时取 shadowRoot 子元素（而非普通 children） */
-      const shadow = url.searchParams.get('shadow') === '1'
+      const shadow = url.searchParams.get("shadow") === "1";
       /** filter 非空时走递归搜索模式（忽略 idx/shadow） */
-      const filter = url.searchParams.get('filter')?.trim()
+      const filter = url.searchParams.get("filter")?.trim();
       const code = filter
         ? buildElementFilterCode(filter)
-        : buildElementTreeCode(parentIdx ? Number(parentIdx) : null, shadow)
-      const result = await execOnDevice(registry, deviceId, code)
+        : buildElementTreeCode(parentIdx ? Number(parentIdx) : null, shadow);
+      const result = await execOnDevice(registry, deviceId, code);
       if (!result.success) {
-        sendJson(ctx, { error: result.error }, 500)
-        return true
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
       }
       /** exec 的 result 是序列化后的 JSON 字符串，直接透传（gzip 压缩） */
-      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '[]', {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-      })
-      writeResponse(ctx, 200, headers, body)
-      return true
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? "[]", {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      writeResponse(ctx, 200, headers, body);
+      return true;
     }
 
     /**
@@ -297,24 +317,24 @@ export async function handleApiRoute(
      * 返回 JSON：{idx, tag, id, classes, visibility, computedStyle, box, ancestors}
      * 诊断 AI 最关心的"为什么元素看起来不对"。
      */
-    case 'element/inspect': {
-      const idx = url.searchParams.get('idx')
+    case "element/inspect": {
+      const idx = url.searchParams.get("idx");
       if (!idx) {
-        sendJson(ctx, { error: '缺少 idx 参数' }, 400)
-        return true
+        sendJson(ctx, { error: "缺少 idx 参数" }, 400);
+        return true;
       }
-      const code = buildElementInspectCode(Number(idx))
-      const result = await execOnDevice(registry, deviceId, code)
+      const code = buildElementInspectCode(Number(idx));
+      const result = await execOnDevice(registry, deviceId, code);
       if (!result.success) {
-        sendJson(ctx, { error: result.error }, 500)
-        return true
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
       }
-      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '{}', {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-      })
-      writeResponse(ctx, 200, headers, body)
-      return true
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? "{}", {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      writeResponse(ctx, 200, headers, body);
+      return true;
     }
 
     /**
@@ -324,24 +344,24 @@ export async function handleApiRoute(
      * 遍历 document.styleSheets + el.matches() 收集匹配的规则，
      * 标注每条规则的来源（文件名 / <style> 标签序号）。
      */
-    case 'element/styles': {
-      const idx = url.searchParams.get('idx')
+    case "element/styles": {
+      const idx = url.searchParams.get("idx");
       if (!idx) {
-        sendJson(ctx, { error: '缺少 idx 参数' }, 400)
-        return true
+        sendJson(ctx, { error: "缺少 idx 参数" }, 400);
+        return true;
       }
-      const code = buildElementStylesCode(Number(idx))
-      const result = await execOnDevice(registry, deviceId, code)
+      const code = buildElementStylesCode(Number(idx));
+      const result = await execOnDevice(registry, deviceId, code);
       if (!result.success) {
-        sendJson(ctx, { error: result.error }, 500)
-        return true
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
       }
-      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? '{}', {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-      })
-      writeResponse(ctx, 200, headers, body)
-      return true
+      const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, result.result ?? "{}", {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      writeResponse(ctx, 200, headers, body);
+      return true;
     }
 
     /**
@@ -357,166 +377,186 @@ export async function handleApiRoute(
      * cookie 的 set 支持 path/expires（可选），delete 通过设 expires 为过去时间实现。
      * HttpOnly cookie 读不到也写不了（浏览器限制），前端需提示。
      */
-    case 'storage': {
-      const type = url.searchParams.get('type') ?? 'local'
-      if (type !== 'local' && type !== 'session' && type !== 'cookie' && type !== 'indexeddb') {
-        sendJson(ctx, { error: 'type 必须是 local/session/cookie/indexeddb' }, 400)
-        return true
+    case "storage": {
+      const type = url.searchParams.get("type") ?? "local";
+      if (type !== "local" && type !== "session" && type !== "cookie" && type !== "indexeddb") {
+        sendJson(ctx, { error: "type 必须是 local/session/cookie/indexeddb" }, 400);
+        return true;
       }
 
-      if (ctx.method === 'GET') {
+      if (ctx.method === "GET") {
         /** indexeddb 走专门的异步读代码，不走 buildStorageReadCode */
-        const code = type === 'indexeddb'
-          ? buildIndexedDBReadCode()
-          : buildStorageReadCode(type as 'local' | 'session' | 'cookie')
-        const result = await execOnDevice(registry, deviceId, code)
+        const code =
+          type === "indexeddb"
+            ? buildIndexedDBReadCode()
+            : buildStorageReadCode(type as "local" | "session" | "cookie");
+        const result = await execOnDevice(registry, deviceId, code);
         if (!result.success) {
-          sendJson(ctx, { error: result.error }, 500)
-          return true
+          sendJson(ctx, { error: result.error }, 500);
+          return true;
         }
         /**
          * 验证 result.result 是合法 JSON。
          * exec 通道有 20K 截断，极端情况（海量 key）可能截断为不合法 JSON，
          * 此时返回错误而非让前端 res.json() 崩溃。
          */
-        const raw = result.result ?? '{}'
+        const raw = result.result ?? "{}";
         try {
-          JSON.parse(raw)
+          JSON.parse(raw);
         } catch {
-          sendJson(ctx, { error: 'Storage 数据过大，exec 结果被截断为不合法 JSON' }, 500)
-          return true
+          sendJson(ctx, { error: "Storage 数据过大，exec 结果被截断为不合法 JSON" }, 500);
+          return true;
         }
         const { body, headers } = maybeGzipResponse({ headers: ctx.headers }, raw, {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Access-Control-Allow-Origin': '*',
-        })
-        writeResponse(ctx, 200, headers, body)
-        return true
+          "Content-Type": "application/json; charset=utf-8",
+          "Access-Control-Allow-Origin": "*",
+        });
+        writeResponse(ctx, 200, headers, body);
+        return true;
       }
 
-      if (ctx.method === 'POST') {
-        const { body, oversize } = await readBody(ctx)
-        if (oversize) { sendJson(ctx, { error: 'storage body 超过 2MB 上限' }, 413); return true }
-        let parsed: { action?: string; type?: string; key?: string; value?: string; path?: string; expires?: string; store?: string }
+      if (ctx.method === "POST") {
+        const { body, oversize } = await readBody(ctx);
+        if (oversize) {
+          sendJson(ctx, { error: "storage body 超过 2MB 上限" }, 413);
+          return true;
+        }
+        let parsed: {
+          action?: string;
+          type?: string;
+          key?: string;
+          value?: string;
+          path?: string;
+          expires?: string;
+          store?: string;
+        };
         try {
-          parsed = JSON.parse(body)
+          parsed = JSON.parse(body);
         } catch {
-          sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
-          return true
+          sendJson(ctx, { error: "body 必须是 JSON" }, 400);
+          return true;
         }
         if (!parsed.action || !parsed.key || !parsed.type) {
-          sendJson(ctx, { error: '缺少 action/key/type 字段' }, 400)
-          return true
+          sendJson(ctx, { error: "缺少 action/key/type 字段" }, 400);
+          return true;
         }
-        if (parsed.action !== 'set' && parsed.action !== 'delete') {
-          sendJson(ctx, { error: 'action 必须是 set/delete' }, 400)
-          return true
+        if (parsed.action !== "set" && parsed.action !== "delete") {
+          sendJson(ctx, { error: "action 必须是 set/delete" }, 400);
+          return true;
         }
-        if (parsed.action === 'set' && parsed.value === undefined) {
-          sendJson(ctx, { error: 'set 缺少 value 字段' }, 400)
-          return true
+        if (parsed.action === "set" && parsed.value === undefined) {
+          sendJson(ctx, { error: "set 缺少 value 字段" }, 400);
+          return true;
         }
-        const code = parsed.type === 'indexeddb'
-          ? buildIndexedDBWriteCode(parsed.action, parsed.key, parsed.value, parsed.store)
-          : buildStorageWriteCode(
-            parsed.type as 'local' | 'session' | 'cookie',
-            parsed.action,
-            parsed.key,
-            parsed.value,
-            parsed.path,
-            parsed.expires,
-          )
-        const result = await execOnDevice(registry, deviceId, code)
+        const code =
+          parsed.type === "indexeddb"
+            ? buildIndexedDBWriteCode(parsed.action, parsed.key, parsed.value, parsed.store)
+            : buildStorageWriteCode(
+                parsed.type as "local" | "session" | "cookie",
+                parsed.action,
+                parsed.key,
+                parsed.value,
+                parsed.path,
+                parsed.expires,
+              );
+        const result = await execOnDevice(registry, deviceId, code);
         if (!result.success) {
-          sendJson(ctx, { error: result.error }, 500)
-          return true
+          sendJson(ctx, { error: result.error }, 500);
+          return true;
         }
-        sendJson(ctx, { ok: true })
-        return true
+        sendJson(ctx, { ok: true });
+        return true;
       }
 
-      sendJson(ctx, { error: '需要 GET 或 POST' }, 405)
-      return true
+      sendJson(ctx, { error: "需要 GET 或 POST" }, 405);
+      return true;
     }
 
     /** /api/devices/:id/exec —— 执行 JS */
-    case 'exec': {
-      if (ctx.method !== 'POST') {
-        sendJson(ctx, { error: '需要 POST' }, 405)
-        return true
+    case "exec": {
+      if (ctx.method !== "POST") {
+        sendJson(ctx, { error: "需要 POST" }, 405);
+        return true;
       }
-      const { body, oversize } = await readBody(ctx)
-      if (oversize) { sendJson(ctx, { error: 'exec body 超过 2MB 上限' }, 413); return true }
-      let parsed: { code?: string }
+      const { body, oversize } = await readBody(ctx);
+      if (oversize) {
+        sendJson(ctx, { error: "exec body 超过 2MB 上限" }, 413);
+        return true;
+      }
+      let parsed: { code?: string };
       try {
-        parsed = JSON.parse(body)
+        parsed = JSON.parse(body);
       } catch {
-        sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
-        return true
+        sendJson(ctx, { error: "body 必须是 JSON" }, 400);
+        return true;
       }
       if (!parsed.code) {
-        sendJson(ctx, { error: '缺少 code 字段' }, 400)
-        return true
+        sendJson(ctx, { error: "缺少 code 字段" }, 400);
+        return true;
       }
-      const result = await execOnDevice(registry, deviceId, parsed.code)
+      const result = await execOnDevice(registry, deviceId, parsed.code);
       /** exec 后的快照统一转成 compact 文本（与 snapshot API 格式一致，AI 直接读） */
       if (result.success && result.snapshotText) {
-        result.snapshotText = sendSnapshot(result.snapshotText)
+        result.snapshotText = sendSnapshot(result.snapshotText);
       }
-      sendJson(ctx, result)
-      return true
+      sendJson(ctx, result);
+      return true;
     }
 
     /** /api/devices/:id/logs —— console 日志（支持 since 游标） */
-    case 'logs': {
-      const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(ctx, device.logs.since(since))
-      return true
+    case "logs": {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      sendJson(ctx, device.logs.since(since));
+      return true;
     }
 
     /** /api/devices/:id/network —— network 记录（支持 since 游标） */
-    case 'network': {
-      const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(ctx, device.network.since(since))
-      return true
+    case "network": {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      sendJson(ctx, device.network.since(since));
+      return true;
     }
 
     /** /api/devices/:id/errors —— 错误记录（支持 since 游标，对齐 logs/network） */
-    case 'errors': {
-      const since = Number(url.searchParams.get('since') ?? 0)
-      sendJson(ctx, device.errors.since(since))
-      return true
+    case "errors": {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      sendJson(ctx, device.errors.since(since));
+      return true;
     }
 
     /** /api/devices/:id/tags —— 修改标签/备注（控制台 & AI 都可调用） */
-    case 'tags': {
-      if (ctx.method !== 'POST') {
-        sendJson(ctx, { error: '需要 POST' }, 405)
-        return true
+    case "tags": {
+      if (ctx.method !== "POST") {
+        sendJson(ctx, { error: "需要 POST" }, 405);
+        return true;
       }
-      const { body, oversize } = await readBody(ctx)
-      if (oversize) { sendJson(ctx, { error: 'tags body 超过 2MB 上限' }, 413); return true }
-      let parsed: { tags?: string[]; note?: string }
+      const { body, oversize } = await readBody(ctx);
+      if (oversize) {
+        sendJson(ctx, { error: "tags body 超过 2MB 上限" }, 413);
+        return true;
+      }
+      let parsed: { tags?: string[]; note?: string };
       try {
-        parsed = JSON.parse(body)
+        parsed = JSON.parse(body);
       } catch {
-        sendJson(ctx, { error: 'body 必须是 JSON' }, 400)
-        return true
+        sendJson(ctx, { error: "body 必须是 JSON" }, 400);
+        return true;
       }
       /** tags 去重 + 去空白；note 允许清空（传空串或 undefined） */
       const tags = Array.isArray(parsed.tags)
         ? Array.from(new Set(parsed.tags.map((t) => String(t).trim()).filter(Boolean)))
-        : device.info.tags
-      const note = parsed.note !== undefined ? String(parsed.note).trim() || undefined : device.info.note
-      registry.updateInfo(deviceId, { tags, note })
-      onDeviceListChanged?.()
-      sendJson(ctx, { ok: true, device: registry.get(deviceId)?.info })
-      return true
+        : device.info.tags;
+      const note =
+        parsed.note !== undefined ? String(parsed.note).trim() || undefined : device.info.note;
+      registry.updateInfo(deviceId, { tags, note });
+      onDeviceListChanged?.();
+      sendJson(ctx, { ok: true, device: registry.get(deviceId)?.info });
+      return true;
     }
   }
 
-  sendJson(ctx, { error: 'Not found' }, 404)
-  return true
+  sendJson(ctx, { error: "Not found" }, 404);
+  return true;
 }
 
 /**
@@ -526,38 +566,38 @@ export async function handleApiRoute(
 export async function execOnDevice(
   registry: DeviceRegistry,
   deviceId: string,
-  code: string
-): Promise<import('@silkpulse/shared').ExecResult> {
-  const device = registry.get(deviceId)
+  code: string,
+): Promise<import("@silkpulse/shared").ExecResult> {
+  const device = registry.get(deviceId);
   if (!device) {
-    return { success: false, error: `设备 ${deviceId} 不在线` }
+    return { success: false, error: `设备 ${deviceId} 不在线` };
   }
-  const sock = device.latestSocket
+  const sock = device.latestSocket;
   if (sock.readyState !== sock.OPEN) {
-    return { success: false, error: `设备 ${deviceId} 连接已关闭` }
+    return { success: false, error: `设备 ${deviceId} 连接已关闭` };
   }
 
-  const execId = Array.from({ length: 8 }, () =>
-    Math.floor(Math.random() * 16).toString(16)
-  ).join('')
+  const execId = Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join(
+    "",
+  );
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      device.pendingExecs.delete(execId)
-      resolve({ success: false, error: '执行超时（10s）' })
-    }, EXEC_TIMEOUT)
+      device.pendingExecs.delete(execId);
+      resolve({ success: false, error: "执行超时（10s）" });
+    }, EXEC_TIMEOUT);
 
-    device.pendingExecs.set(execId, { resolve, timer })
+    device.pendingExecs.set(execId, { resolve, timer });
 
     /** ws.send 可能因竞态（readyState 检查后断开）抛异常，保护之 */
     try {
-      sock.send(JSON.stringify({ type: 'exec', execId, code }))
+      sock.send(JSON.stringify({ type: "exec", execId, code }));
     } catch {
-      device.pendingExecs.delete(execId)
-      clearTimeout(timer)
-      resolve({ success: false, error: '发送执行指令失败（连接已断开）' })
+      device.pendingExecs.delete(execId);
+      clearTimeout(timer);
+      resolve({ success: false, error: "发送执行指令失败（连接已断开）" });
     }
-  })
+  });
 }
 
 /**
@@ -600,10 +640,10 @@ for (const el of host.shadowRoot.children) {
   result.push(item)
 }
 return result
-`
+`;
   }
   return `
-const parent = ${parentIdx === null ? 'document.documentElement' : `__silkpulse_getElement(${parentIdx})`}
+const parent = ${parentIdx === null ? "document.documentElement" : `__silkpulse_getElement(${parentIdx})`}
 if (!parent) return []
 const result = []
 for (const el of parent.children) {
@@ -628,7 +668,7 @@ for (const el of parent.children) {
   result.push(item)
 }
 return result
-`
+`;
 }
 
 /**
@@ -640,7 +680,7 @@ return result
  * 每个结果带 ancestors 路径（idx 数组），前端可据此展开树到匹配位置。
  */
 export function buildElementFilterCode(query: string): string {
-  const q = JSON.stringify(query.toLowerCase())
+  const q = JSON.stringify(query.toLowerCase());
   return `
 const query = ${q}
 if (!query) return []
@@ -709,7 +749,7 @@ while (queue.length > 0 && results.length < MAX) {
   }
 }
 return results
-`
+`;
 }
 
 /**
@@ -828,14 +868,14 @@ const rect = el.getBoundingClientRect()
     idx: ${idx},
     tag: el.tagName.toLowerCase(),
     id: el.id || undefined,
-    classes: el.className && typeof el.className === 'string' ? el.className.split(/\s+/).filter(Boolean).join(' ') : undefined,
+    classes: el.className && typeof el.className === 'string' ? el.className.split(/s+/).filter(Boolean).join(' ') : undefined,
     visibility,
     computedStyle,
     box,
     ancestors,
     inputValue,
   }
-`
+`;
 }
 
 /**
@@ -1003,7 +1043,7 @@ return {
   inlineStyle: inlineStyle,
   inherited: inherited,
 }
-`
+`;
 }
 
 /**
@@ -1013,15 +1053,15 @@ return {
  * 单个 value 截断到 1000 字符：防止大量 key 的 SPA（如 DeepSeek）总量超 exec 20K 限制。
  * 截断值加 `…(N chars)` 后缀，前端检测到此标记后点击编辑时走单独 exec 获取完整值。
  */
-function buildStorageReadCode(type: 'local' | 'session' | 'cookie'): string {
+function buildStorageReadCode(type: "local" | "session" | "cookie"): string {
   /**
    * 单个 value 最大长度：超长截断（JWT/base64 图片等可能很长）
    * 1000 字符够看到 token/配置的关键头部，同时控制总大小在 exec 20K 限制内
    */
-  const MAX_VAL = 1000
+  const MAX_VAL = 1000;
   const truncateExpr = (s: string): string =>
-    `${s}.length > ${MAX_VAL} ? ${s}.slice(0, ${MAX_VAL}) + '…(' + ${s}.length + ' chars)' : ${s}`
-  if (type === 'cookie') {
+    `${s}.length > ${MAX_VAL} ? ${s}.slice(0, ${MAX_VAL}) + '…(' + ${s}.length + ' chars)' : ${s}`;
+  if (type === "cookie") {
     return `
 const result = {}
 for (const part of document.cookie.split(';')) {
@@ -1029,24 +1069,24 @@ for (const part of document.cookie.split(';')) {
   if (eq > 0) {
     const k = part.slice(0, eq).trim()
     const v = part.slice(eq + 1).trim()
-    result[k] = ${truncateExpr('v')}
+    result[k] = ${truncateExpr("v")}
   }
 }
 return result
-`
+`;
   }
-  const store = type === 'session' ? 'sessionStorage' : 'localStorage'
+  const store = type === "session" ? "sessionStorage" : "localStorage";
   return `
 const result = {}
 for (let i = 0; i < ${store}.length; i++) {
   const k = ${store}.key(i)
   if (k) {
     const v = ${store}.getItem(k) || ''
-    result[k] = ${truncateExpr('v')}
+    result[k] = ${truncateExpr("v")}
   }
 }
 return result
-`
+`;
 }
 
 /**
@@ -1056,31 +1096,31 @@ return result
  * cookie 的 delete 通过设 expires 为过去时间实现（浏览器无 removeItem 等价物）。
  */
 function buildStorageWriteCode(
-  type: 'local' | 'session' | 'cookie',
-  action: 'set' | 'delete',
+  type: "local" | "session" | "cookie",
+  action: "set" | "delete",
   key: string,
   value?: string,
   path?: string,
   expires?: string,
 ): string {
-  const k = JSON.stringify(key)
-  if (type === 'cookie') {
-    if (action === 'set') {
-      const v = JSON.stringify(value ?? '')
-      const p = path ? `; path=${path}` : '; path=/'
-      const exp = expires ? `; expires=${expires}` : ''
-      return `document.cookie = ${k} + '=' + encodeURIComponent(${v}) + '${p}${exp}'; return true`
+  const k = JSON.stringify(key);
+  if (type === "cookie") {
+    if (action === "set") {
+      const v = JSON.stringify(value ?? "");
+      const p = path ? `; path=${path}` : "; path=/";
+      const exp = expires ? `; expires=${expires}` : "";
+      return `document.cookie = ${k} + '=' + encodeURIComponent(${v}) + '${p}${exp}'; return true`;
     }
     /** delete：expires 设为过去时间，浏览器自动清除 */
-    const p = path ? `; path=${path}` : '; path=/'
-    return `document.cookie = ${k} + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT${p}'; return true`
+    const p = path ? `; path=${path}` : "; path=/";
+    return `document.cookie = ${k} + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT${p}'; return true`;
   }
-  const store = type === 'session' ? 'sessionStorage' : 'localStorage'
-  if (action === 'set') {
-    const v = JSON.stringify(value ?? '')
-    return `${store}.setItem(${k}, ${v}); return true`
+  const store = type === "session" ? "sessionStorage" : "localStorage";
+  if (action === "set") {
+    const v = JSON.stringify(value ?? "");
+    return `${store}.setItem(${k}, ${v}); return true`;
   }
-  return `${store}.removeItem(${k}); return true`
+  return `${store}.removeItem(${k}); return true`;
 }
 
 /**
@@ -1146,7 +1186,7 @@ for (const dbInfo of dbList) {
   }
 }
 return { databases }
-`
+`;
 }
 
 /**
@@ -1158,10 +1198,15 @@ return { databases }
  *
  * value 尝试 JSON.parse（前端传的是 JSON 字符串），失败则原样存
  */
-function buildIndexedDBWriteCode(action: 'set' | 'delete', key: string, value?: string, store?: string): string {
-  const storeName = JSON.stringify(store ?? '')
-  const k = JSON.stringify(key)
-  if (action === 'set') {
+function buildIndexedDBWriteCode(
+  action: "set" | "delete",
+  key: string,
+  value?: string,
+  store?: string,
+): string {
+  const storeName = JSON.stringify(store ?? "");
+  const k = JSON.stringify(key);
+  if (action === "set") {
     return `
 const dbName = ''
 const dbList = (indexedDB.databases ? await indexedDB.databases() : [])
@@ -1175,7 +1220,7 @@ const db = await new Promise((resolve, reject) => {
 const sn = ${storeName}
 if (!db.objectStoreNames.contains(sn)) throw new Error('objectStore 不存在: ' + sn)
 let parsedValue
-try { parsedValue = JSON.parse(${JSON.stringify(value ?? '')}) } catch { parsedValue = ${JSON.stringify(value ?? '')} }
+try { parsedValue = JSON.parse(${JSON.stringify(value ?? "")}) } catch { parsedValue = ${JSON.stringify(value ?? "")} }
 await new Promise((resolve, reject) => {
   const tx = db.transaction(sn, 'readwrite')
   tx.objectStore(sn).put(parsedValue)
@@ -1184,7 +1229,7 @@ await new Promise((resolve, reject) => {
 })
 db.close()
 return true
-`
+`;
   }
   return `
 const dbList = (indexedDB.databases ? await indexedDB.databases() : [])
@@ -1205,5 +1250,5 @@ await new Promise((resolve, reject) => {
 })
 db.close()
 return true
-`
+`;
 }

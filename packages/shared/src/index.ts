@@ -9,27 +9,31 @@
 
 /** 设备 → server 的消息类型 */
 export type DeviceMessage =
-  | { type: 'register'; device: DeviceInfo; /** 每次页面加载的唯一 token（server 区分 reload 与复制标签页） */ sessionToken?: string }
-  | { type: 'update-info'; device: Partial<DeviceInfo> & Pick<DeviceInfo, 'id'> }
-  | { type: 'log'; log: LogEntry }
-  | { type: 'log-repeat' }
-  | { type: 'network'; entry: NetworkEntry }
-  | { type: 'network-update'; seq: number; patch: Partial<NetworkEntry> }
-  | { type: 'ws-frame'; seq: number; frame: WsFrame }
-  | { type: 'ws-state'; seq: number; wsState: number }
-  | { type: 'sse-event'; seq: number; event: SseEvent }
-  | { type: 'error'; error: ErrorEntry }
-  | { type: 'snapshot'; snapshot: SnapshotData }
-  | { type: 'screen-frame'; frame: ScreenFrame }
-  | { type: 'screen-share-status'; status: ScreenShareStatus }
-  | { type: 'exec-result'; execId: string; result: ExecResult }
+  | {
+      type: "register";
+      device: DeviceInfo;
+      /** 每次页面加载的唯一 token（server 区分 reload 与复制标签页） */ sessionToken?: string;
+    }
+  | { type: "update-info"; device: Partial<DeviceInfo> & Pick<DeviceInfo, "id"> }
+  | { type: "log"; log: LogEntry }
+  | { type: "log-repeat" }
+  | { type: "network"; entry: NetworkEntry }
+  | { type: "network-update"; seq: number; patch: Partial<NetworkEntry> }
+  | { type: "ws-frame"; seq: number; frame: WsFrame }
+  | { type: "ws-state"; seq: number; wsState: number }
+  | { type: "sse-event"; seq: number; event: SseEvent }
+  | { type: "error"; error: ErrorEntry }
+  | { type: "snapshot"; snapshot: SnapshotData }
+  | { type: "screen-frame"; frame: ScreenFrame }
+  | { type: "screen-share-status"; status: ScreenShareStatus }
+  | { type: "exec-result"; execId: string; result: ExecResult }
   /** network entry 完整 body 回传（懒加载响应） */
-  | { type: 'network-body'; bodySeq: number; body: string | null }
-  | { type: 'storage-change'; storageType: 'local' | 'session'; key?: string; timestamp?: number }
-  | { type: 'dom-change'; changes: DomChangeData }
-  | { type: 'device-mouse'; mouse: MouseEventData }
+  | { type: "network-body"; bodySeq: number; body: string | null }
+  | { type: "storage-change"; storageType: "local" | "session"; key?: string; timestamp?: number }
+  | { type: "dom-change"; changes: DomChangeData }
+  | { type: "device-mouse"; mouse: MouseEventData }
   /** devtools 插件消息上行（backend → 控制台 frontend） */
-  | { type: 'devtools-relay'; plugin: string; payload: string | Record<string, unknown> }
+  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> };
 
 /**
  * 远端设备鼠标/触摸事件数据（实时同步用户操作到控制台）
@@ -39,13 +43,13 @@ export type DeviceMessage =
  */
 export interface MouseEventData {
   /** 事件类型 */
-  type: 'move' | 'down' | 'up' | 'click'
+  type: "move" | "down" | "up" | "click";
   /** 归一化 X 坐标（0~1，相对于视口宽度） */
-  x: number
+  x: number;
   /** 归一化 Y 坐标（0~1，相对于视口高度） */
-  y: number
+  y: number;
   /** 时间戳 */
-  t: number
+  t: number;
 }
 
 /**
@@ -56,74 +60,95 @@ export interface MouseEventData {
  */
 export interface DomChangeData {
   /** 变化的父元素 idx 列表（去重），控制台据此决定刷新哪些节点 */
-  parentIdxs: number[]
+  parentIdxs: number[];
   /** 本次变化的类型汇总（added/removed/attributes/text） */
-  kinds: Array<'added' | 'removed' | 'attributes' | 'text'>
+  kinds: Array<"added" | "removed" | "attributes" | "text">;
   /** 变化的时间戳 */
-  timestamp: number
+  timestamp: number;
 }
 
-export { SKILL_PROMPT_TEMPLATE, SKILL_SYSTEM_PROMPT_TEMPLATE, renderSkillPrompt, renderSkillSystemPrompt } from './skill-template.js'
+export {
+  SKILL_PROMPT_TEMPLATE,
+  SKILL_SYSTEM_PROMPT_TEMPLATE,
+  renderSkillPrompt,
+  renderSkillSystemPrompt,
+} from "./skill-template.js";
 
 /** server → 设备 的消息类型 */
 export type ServerToDeviceMessage =
-  | { type: 'exec'; execId: string; code: string }
+  | { type: "exec"; execId: string; code: string }
   /** 按需启停采集器：控制台打开对应面板时启用，关闭时停止，减少不必要的数据传输 */
-  | { type: 'set-watchers'; watchers: WatcherType[] }
+  | { type: "set-watchers"; watchers: WatcherType[] }
   /** 请求设备开始屏幕共享（用户侧弹出授权弹窗） */
-  | { type: 'start-screen-share' }
+  | { type: "start-screen-share" }
   /** 请求设备停止屏幕共享 */
-  | { type: 'stop-screen-share' }
+  | { type: "stop-screen-share" }
   /** 请求设备返回某个 network entry 的完整 body（懒加载） */
-  | { type: 'get-network-body'; bodySeq: number }
+  | { type: "get-network-body"; bodySeq: number }
   /** deviceId 已被另一个活着的标签页占用（复制标签页场景），设备需换 id 重新注册 */
-  | { type: 'device-id-conflict' }
+  | { type: "device-id-conflict" }
   /** devtools 插件消息透传（vue: SuperJSON 信封字符串 / react: {event,payload} 对象） */
-  | { type: 'devtools-relay'; plugin: string; payload: string | Record<string, unknown> }
+  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> };
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =
-  | { type: 'device-online'; device: DeviceInfo }
-  | { type: 'device-offline'; deviceId: string }
-  | { type: 'device-list'; devices: DeviceInfo[] }
+  | { type: "device-online"; device: DeviceInfo }
+  | { type: "device-offline"; deviceId: string }
+  | { type: "device-list"; devices: DeviceInfo[] }
   /** 设备页面 reload 重连（同 id 新 sessionToken）：devtools backend 已重建，控制台 devtools 面板需重新握手 */
-  | { type: 'device-reconnect'; deviceId: string }
-  | { type: 'log'; deviceId: string; log: LogEntry }
-  | { type: 'log-repeat'; deviceId: string }
-  | { type: 'network'; deviceId: string; entry: NetworkEntry }
-  | { type: 'network-update'; deviceId: string; seq: number; patch: Partial<NetworkEntry> }
-  | { type: 'ws-frame'; deviceId: string; seq: number; frame: WsFrame }
-  | { type: 'ws-state'; deviceId: string; seq: number; wsState: number }
-  | { type: 'sse-event'; deviceId: string; seq: number; event: SseEvent }
-  | { type: 'error'; deviceId: string; error: ErrorEntry }
-  | { type: 'screen-frame'; deviceId: string; frame: ScreenFrame }
-  | { type: 'screen-share-status'; deviceId: string; status: ScreenShareStatus }
-  | { type: 'storage-change'; deviceId: string; storageType: 'local' | 'session'; key?: string; timestamp?: number }
-  | { type: 'dom-change'; deviceId: string; changes: DomChangeData }
-  | { type: 'device-mouse'; deviceId: string; mouse: MouseEventData }
+  | { type: "device-reconnect"; deviceId: string }
+  | { type: "log"; deviceId: string; log: LogEntry }
+  | { type: "log-repeat"; deviceId: string }
+  | { type: "network"; deviceId: string; entry: NetworkEntry }
+  | { type: "network-update"; deviceId: string; seq: number; patch: Partial<NetworkEntry> }
+  | { type: "ws-frame"; deviceId: string; seq: number; frame: WsFrame }
+  | { type: "ws-state"; deviceId: string; seq: number; wsState: number }
+  | { type: "sse-event"; deviceId: string; seq: number; event: SseEvent }
+  | { type: "error"; deviceId: string; error: ErrorEntry }
+  | { type: "screen-frame"; deviceId: string; frame: ScreenFrame }
+  | { type: "screen-share-status"; deviceId: string; status: ScreenShareStatus }
+  | {
+      type: "storage-change";
+      deviceId: string;
+      storageType: "local" | "session";
+      key?: string;
+      timestamp?: number;
+    }
+  | { type: "dom-change"; deviceId: string; changes: DomChangeData }
+  | { type: "device-mouse"; deviceId: string; mouse: MouseEventData }
   /** 设备返回完整 body（懒加载响应） */
-  | { type: 'network-body'; deviceId: string; bodySeq: number; body: string | null }
+  | { type: "network-body"; deviceId: string; bodySeq: number; body: string | null }
   /** devtools backend RPC 消息透传（设备 → 控制台 frontend） */
-  | { type: 'devtools-relay'; deviceId: string; plugin: string; payload: string | Record<string, unknown> }
+  | {
+      type: "devtools-relay";
+      deviceId: string;
+      plugin: string;
+      payload: string | Record<string, unknown>;
+    }
   /** server → 控制台的心跳响应 */
-  | { type: 'pong' }
+  | { type: "pong" };
 
 /** 控制台 → server 的消息类型 */
 export type ConsoleMessage =
-  | { type: 'subscribe'; deviceId: string }
-  | { type: 'unsubscribe'; deviceId: string }
+  | { type: "subscribe"; deviceId: string }
+  | { type: "unsubscribe"; deviceId: string }
   /** 控制台通知 server 当前启用的 watcher（按需采集，减少不必要的数据传输） */
-  | { type: 'set-watchers'; deviceId: string; watchers: WatcherType[] }
+  | { type: "set-watchers"; deviceId: string; watchers: WatcherType[] }
   /** 控制台请求设备开始屏幕共享 */
-  | { type: 'start-screen-share'; deviceId: string }
+  | { type: "start-screen-share"; deviceId: string }
   /** 控制台请求设备停止屏幕共享 */
-  | { type: 'stop-screen-share'; deviceId: string }
+  | { type: "stop-screen-share"; deviceId: string }
   /** 控制台请求某个 network entry 的完整 body（懒加载） */
-  | { type: 'get-network-body'; deviceId: string; bodySeq: number }
+  | { type: "get-network-body"; deviceId: string; bodySeq: number }
   /** 控制台 devtools client 的 RPC 消息，透传给对应设备 */
-  | { type: 'devtools-relay'; deviceId: string; plugin: string; payload: string | Record<string, unknown> }
+  | {
+      type: "devtools-relay";
+      deviceId: string;
+      plugin: string;
+      payload: string | Record<string, unknown>;
+    }
   /** 控制台 → server 的应用层心跳（检测半开连接） */
-  | { type: 'ping' }
+  | { type: "ping" };
 
 /**
  * 可按需启停的采集器类型
@@ -132,38 +157,38 @@ export type ConsoleMessage =
  * - storage：Storage 面板打开时启用 storage-watcher
  * - dom：Element 面板打开时启用 dom-watcher
  */
-export type WatcherType = 'storage' | 'dom'
+export type WatcherType = "storage" | "dom";
 
 /** 设备元信息 */
 export interface DeviceInfo {
   /** 设备唯一标识（sdk 端生成，sessionStorage 持久化，保证同 tab 刷新不变） */
-  id: string
+  id: string;
   /** 所属项目 ID（鉴权模式下由 server 在连接时分配） */
-  projectId?: string
+  projectId?: string;
   /** 当前页面 URL */
-  url: string
+  url: string;
   /** 页面标题 */
-  title: string
+  title: string;
   /** 页面图标 URL（SDK 从 <link rel="icon"> 采集，兜底 /favicon.ico） */
-  icon?: string
+  icon?: string;
   /** User-Agent */
-  userAgent: string
+  userAgent: string;
   /** 视口宽度（移动端识别） */
-  viewportWidth: number
+  viewportWidth: number;
   /** 视口高度 */
-  viewportHeight: number
+  viewportHeight: number;
   /** 设备类型（mobile/tablet/desktop，基于 UA + 视口推断） */
-  deviceType: 'mobile' | 'tablet' | 'desktop'
+  deviceType: "mobile" | "tablet" | "desktop";
   /** 最近一次上报的错误数 */
-  errorCount: number
+  errorCount: number;
   /** 上线时间戳（ms） */
-  onlineAt: number
+  onlineAt: number;
   /** 自定义标签（多设备场景区分用，如 "生产环境" / "用户A"） */
-  tags: string[]
+  tags: string[];
   /** 自定义备注（一句话描述这台设备的身份） */
-  note?: string
+  note?: string;
   /** 页面检测到的前端框架（devtools 面板自动选中用，如 ["vue"] / ["react"] / ["vue","react"]） */
-  frameworks?: string[]
+  frameworks?: string[];
 }
 
 /**
@@ -174,29 +199,29 @@ export interface DeviceInfo {
  */
 export interface OfflineDeviceSummary {
   /** 设备 id */
-  id: string
+  id: string;
   /** 所属项目 ID */
-  projectId?: string
+  projectId?: string;
   /** 最后的页面 URL */
-  url: string
+  url: string;
   /** 最后的页面标题 */
-  title: string
+  title: string;
   /** 设备类型 */
-  deviceType: 'mobile' | 'tablet' | 'desktop'
+  deviceType: "mobile" | "tablet" | "desktop";
   /** 下线时刻的时间戳（ms） */
-  offlineAt: number
+  offlineAt: number;
   /** 上线时刻的时间戳（ms） */
-  onlineAt: number
+  onlineAt: number;
   /** 累计错误数（下线时的快照） */
-  errorCount: number
+  errorCount: number;
   /** 标签 */
-  tags: string[]
+  tags: string[];
 }
 
 /** console 日志条目 */
 export interface LogEntry {
   /** ISO 时间戳 */
-  timestamp: string
+  timestamp: string;
   /**
    * 日志级别/类型
    *
@@ -210,9 +235,22 @@ export interface LogEntry {
    * - dir：console.dir/dirxml（对象结构预览）
    * - clear：console.clear（前端收到后清空日志视图）
    */
-  type: 'info' | 'warn' | 'error' | 'debug' | 'table' | 'trace' | 'group' | 'groupEnd' | 'count' | 'time' | 'assert' | 'dir' | 'clear'
+  type:
+    | "info"
+    | "warn"
+    | "error"
+    | "debug"
+    | "table"
+    | "trace"
+    | "group"
+    | "groupEnd"
+    | "count"
+    | "time"
+    | "assert"
+    | "dir"
+    | "clear";
   /** 序列化后的消息文本（纯文本，不含样式信息，作为搜索/复制/AI 上下文的事实标准） */
-  message: string
+  message: string;
   /**
    * 带样式的文本段（仅当 console.log 使用了 %c 占位符时存在）
    *
@@ -222,7 +260,7 @@ export interface LogEntry {
    *
    * 前端渲染时有 styledSegments 则渲染 <span style>，否则降级纯文本 message。
    */
-  styledSegments?: { text: string; style?: string }[]
+  styledSegments?: { text: string; style?: string }[];
   /**
    * 连续重复次数（仅当 >1 时存在）
    *
@@ -230,119 +268,119 @@ export interface LogEntry {
    * 避免重复日志占满环形缓冲区、挤掉有价值的诊断日志。
    * 与 Chrome DevTools 的重复日志 ⓧN 行为一致。
    */
-  repeat?: number
+  repeat?: number;
 }
 
 /** WebSocket 帧（send/recv/event） */
 export interface WsFrame {
   /** ISO 时间戳 */
-  timestamp: string
+  timestamp: string;
   /** 方向：send 发出 / recv 收到 / event 连接事件（close/error） */
-  dir: 'send' | 'recv' | 'event'
+  dir: "send" | "recv" | "event";
   /** 帧数据（截断到 500 字符，二进制标记类型+大小） */
-  data: string
+  data: string;
 }
 
 /** SSE 事件（Server-Sent Events 流式推送的单条事件） */
 export interface SseEvent {
   /** ISO 时间戳 */
-  timestamp: string
+  timestamp: string;
   /** 事件类型（event: 字段的值，默认 'message'） */
-  event: string
+  event: string;
   /** 事件 ID（id: 字段的值，断线重连用） */
-  id?: string
+  id?: string;
   /** 事件数据（data: 字段的值，多行合并，不截断） */
-  data: string
+  data: string;
   /** 重连间隔 ms（retry: 字段的值，服务端建议的重连等待时间） */
-  retry?: number
+  retry?: number;
 }
 
 /** network 请求条目（HAR 风格，借鉴 PageSpy） */
 export interface NetworkEntry {
   /** 内部递增序号（环形缓冲区定位用） */
-  seq: number
+  seq: number;
   /** ISO 时间戳 */
-  timestamp: string
+  timestamp: string;
   /** 请求 URL */
-  url: string
+  url: string;
   /** HTTP 方法（WS 连接用 'WS'/'WSS'） */
-  method: string
+  method: string;
   /** 响应状态码（请求未完成时为 0；WS 连接用 readyState 0-3） */
-  status: number
+  status: number;
   /** 请求头（截断） */
-  reqHeaders?: Record<string, string>
+  reqHeaders?: Record<string, string>;
   /** 请求体摘要（前 500 字符，完整内容懒加载） */
-  reqBody?: string
+  reqBody?: string;
   /** 响应头（截断） */
-  resHeaders?: Record<string, string>
+  resHeaders?: Record<string, string>;
   /** 响应体摘要（前 500 字符，完整内容懒加载） */
-  resBody?: string
+  resBody?: string;
   /**
    * 响应体编码方式
    * - undefined：默认文本（resBody 是原始文本）
    * - 'base64'：二进制数据经 base64 编码（resBody 是 base64 字符串，用 resBodyMime 判断具体类型）
    * - 'info'：二进制但未读取内容（resBody 是描述信息如 "[Blob image/png 1234b]"）
    */
-  resBodyEncoding?: 'base64' | 'info'
+  resBodyEncoding?: "base64" | "info";
   /** 响应体 MIME 类型（resBodyEncoding='base64' 时有值，如 image/png） */
-  resBodyMime?: string
+  resBodyMime?: string;
   /** 响应体完整长度（字节数），用于控制台判断是否值得懒加载 */
-  resBodySize?: number
+  resBodySize?: number;
   /** 标记 body 已截断（控制台据此显示"加载完整内容"按钮） */
-  bodyTruncated?: boolean
+  bodyTruncated?: boolean;
   /** 耗时（ms） */
-  duration: number
+  duration: number;
   /** 是否出错 */
-  error?: string
+  error?: string;
   /** 标识这是 WebSocket 连接条目（普通 HTTP 请求无此字段） */
-  protocol?: 'ws'
+  protocol?: "ws";
   /** 请求类型：fetch（fetch API）/ xhr（XMLHttpRequest）/ ws（WebSocket）/ resource（<script>/<link>/等静态资源） */
-  kind?: 'fetch' | 'xhr' | 'ws' | 'resource'
+  kind?: "fetch" | "xhr" | "ws" | "resource";
   /** 资源 MIME 类型（仅 resource 类型，如 text/css/application/javascript） */
-  mimeType?: string
+  mimeType?: string;
   /** 资源体积（字节，仅 resource 类型） */
-  size?: number
+  size?: number;
   /** WebSocket readyState（0=CONNECTING/1=OPEN/2=CLOSING/3=CLOSED），仅 WS 条目 */
-  wsState?: number
+  wsState?: number;
   /** 帧时间线（send/recv/event），仅 WS 条目，上限 50 帧 FIFO */
-  frames?: WsFrame[]
+  frames?: WsFrame[];
   /**
    * 标识这是 SSE 连接条目（text/event-stream 流式响应）
    * SSE 连接在 fetch hook 中检测到后走流式 reader 路径
    */
-  sseState?: 'open' | 'closed'
+  sseState?: "open" | "closed";
   /** SSE 事件时间线，仅 SSE 条目，上限 50 条 FIFO */
-  events?: SseEvent[]
+  events?: SseEvent[];
 }
 
 /** 全局错误条目 */
 export interface ErrorEntry {
   /** ISO 时间戳 */
-  timestamp: string
+  timestamp: string;
   /** 错误消息 */
-  message: string
+  message: string;
   /** 错误堆栈 */
-  stack?: string
+  stack?: string;
   /** 来源文件（压缩后） */
-  source?: string
+  source?: string;
   /** 行号（压缩后） */
-  line?: number
+  line?: number;
   /** 列号（压缩后） */
-  col?: number
+  col?: number;
   /** source map 解析后的原始位置（若有） */
-  mapped?: SourceMapPosition
+  mapped?: SourceMapPosition;
 }
 
 /** source map 解析结果：压缩位置 → 原始源码位置 */
 export interface SourceMapPosition {
   /** 原始源文件路径 */
-  source: string
+  source: string;
   /** 原始行号（1-based） */
-  line: number
+  line: number;
   /** 原始列号（0-based） */
-  column: number
+  column: number;
   /** 符号名（若有） */
-  name?: string
+  name?: string;
 }
 
 /**
@@ -359,57 +397,72 @@ export interface SourceMapPosition {
 export interface SerializedValue {
   /** 值的类型标签 */
   type:
-    | 'string' | 'number' | 'boolean' | 'null' | 'undefined' | 'bigint'
-    | 'symbol' | 'function'
-    | 'array' | 'object'
-    | 'date' | 'regexp' | 'error' | 'map' | 'set'
-    | 'weakmap' | 'weakset' | 'promise'
-    | 'element' | 'textnode' | 'event'
-    | 'unknown'
+    | "string"
+    | "number"
+    | "boolean"
+    | "null"
+    | "undefined"
+    | "bigint"
+    | "symbol"
+    | "function"
+    | "array"
+    | "object"
+    | "date"
+    | "regexp"
+    | "error"
+    | "map"
+    | "set"
+    | "weakmap"
+    | "weakset"
+    | "promise"
+    | "element"
+    | "textnode"
+    | "event"
+    | "unknown";
   /** 预览文本（一行摘要，如 Object { a: 1 }、Array(3)、Error: msg） */
-  preview: string
+  preview: string;
   /** 原始值（string/number/boolean/bigint 直接用） */
-  value?: string | number | boolean
+  value?: string | number | boolean;
   /** 对象/Map 的属性列表（展开时渲染） */
-  properties?: SerializedProperty[]
+  properties?: SerializedProperty[];
   /** 数组的元素列表（展开时渲染） */
-  elements?: SerializedValue[]
+  elements?: SerializedValue[];
   /** 元素数量（数组/Map/Set，用于 preview 中显示长度） */
-  length?: number
+  length?: number;
   /** 构造函数名（如 HTMLDivElement、Headers、URL 等） */
-  constructorName?: string
+  constructorName?: string;
   /** 循环引用标记（同一对象多次出现时，第二次起用 { type:'object', refId:N } 替代完整展开） */
-  refId?: number
+  refId?: number;
 }
 
 /** 对象的一个属性 */
 export interface SerializedProperty {
   /** 属性名 */
-  key: string
+  key: string;
   /** 属性值 */
-  value: SerializedValue
+  value: SerializedValue;
   /** 是否是 getter（影响是否能深入展开） */
-  isGetter?: boolean
+  isGetter?: boolean;
   /** 是否是 Symbol key */
-  isSymbol?: boolean
+  isSymbol?: boolean;
   /** 是否来自原型链（非实例自有属性）。展示层据此把继承属性折叠进 [[Prototype]] 分组 */
-  inherited?: boolean
+  inherited?: boolean;
 }
 
 /** exec 在远程设备执行 JS 的结果 */
 export interface ExecResult {
   /** 是否执行成功 */
-  success: boolean
+  success: boolean;
   /** 序列化后的返回值（JSON 字符串，兼容旧消费方） */
-  result?: string
+  result?: string;
   /** 结构化序列化返回值（可交互对象树用） */
-  resultValue?: SerializedValue
+  resultValue?: SerializedValue;
   /** 错误信息 */
-  error?: string
+  error?: string;
   /** exec 期间产生的 console 日志（紧凑格式：[TYPE] message） */
-  logs?: string[]
+  logs?: string[];
   /** exec 后自动采集的页面快照文本 */
-  snapshotText?: string
+  snapshotText?: string;
 }
 
 /** 页面快照数据（compact 格式的结构化形态，移植 pilot snapshot） */
@@ -423,142 +476,142 @@ export interface ExecResult {
 /** 屏幕共享状态（设备 SDK → 控制台） */
 export type ScreenShareStatus =
   /** 控制台请求共享，设备端等待用户点击授权按钮 */
-  | 'awaiting-user-action'
+  | "awaiting-user-action"
   /** 用户已授权，正在推流 */
-  | 'sharing'
+  | "sharing"
   /** 用户拒绝授权 */
-  | 'denied'
+  | "denied"
   /** 共享已停止 */
-  | 'stopped'
+  | "stopped"
   /** 发生错误 */
-  | 'error'
+  | "error";
 
 export interface ScreenFrame {
   /** 是否为关键帧（完整画面） */
-  keyframe: boolean
+  keyframe: boolean;
   /** JPEG dataURL（关键帧=完整画面，增量帧=变化区域裁剪图） */
-  dataUrl: string
+  dataUrl: string;
   /** 帧序号（从 0 递增，控制台检测丢帧用） */
-  seq: number
+  seq: number;
   /** 画面宽度 px（帧的原始尺寸，不含缩放） */
-  width: number
+  width: number;
   /** 画面高度 px */
-  height: number
+  height: number;
   /** 增量帧：变化区域在画面中的 x 偏移（关键帧时为 0） */
-  dx: number
+  dx: number;
   /** 增量帧：变化区域在画面中的 y 偏移（关键帧时为 0） */
-  dy: number
+  dy: number;
   /** 增量帧：变化区域宽度（关键帧时等于 width） */
-  dw: number
+  dw: number;
   /** 增量帧：变化区域高度（关键帧时等于 height） */
-  dh: number
+  dh: number;
   /** 采集时间戳（ms） */
-  timestamp: number
+  timestamp: number;
 }
 
 export interface SnapshotData {
   /** ISO 时间戳 */
-  t: string
+  t: string;
   /** 页面 URL */
-  url: string
+  url: string;
   /** 页面标题 */
-  title: string
+  title: string;
   /** 视口宽度（px），诊断响应式/布局问题时让 AI 知道当前可视区域尺寸 */
-  viewportWidth: number
+  viewportWidth: number;
   /** 视口高度（px） */
-  viewportHeight: number
+  viewportHeight: number;
   /** 采集到的可见元素列表（已压缩） */
-  els: SnapshotElement[]
+  els: SnapshotElement[];
   /** 当前错误数 */
-  errors: number
+  errors: number;
   /** 最近几条错误消息 */
-  lastErrors?: string[]
+  lastErrors?: string[];
 }
 
 /** 快照中的单个元素 */
 export interface SnapshotElement {
   /** 标签名（小写） */
-  tag: string
+  tag: string;
   /** 稳定索引（跨快照复用，AI 可用它引用元素） */
-  idx: number
+  idx: number;
   /** id 属性 */
-  id?: string
+  id?: string;
   /** 文本内容 */
-  text?: string
+  text?: string;
   /** 是否禁用 */
-  disabled?: boolean
+  disabled?: boolean;
   /** 是否为当前聚焦元素（document.activeElement） */
-  focused?: boolean
+  focused?: boolean;
   /** 是否只读（input/textarea，值不可编辑但可聚焦） */
-  readOnly?: boolean
+  readOnly?: boolean;
   /** 是否必填（表单校验失败时 AI 据此判断缺哪个字段） */
-  required?: boolean
+  required?: boolean;
   /** checkbox 半选状态（全选列表的中间态） */
-  indeterminate?: boolean
+  indeterminate?: boolean;
   /** 是否选中（checkbox/radio） */
-  checked?: boolean
+  checked?: boolean;
   /** aria-disabled（自定义组件常用，按钮可能用此而非 disabled） */
-  ariaDisabled?: boolean
+  ariaDisabled?: boolean;
   /** aria-expanded（折叠/展开状态，菜单/手风琴等自定义组件） */
-  ariaExpanded?: boolean
+  ariaExpanded?: boolean;
   /** input 的值 */
-  value?: string
+  value?: string;
   /** placeholder */
-  placeholder?: string
+  placeholder?: string;
   /** select 的选项 */
-  options?: string[]
+  options?: string[];
   /** 状态标记（active/selected/checked 等，从 class 提取） */
-  state?: string
+  state?: string;
   /** aria-label */
-  aria?: string
+  aria?: string;
   /** 链接 href（相对路径） */
-  href?: string
+  href?: string;
   /** 元素所在的 iframe 标识（src 或 name，主文档元素无此字段） */
-  frame?: string
+  frame?: string;
   /** 元素相对视口的位置和尺寸（用于控制台侧渲染布局框图预览） */
-  rect?: { x: number; y: number; w: number; h: number }
+  rect?: { x: number; y: number; w: number; h: number };
   /** 关键视觉样式（控制台侧高保真预览用） */
   style?: {
     /** 背景色（rgba/hex，透明色不采集） */
-    bg?: string
+    bg?: string;
     /** 文字颜色 */
-    color?: string
+    color?: string;
     /** 字号 px */
-    fs?: number
+    fs?: number;
     /** 字重 */
-    fw?: string
+    fw?: string;
     /** 圆角 px */
-    radius?: number
+    radius?: number;
     /** 边框（简写，如 1px solid #e5e7eb） */
-    border?: string
+    border?: string;
     /** 文字对齐 */
-    align?: string
+    align?: string;
     /** 阴影（box-shadow 简写） */
-    shadow?: string
+    shadow?: string;
     /** 透明度（< 1 才采集） */
-    opacity?: number
+    opacity?: number;
     /** 内边距 px（上下左右一致时单个值） */
-    pad?: number
+    pad?: number;
     /** 行高（非 normal 时采集） */
-    lh?: number
+    lh?: number;
     /** 字间距 px（非 normal 才采集） */
-    lsp?: number
+    lsp?: number;
     /** 文字修饰（underline/line-through 等） */
-    tdecor?: string
+    tdecor?: string;
     /** 文字转换（uppercase/lowercase/capitalize） */
-    ttrans?: string
+    ttrans?: string;
     /** 文字溢出省略（ellipsis 时为 true） */
-    noWrap?: boolean
+    noWrap?: boolean;
     /** 背景渐变（linear-gradient 等 CSS 值，原样传递） */
-    gradient?: string
+    gradient?: string;
     /** 缩略图 dataURL（img 元素或 CSS background-image，压缩后 ~1-2KB） */
-    img?: string
+    img?: string;
     /** 背景图 dataURL（CSS background-image 采集，压缩后 ~1-2KB） */
-    bgImg?: string
+    bgImg?: string;
     /** 溢出模式（overflow-x/overflow-y 的简写，如 'auto auto'） */
-    overflow?: string
+    overflow?: string;
     /** 滚动位置 [scrollLeft, scrollTop]（可滚动容器才采集） */
-    scroll?: [number, number]
-  }
-  [k: string]: unknown
+    scroll?: [number, number];
+  };
+  [k: string]: unknown;
 }

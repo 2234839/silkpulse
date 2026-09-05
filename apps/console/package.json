@@ -12,6 +12,7 @@
   "dependencies": {
     "@silkpulse/renderer": "workspace:*",
     "@silkpulse/shared": "workspace:*",
+    "@vueuse/core": "catalog:",
     "vue-router": "catalog:"
   },
   "devDependencies": {

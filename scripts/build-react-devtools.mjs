@@ -22,14 +22,14 @@
  *   从 bundle 导出里拿 react/reactDOM 来 createRoot。
  */
 
-import { execSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { execSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const OUT_DIR = join(ROOT, 'plugins/react-devtools/assets')
-const TMP = join(ROOT, 'node_modules/.cache/build-react-devtools')
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT_DIR = join(ROOT, "plugins/react-devtools/assets");
+const TMP = join(ROOT, "node_modules/.cache/build-react-devtools");
 
 /** React 版本（frontend UI 自身用，与目标页 React 版本无关）
  *
@@ -38,29 +38,36 @@ const TMP = join(ROOT, 'node_modules/.cache/build-react-devtools')
  * stable React 19 会 console.error "The seed argument is not enabled outside
  * experimental channels." 并忽略 seed → 检查器永远显示首次选中的旧值（state 更新不生效）。
  */
-const REACT_VERSION = 'experimental'
+const REACT_VERSION = "experimental";
 /** react-devtools-inline 版本（7.x 对应 React DevTools 2025 版） */
-const INLINE_VERSION = '7.0.1'
+const INLINE_VERSION = "7.0.1";
 
 /** 是否跳过安装（本地已有缓存目录时提速） */
-const skipInstall = process.argv.includes('--skip-install')
+const skipInstall = process.argv.includes("--skip-install");
 
-console.log(`[1/4] 准备构建环境 → ${TMP}`)
-mkdirSync(TMP, { recursive: true })
-if (!skipInstall || !existsSync(join(TMP, 'node_modules/react-devtools-inline'))) {
-  if (!existsSync(join(TMP, 'package.json'))) {
-    writeFileSync(join(TMP, 'package.json'), JSON.stringify({ name: 'rd-build', private: true }, null, 2))
+console.log(`[1/4] 准备构建环境 → ${TMP}`);
+mkdirSync(TMP, { recursive: true });
+if (!skipInstall || !existsSync(join(TMP, "node_modules/react-devtools-inline"))) {
+  if (!existsSync(join(TMP, "package.json"))) {
+    writeFileSync(
+      join(TMP, "package.json"),
+      JSON.stringify({ name: "rd-build", private: true }, null, 2),
+    );
   }
-  console.log(`      安装 react@${REACT_VERSION} react-dom@${REACT_VERSION} react-is@${REACT_VERSION} react-devtools-inline@${INLINE_VERSION} esbuild`)
+  console.log(
+    `      安装 react@${REACT_VERSION} react-dom@${REACT_VERSION} react-is@${REACT_VERSION} react-devtools-inline@${INLINE_VERSION} esbuild`,
+  );
   execSync(
     `npm install --no-audit --no-fund react@${REACT_VERSION} react-dom@${REACT_VERSION} react-is@${REACT_VERSION} react-devtools-inline@${INLINE_VERSION} esbuild@latest`,
-    { cwd: TMP, stdio: 'inherit' },
-  )
+    { cwd: TMP, stdio: "inherit" },
+  );
 }
 
-console.log('[2/4] 写 entry wrapper（frontend：导出 react/react-dom 供宿主渲染）')
-const feEntry = join(TMP, 'fe-entry.js')
-writeFileSync(feEntry, `
+console.log("[2/4] 写 entry wrapper（frontend：导出 react/react-dom 供宿主渲染）");
+const feEntry = join(TMP, "fe-entry.js");
+writeFileSync(
+  feEntry,
+  `
 const react = require('react')
 const reactDOM = require('react-dom')
 const reactDOMClient = require('react-dom/client')
@@ -89,28 +96,29 @@ module.exports = frontend
 module.exports.react = react
 module.exports.reactDOM = reactDOM
 module.exports.reactDOMClient = reactDOMClient
-`)
+`,
+);
 
-console.log('[3/4] esbuild 打包 frontend（IIFE）')
-rmSync(OUT_DIR, { recursive: true, force: true })
-mkdirSync(OUT_DIR, { recursive: true })
+console.log("[3/4] esbuild 打包 frontend（IIFE）");
+rmSync(OUT_DIR, { recursive: true, force: true });
+mkdirSync(OUT_DIR, { recursive: true });
 execSync(
-  `node ${join(TMP, 'node_modules/esbuild/bin/esbuild')} ${feEntry}` +
-    ' --bundle --format=iife --global-name=ReactDevToolsFrontend' +
-    ` --outfile=${join(OUT_DIR, 'frontend.bundle.js')}` +
+  `node ${join(TMP, "node_modules/esbuild/bin/esbuild")} ${feEntry}` +
+    " --bundle --format=iife --global-name=ReactDevToolsFrontend" +
+    ` --outfile=${join(OUT_DIR, "frontend.bundle.js")}` +
     ` --define:process.env.NODE_ENV='"development"'`,
-  { stdio: 'inherit' },
-)
+  { stdio: "inherit" },
+);
 
-console.log('[4/4] esbuild 打包 backend（IIFE，SDK 按需 fetch）')
-const backendOut = join(OUT_DIR, 'backend.bundle.js')
+console.log("[4/4] esbuild 打包 backend（IIFE，SDK 按需 fetch）");
+const backendOut = join(OUT_DIR, "backend.bundle.js");
 execSync(
-  `node ${join(TMP, 'node_modules/esbuild/bin/esbuild')} ${join(TMP, 'node_modules/react-devtools-inline/dist/backend.js')}` +
-    ' --bundle --format=iife --global-name=ReactDevToolsBackend' +
+  `node ${join(TMP, "node_modules/esbuild/bin/esbuild")} ${join(TMP, "node_modules/react-devtools-inline/dist/backend.js")}` +
+    " --bundle --format=iife --global-name=ReactDevToolsBackend" +
     ` --outfile=${backendOut}` +
     ` --define:process.env.NODE_ENV='"development"'`,
-  { stdio: 'inherit' },
-)
+  { stdio: "inherit" },
+);
 
 /**
  * SilkPulse patch：后注入页面的 hooks inspect 降级
@@ -128,39 +136,43 @@ execSync(
  * 先注入场景（script 标签，生产主路径）renderer 自带 currentDispatcherRef，
  * 不受影响。
  */
-const HOOKS_ANCHOR = 'return inspectHooksOfFiber(fiber, getDispatcherRef(renderer));'
+const HOOKS_ANCHOR = "return inspectHooksOfFiber(fiber, getDispatcherRef(renderer));";
 const HOOKS_PATCH = [
-  'var __silkpulseDispatcherRef = getDispatcherRef(renderer);',
-  '// SilkPulse: 合成 renderer（后注入）无 currentDispatcherRef，重放组件必报 #321，降级为无 hooks',
-  'if (__silkpulseDispatcherRef === void 0) {',
-  '  return null;',
-  '}',
-  'return inspectHooksOfFiber(fiber, __silkpulseDispatcherRef);',
-].join('\n')
-const backendSrc = readFileSync(backendOut, 'utf8')
-const anchorCount = backendSrc.split(HOOKS_ANCHOR).length - 1
+  "var __silkpulseDispatcherRef = getDispatcherRef(renderer);",
+  "// SilkPulse: 合成 renderer（后注入）无 currentDispatcherRef，重放组件必报 #321，降级为无 hooks",
+  "if (__silkpulseDispatcherRef === void 0) {",
+  "  return null;",
+  "}",
+  "return inspectHooksOfFiber(fiber, __silkpulseDispatcherRef);",
+].join("\n");
+const backendSrc = readFileSync(backendOut, "utf8");
+const anchorCount = backendSrc.split(HOOKS_ANCHOR).length - 1;
 if (anchorCount !== 1) {
-  throw new Error(`backend patch 锚点数量异常（期望 1，实际 ${anchorCount}），请检查 react-devtools-inline 版本变化`)
+  throw new Error(
+    `backend patch 锚点数量异常（期望 1，实际 ${anchorCount}），请检查 react-devtools-inline 版本变化`,
+  );
 }
-writeFileSync(backendOut, backendSrc.replace(HOOKS_ANCHOR, HOOKS_PATCH))
-console.log('      backend patch 已应用（hooks dispatcher 降级）')
+writeFileSync(backendOut, backendSrc.replace(HOOKS_ANCHOR, HOOKS_PATCH));
+console.log("      backend patch 已应用（hooks dispatcher 降级）");
 
 /** 记录版本信息（同 vue-devtools 的 version.json 格式） */
 writeFileSync(
-  join(OUT_DIR, '..', 'version.json'),
+  join(OUT_DIR, "..", "version.json"),
   JSON.stringify(
     {
-      plugin: 'react',
+      plugin: "react",
       reactDevtoolsInline: INLINE_VERSION,
       react: REACT_VERSION,
       builtAt: new Date().toISOString(),
-      source: 'react-devtools-inline dist + esbuild IIFE（scripts/build-react-devtools.mjs）',
+      source: "react-devtools-inline dist + esbuild IIFE（scripts/build-react-devtools.mjs）",
     },
     null,
     2,
-  ) + '\n',
-)
+  ) + "\n",
+);
 
-const feSize = (readFileSync(join(OUT_DIR, 'frontend.bundle.js')).length / 1024 / 1024).toFixed(2)
-const beSize = (readFileSync(join(OUT_DIR, 'backend.bundle.js')).length / 1024).toFixed(0)
-console.log(`\n✅ 构建完成：frontend ${feSize}MB / backend ${beSize}KB → plugins/react-devtools/assets/`)
+const feSize = (readFileSync(join(OUT_DIR, "frontend.bundle.js")).length / 1024 / 1024).toFixed(2);
+const beSize = (readFileSync(join(OUT_DIR, "backend.bundle.js")).length / 1024).toFixed(0);
+console.log(
+  `\n✅ 构建完成：frontend ${feSize}MB / backend ${beSize}KB → plugins/react-devtools/assets/`,
+);

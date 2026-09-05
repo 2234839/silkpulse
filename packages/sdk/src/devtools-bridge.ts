@@ -18,17 +18,22 @@
  * - client SPA 检测 self !== top 自动选 iframe preset，与我们的 Console 桥天然匹配
  */
 
-import { initDevTools, createRpcServer, devtoolsContext, DevToolsContextHookKeys } from '@vue/devtools-kit'
-import { functions as devtoolsFunctions } from '@vue/devtools-core'
-import SuperJSON from 'superjson'
-import { send } from './ws-client.js'
-import { registerServerMessageHandler } from './message-router.js'
+import {
+  initDevTools,
+  createRpcServer,
+  devtoolsContext,
+  DevToolsContextHookKeys,
+} from "@vue/devtools-kit";
+import { functions as devtoolsFunctions } from "@vue/devtools-core";
+import SuperJSON from "superjson";
+import { send } from "./ws-client.js";
+import { registerServerMessageHandler } from "./message-router.js";
 
 /** 与官方 iframe channel 一致的消息信封 key */
-const IFRAME_MESSAGING_EVENT_KEY = '__devtools-kit-iframe-messaging-event-key__'
+const IFRAME_MESSAGING_EVENT_KEY = "__devtools-kit-iframe-messaging-event-key__";
 
 /** devtools 桥是否已初始化（防止 SDK 重复注入时双重初始化） */
-let bridgeInitialized = false
+let bridgeInitialized = false;
 
 /**
  * Agent DevTools 能力用：拿 devtools-core 的 RPC 函数集（本地直调，不走网络）
@@ -36,12 +41,17 @@ let bridgeInitialized = false
  * getInspectorTree / getInspectorState / editInspectorState 等读写方法
  * 与 createRpcServer 注册的实现是同一份。页面无 Vue 应用时返回 null。
  */
-export function getVueDevToolsFunctions(): Record<string, (...args: unknown[]) => Promise<unknown>> | null {
-  const target = window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[]; devtools?: unknown } }
-  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__
+export function getVueDevToolsFunctions(): Record<
+  string,
+  (...args: unknown[]) => Promise<unknown>
+> | null {
+  const target = window as unknown as {
+    __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[]; devtools?: unknown };
+  };
+  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__;
   /** 无 app 注册 = 页面没有 Vue 应用（或尚未创建） */
-  if (!hook?.apps?.length) return null
-  return devtoolsFunctions as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+  if (!hook?.apps?.length) return null;
+  return devtoolsFunctions as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
 }
 
 /**
@@ -60,31 +70,34 @@ export function getVueDevToolsFunctions(): Record<string, (...args: unknown[]) =
  */
 function recoverExistingVueApps(): void {
   const target = window as unknown as {
-    __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[]; emit?: (event: string, ...args: unknown[]) => void }
-  }
-  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__
-  if (!hook?.emit) return
+    __VUE_DEVTOOLS_GLOBAL_HOOK__?: {
+      apps?: unknown[];
+      emit?: (event: string, ...args: unknown[]) => void;
+    };
+  };
+  const hook = target.__VUE_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook?.emit) return;
 
   /** Vue3 Fragment/Text/Comment/Static 的 type 符号值（与 runtime-core vnode.ts 一致） */
   const vueTypes = {
-    Fragment: Symbol.for('v-fgt'),
-    Text: Symbol.for('v-txt'),
-    Comment: Symbol.for('v-cmt'),
-    Static: Symbol.for('v-stc'),
-  }
+    Fragment: Symbol.for("v-fgt"),
+    Text: Symbol.for("v-txt"),
+    Comment: Symbol.for("v-cmt"),
+    Static: Symbol.for("v-stc"),
+  };
 
   /** 全 DOM 扫描根容器（__vue_app__ 挂在 mount 容器上，开销可忽略：
    *  未注册 app 时短路在 includes 检查，无副作用） */
-  const seen = new Set<unknown>()
-  for (const el of document.querySelectorAll('*')) {
-    const app = (el as unknown as { __vue_app__?: unknown }).__vue_app__
-    if (!app || seen.has(app)) continue
-    seen.add(app)
+  const seen = new Set<unknown>();
+  for (const el of document.querySelectorAll("*")) {
+    const app = (el as unknown as { __vue_app__?: unknown }).__vue_app__;
+    if (!app || seen.has(app)) continue;
+    seen.add(app);
     /** 已注册过（正常时序注入，或官方 hook 自带）的不重复注册 */
-    if (hook.apps?.includes(app)) continue
-    const appObj = app as { version?: string }
+    if (hook.apps?.includes(app)) continue;
+    const appObj = app as { version?: string };
     try {
-      hook.emit('app:init', app, appObj.version ?? '3', vueTypes)
+      hook.emit("app:init", app, appObj.version ?? "3", vueTypes);
     } catch {
       /** 单个 app 恢复失败不阻塞其余 */
     }
@@ -98,35 +111,32 @@ function recoverExistingVueApps(): void {
  * 天然早于业务代码的 createApp）。
  */
 export function initVueDevToolsBridge(): void {
-  if (bridgeInitialized) return
-  bridgeInitialized = true
+  if (bridgeInitialized) return;
+  bridgeInitialized = true;
 
   /** RPC server 的 on 回调集合（channel.on 每次调用追加一个 handler） */
-  const messageHandlers: Array<(data: unknown) => void> = []
+  const messageHandlers: Array<(data: unknown) => void> = [];
 
   /** 用官方完整 RPC 函数集（组件树/状态/inspector/路由等 40+ 个方法）注册 server */
-  createRpcServer(
-    devtoolsFunctions as Record<string, unknown>,
-    {
-      channel: {
-        /** RPC server 要发消息 → 包上官方信封走 WS（用标准 SuperJSON，与 client SPA 的 channel 格式一致） */
-        post: (data) => {
-          const payload = SuperJSON.stringify({ event: IFRAME_MESSAGING_EVENT_KEY, data })
-          send({
-            type: 'devtools-relay',
-            plugin: 'vue',
-            payload,
-          })
-        },
-        on: (handler) => {
-          messageHandlers.push(handler)
-        },
+  createRpcServer(devtoolsFunctions as Record<string, unknown>, {
+    channel: {
+      /** RPC server 要发消息 → 包上官方信封走 WS（用标准 SuperJSON，与 client SPA 的 channel 格式一致） */
+      post: (data) => {
+        const payload = SuperJSON.stringify({ event: IFRAME_MESSAGING_EVENT_KEY, data });
+        send({
+          type: "devtools-relay",
+          plugin: "vue",
+          payload,
+        });
       },
-    }
-  )
+      on: (handler) => {
+        messageHandlers.push(handler);
+      },
+    },
+  });
 
   /** initDevTools 创建 __VUE_DEVTOOLS_GLOBAL_HOOK__，Vue app 创建时自动注册并回放事件 */
-  initDevTools()
+  initDevTools();
 
   /** 告知 kit 已有 client 在监听：内部会 toggleHighPerfMode(false)。
    *  highPerf 开着时 kit 的 debounceSendInspectorTree/State 开头就短路，
@@ -134,40 +144,42 @@ export function initVueDevToolsBridge(): void {
    *  官方 client 检测到面板可见时也会调同样的 RPC，这里后端侧直接补上。
    *  （initDevToolsServerListener 不在此调：面板 client mount 时会经 RPC
    *  自己调，backend 再调一次会双注册 → 每条广播双发） */
-  ;(devtoolsFunctions as unknown as {
-    initDevToolsServerListener: () => void
-    updateDevToolsClientDetected: (params: Record<string, boolean>) => void
-  }).updateDevToolsClientDetected({ iframe: true })
+  (
+    devtoolsFunctions as unknown as {
+      initDevToolsServerListener: () => void;
+      updateDevToolsClientDetected: (params: Record<string, boolean>) => void;
+    }
+  ).updateDevToolsClientDetected({ iframe: true });
 
   /** DOM 变化 → 自动广播（自动更新），见 setupDomChangeAutoRefresh 注释 */
-  setupDomChangeAutoRefresh()
+  setupDomChangeAutoRefresh();
 
   /** 后注入兜底：页面已有 Vue app（prod 构建不发事件）时补注册 */
-  recoverExistingVueApps()
+  recoverExistingVueApps();
 
   /** 定期补扫：后注入 + 后续动态 mount 的 app（SPA 路由级 createApp、延迟挂载的微前端子应用）
    *  轻量兜底，仅补漏——正常时序下 hook 的事件驱动注册是主路径。
    *  findRegistered 回调跳过已注册 app，扫全部元素开销极低（querySelectorAll + 属性检查） */
-  setInterval(recoverExistingVueApps, 5000)
+  setInterval(recoverExistingVueApps, 5000);
 
   /** 监听 server 转发的控制台 RPC 消息，解信封后交给 RPC server；
    *  另识别控制台「刷新」专用指令（非 SuperJSON 信封）触发原地拉新 */
   registerServerMessageHandler((msg) => {
-    if (msg.type !== 'devtools-relay' || msg.plugin !== 'vue') return
-    if (typeof msg.payload !== 'string') return
+    if (msg.type !== "devtools-relay" || msg.plugin !== "vue") return;
+    if (typeof msg.payload !== "string") return;
     /** 「刷新」指令：触发 backend 广播树+状态更新（client 原地刷新，保留 UI 状态） */
-    if (msg.payload === '__silkpulse_refresh__') {
-      broadcastInspectorUpdate()
-      return
+    if (msg.payload === "__silkpulse_refresh__") {
+      broadcastInspectorUpdate();
+      return;
     }
     try {
-      const parsed = SuperJSON.parse(msg.payload) as { event?: string; data?: unknown }
-      if (parsed?.event !== IFRAME_MESSAGING_EVENT_KEY) return
-      for (const handler of messageHandlers) handler(parsed.data)
+      const parsed = SuperJSON.parse(msg.payload) as { event?: string; data?: unknown };
+      if (parsed?.event !== IFRAME_MESSAGING_EVENT_KEY) return;
+      for (const handler of messageHandlers) handler(parsed.data);
     } catch {
       /** 非 SuperJSON 格式，忽略 */
     }
-  })
+  });
 }
 
 /**
@@ -194,63 +206,69 @@ export function initVueDevToolsBridge(): void {
  * attributes——动画/样式高频刷 class 不值得拉新。无 Vue app 时
  * broadcastInspectorUpdate 开头静默返回，observer 回调只剩一个防抖 timer。
  */
-const AUTO_REFRESH_DEBOUNCE_MS = 300
-const AUTO_REFRESH_THROTTLE_MS = 2000
+const AUTO_REFRESH_DEBOUNCE_MS = 300;
+const AUTO_REFRESH_THROTTLE_MS = 2000;
 
 function setupDomChangeAutoRefresh(): void {
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined
-  let lastBroadcastAt = 0
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastBroadcastAt = 0;
 
   function trigger(): void {
-    lastBroadcastAt = Date.now()
-    broadcastInspectorUpdate()
+    lastBroadcastAt = Date.now();
+    broadcastInspectorUpdate();
   }
 
   const observer = new MutationObserver(() => {
-    if (debounceTimer) clearTimeout(debounceTimer)
+    if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const sinceLast = Date.now() - lastBroadcastAt
+      const sinceLast = Date.now() - lastBroadcastAt;
       if (sinceLast < AUTO_REFRESH_THROTTLE_MS) {
         /** 节流窗口内：推迟到窗口结束再触发一次 */
-        debounceTimer = setTimeout(trigger, AUTO_REFRESH_THROTTLE_MS - sinceLast)
-        return
+        debounceTimer = setTimeout(trigger, AUTO_REFRESH_THROTTLE_MS - sinceLast);
+        return;
       }
-      trigger()
-    }, AUTO_REFRESH_DEBOUNCE_MS)
-  })
+      trigger();
+    }, AUTO_REFRESH_DEBOUNCE_MS);
+  });
 
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
     characterData: true,
-  })
+  });
 }
 
 /** SEND_INSPECTOR_TREE / SEND_INSPECTOR_STATE 事件的 payload 形状（kit 内部 components 插件消费） */
 interface SendInspectorTreePayload {
-  inspectorId: string
-  plugin: { descriptor: { id: string; label: string; app: unknown }; setupFn: () => Record<string, never> }
+  inspectorId: string;
+  plugin: {
+    descriptor: { id: string; label: string; app: unknown };
+    setupFn: () => Record<string, never>;
+  };
 }
 
 function broadcastInspectorUpdate(): void {
-  const hook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } }).__VUE_DEVTOOLS_GLOBAL_HOOK__
-  if (!hook?.apps?.length) return
-  const hooks = devtoolsContext.hooks
+  const hook = (window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } })
+    .__VUE_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook?.apps?.length) return;
+  const hooks = devtoolsContext.hooks;
   /** plugin 形状仿 kit 内部 createDevToolsApi 的调用（descriptor.app 在多 app
    *  场景做匹配，用第一个注册的 app） */
   const payload: SendInspectorTreePayload = {
-    inspectorId: 'components',
-    plugin: { descriptor: { id: 'components', label: 'Components', app: hook.apps[0] }, setupFn: () => ({}) },
-  }
-  const call = hooks.callHook as (event: string, payload: unknown) => void
+    inspectorId: "components",
+    plugin: {
+      descriptor: { id: "components", label: "Components", app: hook.apps[0] },
+      setupFn: () => ({}),
+    },
+  };
+  const call = hooks.callHook as (event: string, payload: unknown) => void;
   /** ① 树：ComponentWalker 现场遍历，同时通过 mark() 把组件写入 instanceMap */
-  call(DevToolsContextHookKeys.SEND_INSPECTOR_TREE, payload)
+  call(DevToolsContextHookKeys.SEND_INSPECTOR_TREE, payload);
   /** ② 状态：读 inspector.selectedNodeId 重抓该组件数据。必须等 ① 的遍历
    *  完成——后注入场景 instanceMap 初始只有 root，selectedNodeId 指向的
    *  组件要靠 ① 的 mark() 填充后才能被 getComponentInstance 取到。
    *  ①② 各有 120ms debounce，间隔 300ms 足够两者都落地 */
   setTimeout(() => {
-    call(DevToolsContextHookKeys.SEND_INSPECTOR_STATE, payload)
-  }, 300)
+    call(DevToolsContextHookKeys.SEND_INSPECTOR_STATE, payload);
+  }, 300);
 }
-

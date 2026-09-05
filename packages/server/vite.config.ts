@@ -48,16 +48,14 @@ function uwsNativePlugin(): Plugin {
 
 export default defineConfig({
   pack: {
-    dts: {
-      tsgo: true,
-    },
+    dts: false,
     /** 不让 vp pack 自动管理 exports —— server 有库入口和 bin 入口，手动管理更稳 */
     exports: false,
     deps: {
       /** uWebSockets.js 加入 alwaysBundle 才能让下方插件拦截到 resolveId：
        *  否则它在 package.json dependencies 里，会被 tsdown 的 DepsPlugin
        *  先一步判为 external，用户插件的 resolveId 根本轮不到 */
-      alwaysBundle: ['@silkpulse/feature-detect', '@silkpulse/shared', 'uWebSockets.js'],
+      alwaysBundle: ["@silkpulse/feature-detect", "@silkpulse/shared", "uWebSockets.js"],
     },
     /** uWS 的 import 被上面的插件替换为同目录 .node 加载，且二进制随产物 emit */
     plugins: [uwsNativePlugin()],

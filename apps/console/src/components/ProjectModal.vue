@@ -219,10 +219,9 @@ defineExpose({ projects, loadProjects });
             <div class="flex items-center gap-2">
               <code
                 class="flex-1 px-2 py-1 text-xs bg-input rounded font-mono break-all text-primary"
-                ><SecretText
-                  v-if="!createdApiKey.startsWith('✓')"
-                  :text="createdApiKey"
-                />{{ createdApiKey.startsWith('✓') ? createdApiKey : '' }}</code
+                ><SecretText v-if="!createdApiKey.startsWith('✓')" :text="createdApiKey" />{{
+                  createdApiKey.startsWith("✓") ? createdApiKey : ""
+                }}</code
               >
               <button
                 v-if="!createdApiKey.startsWith('✓')"
@@ -258,7 +257,11 @@ defineExpose({ projects, loadProjects });
                 <span
                   v-if="p.guest"
                   class="ml-1 px-1.5 py-0.5 text-[10px] rounded font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
-                  :title="p.expiresAt ? `${new Date(p.expiresAt).toLocaleString()}自动销毁` : '最长存活 5 天'"
+                  :title="
+                    p.expiresAt
+                      ? `${new Date(p.expiresAt).toLocaleString()}自动销毁`
+                      : '最长存活 5 天'
+                  "
                   >🔑 游客 · {{ p.expiresAt ? `剩 ${remainDays(p.expiresAt)} 天` : "5 天限" }}</span
                 >
                 <span class="ml-1 text-[10px] text-faint">{{

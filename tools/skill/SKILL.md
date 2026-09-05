@@ -8,6 +8,7 @@ description: 远程设备调试器 —— 查看、诊断、操作用户在远�
 ## 何时使用
 
 当用户需要调试**无法直接打开 DevTools** 的网页时：
+
 - 线上 H5 页面出了问题（线上环境，非本地 dev server）
 - 用户的手机/平板上的页面
 - 小程序 webview / 混合 App 的内嵌页面
@@ -81,6 +82,7 @@ __silkpulse_click(5)
 __silkpulse_setValue(3, 'test@example.com')
 await __silkpulse_wait(500)
 return document.querySelector('#result')?.textContent
+
 ```
 
 **辅助函数**（exec 代码中可直接用）：
@@ -104,14 +106,19 @@ return document.querySelector('#result')?.textContent
 snapshot 是 token 高效的 compact 文本，每行一个元素：
 
 ```
+
 # url: https://example.com/shop
+
 # title: 商品页
+
 # viewport: 375×667
-button #5 text=打招呼            ← 可点击的按钮，idx=5
-input #4 #name-input ph:输入名字  ← 输入框，idx=4，有 placeholder
-select #9 #city-select check=bj:北京 <bj:北京|sh:上海|gz:广州>  ← 下拉框（value:text 格式，setValue 用 value）
-input #10 #agree type:checkbox check 同意条款     ← 勾选框（已选中，setValue(idx,'false') 取消）
-input #11 type:radio name:plan 专业版              ← 单选框（setValue(idx,'pro') 选中，同组自动互斥）
+
+button #5 text=打招呼 ← 可点击的按钮，idx=5
+input #4 #name-input ph:输入名字 ← 输入框，idx=4，有 placeholder
+select #9 #city-select check=bj:北京 <bj:北京|sh:上海|gz:广州> ← 下拉框（value:text 格式，setValue 用 value）
+input #10 #agree type:checkbox check 同意条款 ← 勾选框（已选中，setValue(idx,'false') 取消）
+input #11 type:radio name:plan 专业版 ← 单选框（setValue(idx,'pro') 选中，同组自动互斥）
+
 ```
 
 - `#数字` 是稳定 idx，跨快照不变，供 `__silkpulse_click(idx)` 使用
@@ -124,3 +131,4 @@ input #11 type:radio name:plan 专业版              ← 单选框（setValue(i
 - `SILKPULSE_SERVER` 环境变量指定 server 地址（默认 `http://localhost:8080`）
 - server 启动：`pnpm start`（或 `node packages/server/dist/bin/silkpulse.mjs --port 8080`）
 - SDK 注入：目标页面加 `<script src="http://<server>/sdk.js" data-server="http://<server>"></script>`
+```

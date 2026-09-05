@@ -1,28 +1,28 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <title>Vue 响应式变动 - DevTools 实时性测试页</title>
-  <script src="/vendor/vue.global.js"></script>
-</head>
-<body>
-  <h1>Vue 响应式变动页面</h1>
-  <div id="app"></div>
-  <script>
-    const { createApp, ref, computed } = Vue
-    const App = {
-      setup() {
-        const count = ref(0)
-        const ticker = ref('t-0')
-        /** 每 800ms 数据变动——验证 DevTools 面板实时刷新 */
-        setInterval(() => {
-          count.value++
-          ticker.value = 't-' + count.value
-        }, 800)
-        const doubled = computed(() => count.value * 2)
-        return { count, ticker, doubled }
-      },
-      template: `
+  <head>
+    <meta charset="UTF-8" />
+    <title>Vue 响应式变动 - DevTools 实时性测试页</title>
+    <script src="/vendor/vue.global.js"></script>
+  </head>
+  <body>
+    <h1>Vue 响应式变动页面</h1>
+    <div id="app"></div>
+    <script>
+      const { createApp, ref, computed } = Vue;
+      const App = {
+        setup() {
+          const count = ref(0);
+          const ticker = ref("t-0");
+          /** 每 800ms 数据变动——验证 DevTools 面板实时刷新 */
+          setInterval(() => {
+            count.value++;
+            ticker.value = "t-" + count.value;
+          }, 800);
+          const doubled = computed(() => count.value * 2);
+          return { count, ticker, doubled };
+        },
+        template: `
         <div class="app">
           <div class="counter">{{ count }}</div>
           <div class="ticker">{{ ticker }}</div>
@@ -30,9 +30,9 @@
           <button id="inc-btn" @click="count++">+1</button>
         </div>
       `,
-    }
-    window.__TEST_PAGE_READY__ = true
-    createApp(App).mount('#app')
-  </script>
-</body>
+      };
+      window.__TEST_PAGE_READY__ = true;
+      createApp(App).mount("#app");
+    </script>
+  </body>
 </html>

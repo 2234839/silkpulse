@@ -6,10 +6,10 @@
  * 模块通过 registerServerMessageHandler 挂自己的监听，互不干扰。
  */
 
-import type { ServerToDeviceMessage } from '@silkpulse/shared'
+import type { ServerToDeviceMessage } from "@silkpulse/shared";
 
 /** 扩展监听器集合 */
-const handlers: Array<(msg: ServerToDeviceMessage) => void> = []
+const handlers: Array<(msg: ServerToDeviceMessage) => void> = [];
 
 /**
  * 注册扩展监听器（devtools-bridge 等模块用）
@@ -17,7 +17,7 @@ const handlers: Array<(msg: ServerToDeviceMessage) => void> = []
  * ws-client.onMessage 的主 handler 会在分发前调用这些监听器。
  */
 export function registerServerMessageHandler(handler: (msg: ServerToDeviceMessage) => void): void {
-  handlers.push(handler)
+  handlers.push(handler);
 }
 
 /**
@@ -26,7 +26,7 @@ export function registerServerMessageHandler(handler: (msg: ServerToDeviceMessag
 export function dispatchServerMessage(msg: ServerToDeviceMessage): void {
   for (const handler of handlers) {
     try {
-      handler(msg)
+      handler(msg);
     } catch {
       /** 单个监听器异常不影响其他监听器和主链路 */
     }

@@ -7,22 +7,23 @@
  * - 保留：元素过滤、连续同类合并、稳定 idx、token 友好的单行格式
  */
 
-import type { SnapshotData, SnapshotElement } from '@silkpulse/shared'
+import type { SnapshotData, SnapshotElement } from "@silkpulse/shared";
 
 /** compact 过滤：保留交互元素、标题、有 id 的元素、含文本的内容元素 */
 function filterCompact(data: SnapshotData): SnapshotElement[] {
-  const INTERACTIVE = new Set(['button', 'input', 'textarea', 'select', 'a', 'option'])
-  const SECTIONS = new Set(['h1', 'h2', 'h3', 'h4'])
-  const CONTENT = new Set(['li', 'td', 'th'])
+  const INTERACTIVE = new Set(["button", "input", "textarea", "select", "a", "option"]);
+  const SECTIONS = new Set(["h1", "h2", "h3", "h4"]);
+  const CONTENT = new Set(["li", "td", "th"]);
 
-  const filtered = data.els.filter((e) =>
-    INTERACTIVE.has(e.tag)
-    || SECTIONS.has(e.tag)
-    || (e.id !== undefined && e.text)
-    || (CONTENT.has(e.tag) && e.text)
-    || (e.tag === 'span' && e.text)
-  )
-  return filtered
+  const filtered = data.els.filter(
+    (e) =>
+      INTERACTIVE.has(e.tag) ||
+      SECTIONS.has(e.tag) ||
+      (e.id !== undefined && e.text) ||
+      (CONTENT.has(e.tag) && e.text) ||
+      (e.tag === "span" && e.text),
+  );
+  return filtered;
 }
 
 /**
@@ -30,43 +31,45 @@ function filterCompact(data: SnapshotData): SnapshotElement[] {
  * 格式：tag[#idx][val=V][type:T][ph=P][disabled][check=labels][state=s][opts=o] text|text|...
  */
 function serializeCompactText(els: SnapshotElement[]): string {
-  const INTERACTIVE_TAGS = new Set(['button', 'input', 'textarea', 'select', 'a', 'option'])
-  return els.map((e) => {
-    const parts: string[] = [e.tag]
-    /** 交互元素显示 idx，供 AI 通过 __silkpulse_click(i) 等精确操作 */
-    if (e.idx != null) parts.push(`#${e.idx}`)
-    /** iframe 内的元素标注来源 frame，让 AI 知道元素不在主文档 */
-    if (e.frame != null) parts.push(`[frame:${e.frame}]`)
-    /** 有 id 的非交互元素输出 id，帮助 AI 理解语义 */
-    if (e.id != null && !INTERACTIVE_TAGS.has(e.tag)) parts.push(`#${e.id}`)
-    if (e.value != null) {
-      const opts = e.options
-      if (opts) {
-        const idx = opts.indexOf(String(e.value))
-        if (idx >= 0) parts.push(`check=${e.value}`)
-        else parts.push(`val=${e.value}`)
-      } else {
-        parts.push(`val=${e.value}`)
+  const INTERACTIVE_TAGS = new Set(["button", "input", "textarea", "select", "a", "option"]);
+  return els
+    .map((e) => {
+      const parts: string[] = [e.tag];
+      /** 交互元素显示 idx，供 AI 通过 __silkpulse_click(i) 等精确操作 */
+      if (e.idx != null) parts.push(`#${e.idx}`);
+      /** iframe 内的元素标注来源 frame，让 AI 知道元素不在主文档 */
+      if (e.frame != null) parts.push(`[frame:${e.frame}]`);
+      /** 有 id 的非交互元素输出 id，帮助 AI 理解语义 */
+      if (e.id != null && !INTERACTIVE_TAGS.has(e.tag)) parts.push(`#${e.id}`);
+      if (e.value != null) {
+        const opts = e.options;
+        if (opts) {
+          const idx = opts.indexOf(String(e.value));
+          if (idx >= 0) parts.push(`check=${e.value}`);
+          else parts.push(`val=${e.value}`);
+        } else {
+          parts.push(`val=${e.value}`);
+        }
       }
-    }
-    if (e.type != null) parts.push(`type:${e.type}`)
-    if (e.placeholder != null) parts.push(`ph:${e.placeholder}`)
-    if (e.href != null) parts.push(`href:${e.href}`)
-    if (e.focused) parts.push('focus')
-    if (e.disabled) parts.push('disabled')
-    if (e.readOnly) parts.push('readonly')
-    if (e.required) parts.push('required')
-    if (e.indeterminate) parts.push('indeterminate')
-    if (e.ariaDisabled) parts.push('aria-disabled')
-    if (e.ariaExpanded === true) parts.push('expanded')
-    else if (e.ariaExpanded === false) parts.push('collapsed')
-    if (e.checked != null) parts.push('check')
-    if (e.state != null) parts.push(`(${e.state})`)
-    if (e.options != null) parts.push(`<${e.options.join('|')}>`)
-    if (e.text != null) parts.push(String(e.text))
-    if (e.aria != null) parts.push(`aria:${e.aria}`)
-    return parts.join(' ')
-  }).join('\n')
+      if (e.type != null) parts.push(`type:${e.type}`);
+      if (e.placeholder != null) parts.push(`ph:${e.placeholder}`);
+      if (e.href != null) parts.push(`href:${e.href}`);
+      if (e.focused) parts.push("focus");
+      if (e.disabled) parts.push("disabled");
+      if (e.readOnly) parts.push("readonly");
+      if (e.required) parts.push("required");
+      if (e.indeterminate) parts.push("indeterminate");
+      if (e.ariaDisabled) parts.push("aria-disabled");
+      if (e.ariaExpanded === true) parts.push("expanded");
+      else if (e.ariaExpanded === false) parts.push("collapsed");
+      if (e.checked != null) parts.push("check");
+      if (e.state != null) parts.push(`(${e.state})`);
+      if (e.options != null) parts.push(`<${e.options.join("|")}>`);
+      if (e.text != null) parts.push(String(e.text));
+      if (e.aria != null) parts.push(`aria:${e.aria}`);
+      return parts.join(" ");
+    })
+    .join("\n");
 }
 
 /**
@@ -74,24 +77,24 @@ function serializeCompactText(els: SnapshotElement[]): string {
  * 入参 rawResult 是设备端 __silkpulse_snapshot() 返回的 JSON 字符串
  */
 export function sendSnapshot(rawResult: string | undefined): string {
-  if (!rawResult) return '[快照为空]'
-  let data: SnapshotData
+  if (!rawResult) return "[快照为空]";
+  let data: SnapshotData;
   try {
-    data = JSON.parse(rawResult)
+    data = JSON.parse(rawResult);
   } catch {
-    return `[快照解析失败] ${rawResult.slice(0, 200)}`
+    return `[快照解析失败] ${rawResult.slice(0, 200)}`;
   }
-  const filtered = filterCompact(data)
-  const text = serializeCompactText(filtered)
+  const filtered = filterCompact(data);
+  const text = serializeCompactText(filtered);
   const header = [
     `# url: ${data.url}`,
     `# title: ${data.title}`,
     `# viewport: ${data.viewportWidth}×${data.viewportHeight}`,
     `# errors: ${data.errors}`,
-  ].join('\n')
+  ].join("\n");
   const errorSuffix =
     data.lastErrors && data.lastErrors.length > 0
-      ? '\n# last errors:\n' + data.lastErrors.map((e) => `#   ${e}`).join('\n')
-      : ''
-  return header + '\n' + text + errorSuffix
+      ? "\n# last errors:\n" + data.lastErrors.map((e) => `#   ${e}`).join("\n")
+      : "";
+  return header + "\n" + text + errorSuffix;
 }

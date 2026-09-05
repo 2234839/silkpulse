@@ -5,7 +5,7 @@
  * 两条管线都被插件解析为真实的构建信息常量，零运行时依赖。
  */
 
-import { buildInfo as raw } from 'virtual:build-info'
+import { buildInfo as raw } from "virtual:build-info";
 
 /**
  * 获取构建信息；直接透传虚拟模块内联的常量。
@@ -21,5 +21,5 @@ export function getBuildInfo(): {
   /** 构建时间（ISO 8601，含时区） */
   buildAt: string;
 } {
-  return raw
+  return raw;
 }

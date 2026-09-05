@@ -10,11 +10,11 @@
   "scripts": {
     "check": "vp check"
   },
+  "dependencies": {
+    "@silkpulse/shared": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "catalog:",
     "vite-plus": "catalog:"
-  },
-  "dependencies": {
-    "@silkpulse/shared": "workspace:*"
   }
 }

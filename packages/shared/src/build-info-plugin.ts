@@ -20,7 +20,11 @@ export interface BuildInfo {
 /** 在 git 目录里执行只读命令，任何失败都返回 null（不让构建崩掉） */
 function gitCmd(args: string, cwd?: string): string | null {
   try {
-    return execSync(`git ${args}`, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execSync(`git ${args}`, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
     return null;
   }

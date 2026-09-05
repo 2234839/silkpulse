@@ -10,42 +10,42 @@
  * - 采集始终开启（不按 watcher 控制），因为鼠标数据轻量且价值高
  */
 
-import type { MouseEventData } from '@silkpulse/shared'
+import type { MouseEventData } from "@silkpulse/shared";
 
 /** move 事件最小间隔 ms */
-const MOVE_THROTTLE = 50
+const MOVE_THROTTLE = 50;
 
 /** 发送回调 */
-let sender: ((mouse: MouseEventData) => void) | null = null
+let sender: ((mouse: MouseEventData) => void) | null = null;
 /** 上次 move 上报时间 */
-let lastMoveTime = 0
+let lastMoveTime = 0;
 /** 是否已激活 */
-let active = false
+let active = false;
 
 /** move 事件处理（节流） */
 function onPointerMove(e: PointerEvent): void {
-  if (!sender) return
-  const now = Date.now()
-  if (now - lastMoveTime < MOVE_THROTTLE) return
-  lastMoveTime = now
+  if (!sender) return;
+  const now = Date.now();
+  if (now - lastMoveTime < MOVE_THROTTLE) return;
+  lastMoveTime = now;
   sender({
-    type: 'move',
+    type: "move",
     x: e.clientX / window.innerWidth,
     y: e.clientY / window.innerHeight,
     t: now,
-  })
+  });
 }
 
 /** click 事件处理 */
 function onClick(e: PointerEvent): void {
-  if (!sender) return
-  const now = Date.now()
+  if (!sender) return;
+  const now = Date.now();
   sender({
-    type: 'click',
+    type: "click",
     x: e.clientX / window.innerWidth,
     y: e.clientY / window.innerHeight,
     t: now,
-  })
+  });
 }
 
 /**
@@ -54,19 +54,19 @@ function onClick(e: PointerEvent): void {
  * @param onEvent 鼠标事件回调（由 index.ts 注入 send）
  */
 export function startMouseTracker(onEvent: (mouse: MouseEventData) => void): void {
-  sender = onEvent
-  if (active) return
-  active = true
+  sender = onEvent;
+  if (active) return;
+  active = true;
   /** passive:true 不阻塞滚动 */
-  window.addEventListener('pointermove', onPointerMove, { passive: true })
-  window.addEventListener('click', onClick, { passive: true })
+  window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("click", onClick, { passive: true });
 }
 
 /** 停止鼠标采集 */
 export function stopMouseTracker(): void {
-  if (!active) return
-  active = false
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('click', onClick)
-  sender = null
+  if (!active) return;
+  active = false;
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("click", onClick);
+  sender = null;
 }

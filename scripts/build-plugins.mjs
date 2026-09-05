@@ -52,15 +52,25 @@ function currentVersion(plugin) {
 
 /** 插件 → 构建命令 */
 const builders = {
-  vue: () => execSync("node scripts/sync-devtools-clients.mjs --plugin vue", { cwd: ROOT, stdio: "inherit" }),
-  react: () => execSync("node scripts/build-react-devtools.mjs --skip-install", { cwd: ROOT, stdio: "inherit" }),
+  vue: () =>
+    execSync("node scripts/sync-devtools-clients.mjs --plugin vue", {
+      cwd: ROOT,
+      stdio: "inherit",
+    }),
+  react: () =>
+    execSync("node scripts/build-react-devtools.mjs --skip-install", {
+      cwd: ROOT,
+      stdio: "inherit",
+    }),
 };
 
 for (const plugin of Object.keys(builders)) {
   if (only && plugin !== only) continue;
   if (!force && isReady(plugin)) {
     const v = currentVersion(plugin);
-    console.log(`[${plugin}-devtools] 产物已就绪（${v ? v.version ?? v.reactDevtoolsInline : "?"}），跳过；如需重建用 --force`);
+    console.log(
+      `[${plugin}-devtools] 产物已就绪（${v ? (v.version ?? v.reactDevtoolsInline) : "?"}），跳过；如需重建用 --force`,
+    );
     continue;
   }
   if (force) {
