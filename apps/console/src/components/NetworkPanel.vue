@@ -268,6 +268,18 @@ const streamParserError = ref("");
 const streamParserOpen = ref(false);
 
 /**
+ * SSE JSON 模式开关
+ *
+ * Agent 场景常见「SSE 返回连续 JSON」：data 拼接后是 {..}{..}{..} 一个 JSON 可能被
+ * 拆到多个 Event/chunk。开启后把所有事件 data 顺序拼接，按 JSON 值边界切分展示，
+ * 而不是按 SSE 事件逐条展示。开关状态 localStorage 持久化。
+ */
+const streamJsonMode = ref(localStorage.getItem("silkpulse:sse-json-mode") === "1");
+watch(streamJsonMode, (v) => {
+  localStorage.setItem("silkpulse:sse-json-mode", v ? "1" : "0");
+});
+
+/**
  * Parser 历史记录：按域名存储，localStorage 持久化
  *
  * 用户编辑 parser 代码后（失焦或切换请求时），自动保存到当前请求域名的历史列表。
@@ -400,9 +412,22 @@ function applyParser(data: string): { ok: true; result: string } | { ok: false; 
 /**
  * 处理后的 SSE 事件列表（filter + parser）
  *
- * 过滤 __closed__ 事件，然后对 data 做 filter 关键词匹配 + parser 变换。
+ * JSON 模式下直接复用 processedSseJsonItems（filter 已在切分后逐条应用）。
+ * 普通模式：过滤 __closed__ 事件，对 data 做 filter 关键词匹配 + parser 变换。
  */
 const processedSseEvents = computed(() => {
+  if (streamJsonMode.value) {
+    /** JSON 模式：复用切分结果，套用普通模式的列表结构 */
+    return processedSseJsonItems.value.map((j) => ({
+      timestamp: j.timestamp,
+      event: j.event,
+      id: undefined,
+      retry: undefined,
+      display: j.display,
+      parseError: j.parseError,
+      pending: j.pending,
+    }));
+  }
   void now.value;
   const events = selectedNetwork.value?.events ?? [];
   const q = streamFilter.value.trim().toLowerCase();
@@ -429,6 +454,157 @@ const processedSseEvents = computed(() => {
   }
   return result;
 });
+
+/**
+ * 从文本流中按 JSON 值边界切分（增量式）
+ *
+ * Agent SSE 场景 data 拼接后是连续 JSON（{..}{..} 或 [{..},{..}...]）。括号深度
+ * + 字符串/转义感知扫描：遇深度归零即切出一个完整 JSON 值。剩余不完整尾段留在
+ * buffer 里等下一段数据。顶层分隔符（连续 JSON 间的逗号/空白）跳过。
+ */
+class JsonStreamSplitter {
+  /** 未消费的不完整尾段 */
+  private buffer = "";
+  /** 当前扫描状态：是否在字符串内 */
+  private inString = false;
+  /** 上一个字符是否为转义符（仅字符串内有效） */
+  private escaped = false;
+  /** 括号深度（字符串外计 { [ ） */
+  private depth = 0;
+  /** 已开始一个值（非空白字符出现且 depth 归零态） */
+  private started = false;
+
+  /** 追加文本，返回切出的完整 JSON 值列表 */
+  push(text: string): string[] {
+    this.buffer += text;
+    const out: string[] = [];
+    let start = 0;
+    for (let i = 0; i < this.buffer.length; i++) {
+      const ch = this.buffer[i];
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (ch === "\\") {
+          this.escaped = true;
+        } else if (ch === '"') {
+          this.inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        this.inString = true;
+        this.started = true;
+      } else if (ch === "{" || ch === "[") {
+        this.depth++;
+        this.started = true;
+      } else if (ch === "}" || ch === "]") {
+        this.depth--;
+        /** 深度归零 = 一个完整 JSON 值结束 */
+        if (this.depth === 0 && this.started) {
+          out.push(this.buffer.slice(start, i + 1));
+          this.started = false;
+          start = i + 1;
+        }
+      } else if (!this.started && /\s|,/.test(ch)) {
+        /** 值之间的空白/逗号分隔符跳过 */
+        start = i + 1;
+      } else if (!this.started) {
+        /** 标量 JSON（数字/true/false/null）开始 */
+        this.started = true;
+      }
+    }
+    this.buffer = this.buffer.slice(start);
+    return out;
+  }
+
+  /** 流结束：剩余 buffer 若是合法 JSON 标量也吐出来，否则标记不完整 */
+  finish(): { value: string; complete: boolean } | null {
+    const rest = this.buffer.trim();
+    if (!rest) return null;
+    try {
+      JSON.parse(rest);
+      this.buffer = "";
+      return { value: rest, complete: true };
+    } catch {
+      return { value: rest, complete: false };
+    }
+  }
+
+  /** 重置（切换请求/流关闭重扫时用） */
+  reset(): void {
+    this.buffer = "";
+    this.inString = false;
+    this.escaped = false;
+    this.depth = 0;
+    this.started = false;
+  }
+}
+
+/**
+ * SSE JSON 模式切分构建（filter 应用在切分后的 JSON 文本上）
+ *
+ * @param applyFilter 是否应用关键词过滤（计数展示时传 false）
+ */
+function buildSseJsonItems(applyFilter: boolean) {
+  void now.value;
+  const events = (selectedNetwork.value?.events ?? []).filter((e) => e.event !== "__closed__");
+  const splitter = new JsonStreamSplitter();
+  const result: Array<{
+    timestamp: string;
+    event: string;
+    display: string;
+    pending: boolean;
+    parseError?: string;
+  }> = [];
+  const q = applyFilter ? streamFilter.value.trim().toLowerCase() : "";
+  for (const e of events) {
+    for (const value of splitter.push(e.data)) {
+      /** JSON 模式下 filter 对切分后的 JSON 文本匹配 */
+      if (q && !value.toLowerCase().includes(q)) continue;
+      const parsed = applyParser(value);
+      result.push({
+        timestamp: e.timestamp,
+        event: e.event,
+        display: parsed.ok ? parsed.result : value,
+        pending: false,
+        parseError: parsed.ok ? undefined : parsed.error,
+      });
+    }
+  }
+  /** 流关闭（有 __closed__ 事件）则 finish 收尾，否则尾段是 pending */
+  const isClosed = (selectedNetwork.value?.events ?? []).some((e) => e.event === "__closed__");
+  const tail = isClosed
+    ? splitter.finish()
+    : splitter.buffer.trim()
+      ? { value: splitter.buffer.trim(), complete: false }
+      : null;
+  if (tail) {
+    if (q && !tail.value.toLowerCase().includes(q)) return result;
+    const parsed = applyParser(tail.value);
+    result.push({
+      timestamp: events.at(-1)?.timestamp ?? new Date().toISOString(),
+      event: events.at(-1)?.event ?? "message",
+      display: parsed.ok ? parsed.result : tail.value,
+      pending: !tail.complete,
+      parseError: parsed.ok ? undefined : parsed.error,
+    });
+  }
+  return result;
+}
+
+/**
+ * SSE JSON 模式事件列表
+ *
+ * 所有事件（过滤 __closed__）data 顺序拼接，经 JsonStreamSplitter 切分成
+ * 独立 JSON 值。timestamp/event 取该 JSON 值结束时所处 SSE 事件的信息。
+ * 流未关闭时的不完整尾段以 pending 状态展示（实时跟随）。
+ */
+const processedSseJsonItems = computed(() => buildSseJsonItems(true));
+
+/**
+ * JSON 模式下已切分出的 JSON 总数（不含 filter，供计数展示）
+ */
+const processedSseJsonTotal = computed(() => buildSseJsonItems(false).length);
 
 /**
  * 处理后的 WS 帧列表（filter + parser）
@@ -1163,8 +1339,12 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               </span>
               <span class="text-xs text-faint"
                 >({{ processedSseEvents.length }} /
-                {{ selectedNetwork.events?.filter((e) => e.event !== "__closed__").length ?? 0 }}
-                事件)</span
+                {{
+                  streamJsonMode
+                    ? processedSseJsonTotal
+                    : (selectedNetwork.events?.filter((e) => e.event !== "__closed__").length ?? 0)
+                }}
+                {{ streamJsonMode ? "个 JSON" : "事件" }})</span
               >
             </div>
             <!-- Filter + Parser 工具栏 -->
@@ -1174,6 +1354,16 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 placeholder="🔍 过滤事件内容/类型..."
                 class="flex-1 min-w-[120px] text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
               />
+              <button
+                @click="streamJsonMode = !streamJsonMode"
+                class="px-2 py-1 text-xs rounded border bg-elevated hover:bg-elevated-hover whitespace-nowrap"
+                :class="
+                  streamJsonMode ? 'text-blue-key border-blue-400' : 'border-base text-secondary'
+                "
+                title="SSE 返回连续 JSON（{..}{..}..，一个 JSON 可能拆多个 Event）时开启，按 JSON 值边界切分展示"
+              >
+                {} JSON
+              </button>
               <button
                 @click="streamParserOpen = !streamParserOpen"
                 class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
@@ -1248,7 +1438,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   <span class="text-faint shrink-0">{{
                     new Date(e.timestamp).toLocaleTimeString()
                   }}</span>
-                  <span class="shrink-0 text-purple-key">event: {{ e.event }}</span>
+                  <span
+                    v-if="(e as { pending?: boolean }).pending"
+                    class="shrink-0 text-amber-500"
+                    title="JSON 尚未接收完整，等待后续数据"
+                    >⏳ 接收中</span
+                  >
+                  <span v-else class="shrink-0 text-purple-key">event: {{ e.event }}</span>
                   <span v-if="e.id" class="shrink-0 text-faint">id: {{ e.id }}</span>
                   <span v-if="e.retry != null" class="shrink-0 text-amber-500"
                     >retry: {{ e.retry }}</span
@@ -1266,13 +1462,17 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 v-if="!selectedNetwork.events?.filter((e) => e.event !== '__closed__').length"
                 class="text-faint text-center py-4 text-xs"
               >
-                暂无事件（连接已建立，等待服务端推送）
+                {{
+                  streamJsonMode
+                    ? "暂无 JSON（连接已建立，等待服务端推送）"
+                    : "暂无事件（连接已建立，等待服务端推送）"
+                }}
               </div>
               <div
                 v-else-if="!processedSseEvents.length"
                 class="text-faint text-center py-4 text-xs"
               >
-                无匹配事件
+                {{ streamJsonMode ? "无匹配 JSON" : "无匹配事件" }}
               </div>
             </div>
           </div>
