@@ -584,6 +584,47 @@ const diffJsonMode = ref(true);
 const diffSortKeys = ref(false);
 /** 视图模式：inline=上下合并显示，split=左右并排，object=JSON 对象树 */
 const diffViewMode = ref<"inline" | "split" | "object">("inline");
+/**
+ * 对象模式自动开关（「对象」按钮内的 ✓/○ 切换）
+ *
+ * 开启时：一旦两侧都能解析为 JSON（可切对象视图），自动切到 object 模式。
+ * 初始默认：能切对象就切对象，切不了就停在合并模式。
+ */
+const diffAutoObject = ref(true);
+/** 对象视图：左右两树同步展开/折叠（展开一侧节点，对侧同路径节点跟随） */
+const diffSyncExpand = ref(false);
+/** 对象视图：左右两树同步滚动（滚动一侧，对侧滚动条按比例跟随） */
+const diffSyncScroll = ref(false);
+/** 同步滚动锁：防止 A→B→A 无限回环 */
+let diffScrollLock = 0;
+
+/**
+ * 按比例同步滚动
+ *
+ * 从滚动事件的 target（源窗格）出发，取同层级另一个窗格作为对侧，
+ * 把源容器的滚动比例应用到对侧 —— 不依赖模板 ref 绑定。
+ */
+function syncDiffScroll(e: Event) {
+  if (!diffSyncScroll.value || diffScrollLock > 0) return;
+  const source = e.target as HTMLElement;
+  /** 源窗格的父是单侧面板容器，再往上一层是左右两列的共同容器 */
+  const wrapper = source.parentElement?.parentElement;
+  const sibling = wrapper?.querySelectorAll(":scope > div > .flex-1.overflow-auto");
+  const target = sibling?.[source === sibling?.[0] ? 1 : 0];
+  if (!target || target === source) return;
+  diffScrollLock++;
+  try {
+    const denomX = source.scrollWidth - source.clientWidth;
+    const denomY = source.scrollHeight - source.clientHeight;
+    target.scrollLeft =
+      denomX > 0 ? (source.scrollLeft / denomX) * (target.scrollWidth - target.clientWidth) : 0;
+    target.scrollTop =
+      denomY > 0 ? (source.scrollTop / denomY) * (target.scrollHeight - target.clientHeight) : 0;
+  } finally {
+    /** 对侧的滚动事件在本宏任务派发后才触发，下个宏任务解锁即可放行下一次用户滚动 */
+    setTimeout(() => diffScrollLock--, 0);
+  }
+}
 /** 字符级高亮：对变化的行进一步标出具体改了哪些字符 */
 const diffCharLevel = ref(true);
 /** 折叠连续未变化行（只保留首尾各 2 行上下文） */
@@ -678,10 +719,22 @@ watch(
 /** 是否可切到 object 视图（JSON 模式 + 两侧都解析成功） */
 const diffCanObjectView = computed(() => diffPrepA.value.isJson && diffPrepB.value.isJson);
 
-/** 当 object 视图不可用时自动回退到 inline（避免卡在空视图） */
-watch(diffCanObjectView, (can) => {
-  if (!can && diffViewMode.value === "object") diffViewMode.value = "inline";
-});
+/**
+ * 对象视图可用性联动：
+ * - 可用且自动开关开启 → 自动切到 object（含初始默认：能切对象就默认对象）
+ * - 不可用 → 回退到 inline（避免卡在空视图）
+ */
+watch(
+  diffCanObjectView,
+  (can) => {
+    if (can) {
+      if (diffAutoObject.value && diffJsonMode.value) diffViewMode.value = "object";
+    } else if (diffViewMode.value === "object") {
+      diffViewMode.value = "inline";
+    }
+  },
+  { immediate: true },
+);
 
 /** 一行 diff 数据（行级） */
 interface DiffLine {
@@ -1368,6 +1421,18 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
           <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
             <input type="checkbox" v-model="diffCollapseSame" class="cursor-pointer" /> 折叠相同行
           </label>
+          <label
+            class="text-xs text-muted flex items-center gap-1 cursor-pointer"
+            title="滚动一侧的对象树，另一侧按比例跟随滚动"
+          >
+            <input type="checkbox" v-model="diffSyncScroll" class="cursor-pointer" /> 同步滚动
+          </label>
+          <label
+            class="text-xs text-muted flex items-center gap-1 cursor-pointer"
+            title="展开/折叠一侧节点时，另一侧同路径节点跟随展开/折叠"
+          >
+            <input type="checkbox" v-model="diffSyncExpand" class="cursor-pointer" /> 同步展开
+          </label>
           <div class="flex rounded border border-base overflow-hidden">
             <button
               @click="diffViewMode = 'inline'"
@@ -1391,20 +1456,38 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
             >
               并排
             </button>
-            <button
+            <div
               v-if="diffJsonMode"
-              @click="diffViewMode = 'object'"
-              :disabled="!diffCanObjectView"
-              class="px-2 py-0.5 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-              :class="
-                diffViewMode === 'object'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-surface text-muted hover:text-primary'
-              "
-              title="用 JSON 面板的 Object 渲染器并排展示两侧结构"
+              class="flex items-center rounded overflow-hidden border"
+              :class="diffViewMode === 'object' ? 'border-blue-500' : 'border-base'"
             >
-              对象
-            </button>
+              <!-- 自动开关：点这里不切视图，只切换「能用时自动用对象」的状态 -->
+              <button
+                @click="diffAutoObject = !diffAutoObject"
+                class="px-1 py-0.5 text-xs leading-none"
+                :class="
+                  diffAutoObject
+                    ? 'bg-blue-500/20 text-blue-500'
+                    : 'bg-surface text-faint hover:text-primary'
+                "
+                title="自动对象模式：开启后，只要两侧都能解析为 JSON，就自动切换到对象视图"
+              >
+                {{ diffAutoObject ? "✓" : "○" }}
+              </button>
+              <button
+                @click="diffViewMode = 'object'"
+                :disabled="!diffCanObjectView"
+                class="px-2 py-0.5 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                :class="
+                  diffViewMode === 'object'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-surface text-muted hover:text-primary'
+                "
+                title="用 JSON 面板的 Object 渲染器并排展示两侧结构"
+              >
+                对象
+              </button>
+            </div>
           </div>
           <div
             v-if="diffStats.total || diffParseMs !== null"
@@ -1438,11 +1521,13 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
               >
                 A（期望）
               </div>
-              <div class="flex-1 overflow-auto p-2">
+              <div class="flex-1 overflow-auto p-2" @scroll="syncDiffScroll">
                 <ObjectInspector
                   :raw="diffPrepA.parsed"
                   :diff-raw="diffPrepB.parsed"
                   diff-side="old"
+                  :sync-key="'diff-a-b'"
+                  :sync-expand="diffSyncExpand"
                   editable
                   @update:model-value="
                     (v) => {
@@ -1458,11 +1543,13 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
               >
                 B（实际）
               </div>
-              <div class="flex-1 overflow-auto p-2">
+              <div class="flex-1 overflow-auto p-2" @scroll="syncDiffScroll">
                 <ObjectInspector
                   :raw="diffPrepB.parsed"
                   :diff-raw="diffPrepA.parsed"
                   diff-side="new"
+                  :sync-key="'diff-a-b'"
+                  :sync-expand="diffSyncExpand"
                   editable
                   @update:model-value="
                     (v) => {

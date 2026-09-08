@@ -22,7 +22,7 @@
  * - StoragePanel localStorage 编辑（可编辑 JSON / 文本）
  * - StoragePanel IndexedDB 记录（只读）
  */
-import { ref, computed, watch, provide, inject, triggerRef } from "vue";
+import { ref, computed, watch, provide, inject, triggerRef, onScopeDispose } from "vue";
 import type { Ref } from "vue";
 import type { SerializedValue } from "@silkpulse/shared";
 import { diffText, type TextDiffSegment } from "@silkpulse/renderer";
@@ -79,6 +79,10 @@ const props = withDefaults(
     diffRaw?: unknown;
     /** Diff 模式：本侧角色（old=红/删除，new=绿/新增），仅根实例需要传 */
     diffSide?: "old" | "new";
+    /** 同步展开分组 key：相同 key 的根实例之间同步节点的展开/折叠，仅根实例需要传 */
+    syncKey?: string;
+    /** 是否启用同步展开（配合 syncKey），仅根实例需要传 */
+    syncExpand?: boolean;
   }>(),
   {
     depth: 0,
@@ -86,6 +90,8 @@ const props = withDefaults(
     childIndex: 0,
     diffRaw: undefined,
     diffSide: undefined,
+    syncKey: undefined,
+    syncExpand: false,
   },
 );
 
@@ -95,6 +101,28 @@ const emit = defineEmits<{
   /** 右键菜单事件冒泡（子→父→根） */
   "context-menu": [ctx: MenuContext];
 }>();
+
+/* ==================== 跨实例同步展开总线（模块级，同 key 根实例互通） ==================== */
+
+/** 同步展开消息：path 为逗号 join 的 childIndex 链，v 为全局版本号（防回环） */
+interface ExpandSyncMsg {
+  path: string;
+  value: boolean;
+  v: number;
+}
+
+/** 同步总线：syncKey → 成员集合（成员 = 自身标识 + 收消息的回调）。
+ * 挂在 globalThis 上做全局单例：任何情况下（HMR/多 chunk/代理包装）都保证同一实例 */
+interface ExpandSyncMember {
+  self: object;
+  onMsg: (msg: ExpandSyncMsg) => void;
+}
+const expandSyncBus: Map<string, Set<ExpandSyncMember>> = ((
+  globalThis as Record<string, unknown>
+).__oiExpandSyncBus ??= new Map()) as Map<string, Set<ExpandSyncMember>>;
+
+/** 全局消息版本号（递增，用于接收方识别/去重） */
+let expandSyncVersion = 0;
 
 /* ==================== 数据归一化：三入口 → SerializedValue ==================== */
 
@@ -552,6 +580,8 @@ function toggle() {
     expandOverride.value = null;
   }
   manualExpanded.value = !manualExpanded.value;
+  /** 同步展开开启时：把这次折叠/展开广播给同组的对侧树 */
+  syncEmit?.(nodePathStr.value, manualExpanded.value);
 }
 
 /* ==================== 右键菜单：展开控制通道实现 ==================== */
@@ -611,6 +641,58 @@ const expandOverride = isRoot
 provide("oi-path", nodePath.value);
 provide("oi-expand-override", expandOverride as Ref<ExpandOverride>);
 provide("oi-font-size", fontSize as Ref<number>);
+
+/* ==================== 同步展开通道（根实例注册总线 + provide 给子树） ==================== */
+
+/** 本树是否作为同步发送/接收方（仅根实例且开启了 syncExpand）；开关可动态切换，故响应式读取 */
+const syncActive = computed(() => isRoot && props.syncExpand === true && !!props.syncKey);
+
+/**
+ * 同步通道：根实例自己创建；子节点从根 inject。
+ * - syncEmit：节点展开/折叠时调用，广播给同组其他树
+ * - remoteExpand：其他树广播来的最新展开消息（所有节点 watch 它，认领自己的 path）
+ */
+const remoteExpand = isRoot
+  ? ref<ExpandSyncMsg | null>(null)
+  : inject<Ref<ExpandSyncMsg | null>>("oi-remote-expand", ref<ExpandSyncMsg | null>(null));
+
+/** 子节点调用：把自己的展开/折叠广播给同组的其他树（仅根实例有真实实现） */
+const syncEmit = isRoot
+  ? (path: string, value: boolean) => {
+      /** 广播前动态检查开关当前值，关闭时不发 */
+      if (!props.syncExpand) return;
+      const msg: ExpandSyncMsg = { path, value, v: ++expandSyncVersion };
+      for (const member of expandSyncBus.get(props.syncKey!) ?? []) {
+        /** 跳过自己，避免回环 */
+        if (member.self === selfMember) continue;
+        member.onMsg(msg);
+      }
+    }
+  : inject<(path: string, value: boolean) => void>("oi-sync-emit", null);
+
+/** 本树在总线中的成员标识（用于广播时排除自己；仅根实例且开关开启时注册） */
+const selfMember = syncActive.value
+  ? (() => {
+      const member = {
+        self: null as unknown,
+        onMsg: (msg: ExpandSyncMsg) => {
+          remoteExpand.value = msg;
+        },
+      };
+      member.self = member;
+      const key = props.syncKey!;
+      if (!expandSyncBus.has(key)) expandSyncBus.set(key, new Set());
+      expandSyncBus.get(key)!.add(member);
+      /** 组件销毁时退出总线，防泄漏 */
+      onScopeDispose(() => expandSyncBus.get(key)?.delete(member));
+      return member;
+    })()
+  : null;
+
+if (isRoot) {
+  provide("oi-sync-emit", syncEmit);
+  provide("oi-remote-expand", remoteExpand as Ref<ExpandSyncMsg | null>);
+}
 
 /* ==================== Diff 模式：raw 树对比 ==================== */
 
@@ -801,6 +883,15 @@ const expanded = computed({
   set: (v: boolean) => {
     manualExpanded.value = v;
   },
+});
+
+/* ==================== 同步展开：节点级接收 + 发送 ==================== */
+
+/** 远端消息到达时：如果目标是自己，应用之（直接改 manualExpanded，不再回传） */
+watch(remoteExpand, (msg) => {
+  if (!msg || !hasChildren.value) return;
+  /** 对端开关关闭时（对端不会发）+ 本端开关关闭时也不应用，保证完全停同步 */
+  if (msg.path === nodePathStr.value) manualExpanded.value = msg.value;
 });
 
 /**
