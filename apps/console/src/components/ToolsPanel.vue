@@ -246,6 +246,51 @@ function applyJq(data: unknown, expr: string): unknown {
   return cur;
 }
 
+/** JSON 操作按钮的错误提示文本（格式化/压缩/转义/反转义共用） */
+const jsonActionError = ref("");
+
+/** 按当前解析模式解析输入，失败时写入错误提示并返回 undefined */
+function parseJsonInputOrError(): unknown | undefined {
+  try {
+    jsonActionError.value = "";
+    return parseByMode(jsonInput.value);
+  } catch (e) {
+    jsonActionError.value = "JSON 解析失败：" + (e as Error).message;
+    return undefined;
+  }
+}
+
+/** 格式化 JSON（2 空格缩进）写回输入框 */
+function jsonFormat() {
+  const obj = parseJsonInputOrError();
+  if (obj === undefined) return;
+  jsonInput.value = JSON.stringify(obj, null, 2);
+}
+
+/** 压缩 JSON（去除空白）写回输入框 */
+function jsonMinify() {
+  const obj = parseJsonInputOrError();
+  if (obj === undefined) return;
+  jsonInput.value = JSON.stringify(obj);
+}
+
+/** 把整个输入文本作为字符串转义（JSON.stringify 的带引号形式）写回输入框 */
+function jsonEscape() {
+  jsonActionError.value = "";
+  jsonInput.value = JSON.stringify(jsonInput.value);
+}
+
+/** 反转义：解析结果为字符串时写回该字符串 */
+function jsonUnescape() {
+  const parsed = parseJsonInputOrError();
+  if (parsed === undefined) return;
+  if (typeof parsed !== "string") {
+    jsonActionError.value = "JSON 解析失败：结果不是字符串，无法反转义";
+    return;
+  }
+  jsonInput.value = parsed;
+}
+
 const jsonParsed = computed(() => {
   if (!jsonInput.value.trim()) return undefined;
   try {
@@ -473,6 +518,11 @@ function doDecode() {
   }
 }
 
+/** 把编解码结果反填回输入框 */
+function codecBackfill() {
+  codecInput.value = codecResult.value;
+}
+
 /* ════════ 5. 时间戳 ════════ */
 const tsInput = ref("");
 const tsResult = ref<{ local: string; utc: string; iso: string; relative: string } | null>(null);
@@ -625,6 +675,19 @@ function syncDiffScroll(e: Event) {
     setTimeout(() => diffScrollLock--, 0);
   }
 }
+/** 交换 Diff 两侧输入 */
+function diffSwap() {
+  const tmp = diffA.value;
+  diffA.value = diffB.value;
+  diffB.value = tmp;
+}
+
+/** 清空 Diff 两侧输入 */
+function diffClear() {
+  diffA.value = "";
+  diffB.value = "";
+}
+
 /** 字符级高亮：对变化的行进一步标出具体改了哪些字符 */
 const diffCharLevel = ref(true);
 /** 折叠连续未变化行（只保留首尾各 2 行上下文） */
@@ -1020,6 +1083,33 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
             class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
             :placeholder="jsonPlaceholder"
           ></textarea>
+          <div class="flex gap-1 flex-wrap">
+            <button
+              @click="jsonFormat"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              格式化
+            </button>
+            <button
+              @click="jsonMinify"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              压缩
+            </button>
+            <button
+              @click="jsonEscape"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              转义
+            </button>
+            <button
+              @click="jsonUnescape"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              反转义
+            </button>
+          </div>
+          <p v-if="jsonActionError" class="text-xs text-red-500">⚠ {{ jsonActionError }}</p>
           <div class="flex gap-2 items-center">
             <input
               v-model="jsonJqFilter"
@@ -1209,6 +1299,7 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
             spellcheck="false"
             class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
           ></textarea>
+          <div class="text-xs text-faint">{{ codecInput.length }} 字符</div>
           <div class="flex gap-2">
             <button
               @click="doEncode"
@@ -1243,6 +1334,15 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
             spellcheck="false"
             class="flex-1 w-full bg-surface border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none"
           ></textarea>
+          <div class="flex items-center gap-2">
+            <button
+              @click="codecBackfill"
+              class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              ↩ 反填到输入
+            </button>
+            <span class="text-xs text-faint">{{ codecResult.length }} 字符</span>
+          </div>
           <p v-if="codecError" class="text-xs text-red-500">⚠ {{ codecError }}</p>
         </div>
       </div>
@@ -1433,6 +1533,20 @@ function charDiffParts(line: DiffLine): TextDiffSegment[] {
           >
             <input type="checkbox" v-model="diffSyncExpand" class="cursor-pointer" /> 同步展开
           </label>
+          <div class="flex gap-1">
+            <button
+              @click="diffSwap"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              ⇄ 交换
+            </button>
+            <button
+              @click="diffClear"
+              class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
+            >
+              清空
+            </button>
+          </div>
           <div class="flex rounded border border-base overflow-hidden">
             <button
               @click="diffViewMode = 'inline'"

@@ -57,6 +57,8 @@ interface MenuContext {
   y: number;
   /** 是否有子节点 */
   hasChildren: boolean;
+  /** 从根到该节点的 keyName 链（不含根自身，子→父冒泡时逐级前置） */
+  keys: string[];
 }
 
 const props = withDefaults(
@@ -920,6 +922,8 @@ const menuTargetPath = ref<number[]>([]);
 const menuTargetNode = ref<SerializedValue | null>(null);
 /** 菜单目标是否有子节点 */
 const menuTargetHasChildren = ref(false);
+/** 菜单目标的 keyName 链（用于拼接 JSON 路径） */
+const menuTargetKeys = ref<string[]>([]);
 /** 复制成功提示 */
 const copyToast = ref("");
 
@@ -934,6 +938,7 @@ function onContextMenu(e: MouseEvent) {
     x: e.clientX,
     y: e.clientY,
     hasChildren: hasChildren.value,
+    keys: props.keyName != null ? [props.keyName] : [],
   };
 
   if (isRoot) {
@@ -950,6 +955,7 @@ function onChildContextMenu(ctx: MenuContext) {
   menuTargetPath.value = ctx.path;
   menuTargetNode.value = ctx.node;
   menuTargetHasChildren.value = ctx.hasChildren;
+  menuTargetKeys.value = ctx.keys;
   /** 边界检测：靠近右/下边缘时偏移 */
   const menuW = 200,
     menuH = 160;
@@ -1009,12 +1015,38 @@ async function copyJson() {
 
 async function copyValue() {
   if (!menuTargetNode.value) return;
-  /** 函数类型：value 存的是完整源码，优先复制源码；其他类型复制 preview */
-  const text =
-    menuTargetNode.value.type === "function" && menuTargetNode.value.value
-      ? String(menuTargetNode.value.value)
-      : menuTargetNode.value.preview;
+  /** 复制规则：string 直接复制原值，object/array 序列化，其他 String() */
+  let text: string;
+  if (menuTargetNode.value.type === "string") {
+    text = String(menuTargetNode.value.value ?? "");
+  } else if (
+    menuTargetNode.value.type === "object" ||
+    menuTargetNode.value.type === "array" ||
+    menuTargetNode.value.type === "map" ||
+    menuTargetNode.value.type === "set"
+  ) {
+    text = JSON.stringify(serializedToJson(menuTargetNode.value), null, 2);
+  } else {
+    text = String(serializedToJson(menuTargetNode.value) ?? menuTargetNode.value.preview);
+  }
   await doCopy(text);
+}
+
+/** 复制从根到当前节点的 JSON 路径（如 data.list[0].name） */
+async function copyJsonPath() {
+  menuVisible.value = false;
+  const segs = menuTargetKeys.value;
+  let p = "";
+  for (const k of segs) {
+    if (/^\d+$/.test(k)) {
+      p += `[${k}]`;
+    } else if (/^[A-Za-z_$][\w$]*$/.test(k)) {
+      p += p === "" ? k : `.${k}`;
+    } else {
+      p += `[${JSON.stringify(k)}]`;
+    }
+  }
+  await doCopy(p || "(root)");
 }
 
 async function doCopy(text: string) {
@@ -1248,13 +1280,15 @@ function typeBadge(type: string): string {
   return badges[type] || type;
 }
 
-/** 处理子组件冒泡上来的右键菜单事件 */
+/** 处理子组件冒泡上来的右键菜单事件：非根时前置自身 keyName 继续向上冒泡 */
 function handleChildContextMenu(ctx: MenuContext) {
   if (isRoot) {
     onChildContextMenu(ctx);
   } else {
-    /** 非根：继续向上冒泡 */
-    emit("context-menu", ctx);
+    emit("context-menu", {
+      ...ctx,
+      keys: props.keyName != null ? [props.keyName, ...ctx.keys] : ctx.keys,
+    });
   }
 }
 </script>
@@ -1427,6 +1461,9 @@ function handleChildContextMenu(ctx: MenuContext) {
         </button>
         <button class="oi-menu-item" @click="copyValue">
           <span class="oi-menu-icon">📄</span> 复制值
+        </button>
+        <button class="oi-menu-item" @click="copyJsonPath">
+          <span class="oi-menu-icon">📍</span> 复制 JSON 路径
         </button>
         <div class="oi-menu-sep"></div>
         <button

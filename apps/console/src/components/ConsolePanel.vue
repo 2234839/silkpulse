@@ -102,6 +102,17 @@ function clearLogs() {
   clearedBeforeTs.value = Date.now();
 }
 
+/** 复制全部：把当前过滤后的所有日志按统一格式拼接后复制 */
+async function copyAllLogs() {
+  if (filteredLogs.value.length === 0) return;
+  const text = filteredLogs.value
+    .map(
+      (l) => `[${new Date(l.timestamp).toLocaleTimeString()}] ${l.type.toUpperCase()} ${l.message}`,
+    )
+    .join("\n");
+  await copyText(text);
+}
+
 const filteredLogs = computed(() => {
   let result = props.logs;
   /** 清空阈值：隐藏"清空"之前的日志（前端视图层，server 缓冲不变） */
@@ -515,6 +526,15 @@ function clearExecResults() {
         title="长会话缓冲区已满，最早的日志已被滚动淘汰（新日志不受影响）"
         >⚠ 已滚动丢弃最早 {{ props.droppedCount }} 条</span
       >
+      <!-- 复制全部：复制当前过滤后的全部日志 -->
+      <button
+        @click="copyAllLogs"
+        :disabled="filteredLogs.length === 0"
+        class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary hover:bg-elevated-hover disabled:opacity-50 disabled:cursor-not-allowed"
+        title="复制当前过滤后的全部日志"
+      >
+        复制全部 ({{ filteredLogs.length }})
+      </button>
       <!-- 清空视图（仅前端隐藏，server 缓冲不变，新日志正常出现） -->
       <button
         @click="clearLogs"
