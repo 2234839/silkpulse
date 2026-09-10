@@ -62,21 +62,25 @@ const groupedResults = computed(() => {
   }));
 });
 
-/** 搜索筛选 */
-const searchQuery = ref("");
+/** 是否只显示不支持的特性（value === false） */
+const onlyUnsupported = ref(false);
+
+/** 搜索 + 只看不支持 叠加筛选 */
 const filteredGroups = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return groupedResults.value;
-  /** 搜索匹配 id/label，或匹配 value（如搜"false"看所有不支持的） */
   return groupedResults.value
     .map((g) => ({
       ...g,
-      items: g.items.filter(
-        (r) =>
+      items: g.items.filter((r) => {
+        if (onlyUnsupported.value && r.value !== false) return false;
+        if (!q) return true;
+        /** 搜索匹配 id/label，或匹配 value（如搜"false"看所有不支持的） */
+        return (
           r.id.toLowerCase().includes(q) ||
           r.label.toLowerCase().includes(q) ||
-          String(r.value).toLowerCase().includes(q),
-      ),
+          String(r.value).toLowerCase().includes(q)
+        );
+      }),
     }))
     .filter((g) => g.items.length > 0);
 });
@@ -148,6 +152,18 @@ async function copyResults() {
           >· {{ stats.unsupported }} 不支持</span
         >
       </span>
+      <button
+        @click="onlyUnsupported = !onlyUnsupported"
+        :class="
+          onlyUnsupported
+            ? 'bg-red-500/15 border-red-400 text-red-500'
+            : 'border-base bg-elevated hover:bg-elevated-hover text-secondary'
+        "
+        class="px-2 py-1 text-xs rounded border transition-colors whitespace-nowrap"
+        title="只显示当前设备不支持的特性"
+      >
+        {{ onlyUnsupported ? "✗ 只看不支持" : "只看不支持" }}
+      </button>
       <button
         @click="copyResults"
         class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors whitespace-nowrap"

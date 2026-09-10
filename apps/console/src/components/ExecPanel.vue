@@ -86,6 +86,69 @@ async function runExec() {
   }
 }
 
+/** 代码编辑区 textarea 引用（用于取光标位置插入片段） */
+const execTextarea = ref<HTMLTextAreaElement | null>(null);
+
+/** 可点击插入的代码片段 */
+interface Snippet {
+  /** chip 上显示的名称 */
+  label: string;
+  /** 点击后插入编辑区的完整代码 */
+  code: string;
+}
+
+/** SDK 辅助函数片段 */
+const helperSnippets: Snippet[] = [
+  { label: "__silkpulse_click", code: "await __silkpulse_click('selector')" },
+  { label: "setValue", code: "await __silkpulse_setValue('selector', 'value')" },
+  { label: "type", code: "await __silkpulse_type('selector', 'text')" },
+  { label: "wait", code: "await __silkpulse_wait(1000)" },
+  { label: "snapshot", code: "await __silkpulse_snapshot()" },
+  { label: "sourcemap", code: "await __silkpulse_sourcemap()" },
+];
+
+/** 常用诊断片段 */
+const diagSnippets: Snippet[] = [
+  { label: "列出所有 cookie", code: "document.cookie" },
+  {
+    label: "查最大 z-index",
+    code: `const max = { el: null, z: 0 };
+for (const el of document.querySelectorAll('*')) {
+  const z = parseInt(getComputedStyle(el).zIndex, 10);
+  if (!Number.isNaN(z) && z > max.z) { max.el = el; max.z = z; }
+}
+console.table(max.el ? [{ tag: max.el.tagName, z: max.z, el: max.el }] : []);
+return max.z;`,
+  },
+  {
+    label: "当前视口",
+    code: "JSON.stringify({w: innerWidth, h: innerHeight, dpr: devicePixelRatio})",
+  },
+];
+
+/**
+ * 把片段插入编辑区：优先插到光标处，拿不到光标则追加到末尾
+ *
+ * @param snippet 片段文本
+ */
+function insertSnippet(snippet: string): void {
+  const ta = execTextarea.value;
+  if (ta && typeof ta.selectionStart === "number") {
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const value = execCode.value;
+    execCode.value = value.slice(0, start) + snippet + value.slice(end);
+    nextTick(() => {
+      const pos = start + snippet.length;
+      ta.selectionStart = ta.selectionEnd = pos;
+      ta.focus();
+    });
+  } else {
+    const prefix = execCode.value && !execCode.value.endsWith("\n") ? "\n" : "";
+    execCode.value = execCode.value + prefix + snippet;
+  }
+}
+
 /** 点击历史项回填到编辑区 */
 function pickHistory(code: string) {
   execCode.value = code;
@@ -174,6 +237,7 @@ function handleMultilineIndent(
       <!-- 代码编辑区 -->
       <div class="p-3 border-b border-base bg-surface">
         <textarea
+          ref="execTextarea"
           v-model="execCode"
           rows="5"
           placeholder="输入诊断代码，如：return document.title"
@@ -188,10 +252,33 @@ function handleMultilineIndent(
           >
             {{ execRunning ? "执行中..." : "执行 (Ctrl+↵)" }}
           </button>
-          <span class="text-xs text-faint"
-            >Tab 缩进 · 辅助函数：__silkpulse_click / setValue / type / wait / snapshot /
-            sourcemap</span
+          <span class="text-xs text-faint">Tab 缩进</span>
+        </div>
+        <!-- 辅助函数片段 chips -->
+        <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+          <span class="text-xs text-faint">辅助函数</span>
+          <button
+            v-for="s in helperSnippets"
+            :key="s.label"
+            @click="insertSnippet(s.code)"
+            class="px-2 py-0.5 text-xs font-mono rounded-full border border-base bg-elevated hover:bg-elevated-hover hover:border-blue-400 text-secondary transition-colors"
+            :title="s.code"
           >
+            {{ s.label }}
+          </button>
+        </div>
+        <!-- 常用诊断片段 chips -->
+        <div class="flex flex-wrap items-center gap-1.5 mt-1">
+          <span class="text-xs text-faint">诊断片段</span>
+          <button
+            v-for="s in diagSnippets"
+            :key="s.label"
+            @click="insertSnippet(s.code)"
+            class="px-2 py-0.5 text-xs rounded-full border border-base bg-elevated hover:bg-elevated-hover hover:border-blue-400 text-secondary transition-colors"
+            :title="s.code"
+          >
+            {{ s.label }}
+          </button>
         </div>
       </div>
       <!-- 结果展示区 -->

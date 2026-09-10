@@ -18,18 +18,20 @@
 import { ref, onUnmounted } from "vue";
 
 interface Options {
-  /** 初始宽度 px */
+  /** 初始宽度/高度 px */
   initial: number;
-  /** 最小宽度 px */
+  /** 最小宽度/高度 px */
   min: number;
-  /** 最大宽度 px */
+  /** 最大宽度/高度 px */
   max: number;
   /**
    * 拖拽方向：
    * - 'right'：手柄在右侧，鼠标右移 → 宽度增大
    * - 'left'：手柄在左侧，鼠标左移 → 宽度增大
+   * - 'down'：手柄在下侧，鼠标下移 → 高度增大
+   * - 'up'：手柄在上侧，鼠标上移 → 高度增大
    */
-  direction: "right" | "left";
+  direction: "right" | "left" | "down" | "up";
   /** localStorage 持久化 key，传入则启用持久化 */
   storageKey?: string;
 }
@@ -45,19 +47,22 @@ export function useResizable(opts: Options) {
     return Math.max(opts.min, Math.min(opts.max, n));
   }
 
-  const width = ref(restore());
+  const size = ref(restore());
   let dragging = false;
-  /** 拖拽起始 X 坐标 */
-  let startX = 0;
-  /** 拖拽起始宽度 */
-  let startW = 0;
+  /** 拖拽起始坐标（x 或 y，按方向取用） */
+  let startPos = 0;
+  /** 拖拽起始尺寸 */
+  let startSize = 0;
+
+  /** 是否为垂直方向（down/up） */
+  const vertical = opts.direction === "down" || opts.direction === "up";
 
   function onMouseMove(e: MouseEvent) {
     if (!dragging) return;
-    const delta = e.clientX - startX;
-    /** right 方向：delta > 0 增宽；left 方向：delta < 0 增宽 */
-    const newW = opts.direction === "right" ? startW + delta : startW - delta;
-    width.value = Math.max(opts.min, Math.min(opts.max, newW));
+    const delta = vertical ? e.clientY - startPos : e.clientX - startPos;
+    /** right/down：delta > 0 增大；left/up：delta < 0 增大 */
+    const grow = delta * (opts.direction === "right" || opts.direction === "down" ? 1 : -1);
+    size.value = Math.max(opts.min, Math.min(opts.max, startSize + grow));
   }
 
   function onMouseUp() {
@@ -67,7 +72,7 @@ export function useResizable(opts: Options) {
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("mouseup", onMouseUp);
     if (opts.storageKey) {
-      localStorage.setItem(opts.storageKey, String(width.value));
+      localStorage.setItem(opts.storageKey, String(size.value));
     }
   }
 
@@ -75,9 +80,9 @@ export function useResizable(opts: Options) {
   function onDragStart(e: MouseEvent) {
     e.preventDefault();
     dragging = true;
-    startX = e.clientX;
-    startW = width.value;
-    document.body.style.cursor = "col-resize";
+    startPos = vertical ? e.clientY : e.clientX;
+    startSize = size.value;
+    document.body.style.cursor = vertical ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -85,5 +90,5 @@ export function useResizable(opts: Options) {
 
   onUnmounted(onMouseUp);
 
-  return { width, onDragStart };
+  return { width: size, onDragStart };
 }

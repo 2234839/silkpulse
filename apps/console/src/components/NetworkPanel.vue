@@ -8,7 +8,7 @@
  *
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入。
  */
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, type Ref } from "vue";
 import type { NetworkEntry } from "@silkpulse/shared";
 import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
@@ -177,6 +177,75 @@ const selectedNetwork = computed(() => {
 
 /** cURL 复制状态（用于按钮反馈） */
 const curlCopyState = ref<"idle" | "copied">("idle");
+
+/** 响应复制状态（用于按钮反馈） */
+const resCopyState = ref<"idle" | "copied">("idle");
+/** 请求体复制状态（用于按钮反馈） */
+const reqCopyState = ref<"idle" | "copied">("idle");
+
+/**
+ * 通用复制反馈：复制后短暂切换为「已复制」再复原
+ */
+function flashCopyState(state: Ref<"idle" | "copied">) {
+  state.value = "copied";
+  setTimeout(() => {
+    state.value = "idle";
+  }, 1500);
+}
+
+/**
+ * 把 NetworkEntry 组装成可导出的纯数据对象
+ *
+ * 字段名取自 NetworkEntry 原始结构：reqHeaders/reqBody/resHeaders/resBody/duration。
+ */
+function toExportObject(n: NetworkEntry): Record<string, unknown> {
+  return {
+    method: n.method,
+    url: n.url,
+    status: n.status,
+    timestamp: n.timestamp,
+    kind: n.kind,
+    mimeType: n.mimeType ?? null,
+    reqHeaders: n.reqHeaders ?? null,
+    reqBody: n.reqBody ?? null,
+    resHeaders: n.resHeaders ?? null,
+    resBody: n.resBody ?? null,
+    duration: n.duration,
+    error: n.error ?? null,
+  };
+}
+
+/**
+ * 触发浏览器下载一段文本为 JSON 文件
+ */
+function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** 从 URL 提取安全文件名片段（路径末段，去掉查询串） */
+function urlFileSegment(url: string): string {
+  const seg = url.split("?")[0].split("/").filter(Boolean).pop() ?? "request";
+  return seg.replace(/[^\w.-]/g, "_").slice(0, 60) || "request";
+}
+
+/** 导出选中请求为 JSON 文件 */
+function exportSelectedNetwork() {
+  const n = selectedNetwork.value;
+  if (!n) return;
+  downloadJson(toExportObject(n), `network-${urlFileSegment(n.url)}-${n.seq}.json`);
+}
+
+/** 导出当前过滤后的全部请求为 JSON 文件（数组） */
+function exportAllNetwork() {
+  const list = filteredNetwork.value.map(toExportObject);
+  downloadJson(list, `network-all-${list.length}.json`);
+}
 
 /** 格式化 headers 对象为 "k: v" 多行文本 */
 function formatHeaders(h: Record<string, string>): string {
@@ -684,10 +753,23 @@ async function copyCurl() {
   if (!selectedNetwork.value) return;
   const cmd = toCurl(selectedNetwork.value);
   await copyText(cmd);
-  curlCopyState.value = "copied";
-  setTimeout(() => {
-    curlCopyState.value = "idle";
-  }, 1500);
+  flashCopyState(curlCopyState);
+}
+
+/** 复制选中请求的响应体原始文本 */
+async function copyResBody() {
+  const n = selectedNetwork.value;
+  if (!n?.resBody) return;
+  await copyText(n.resBody);
+  flashCopyState(resCopyState);
+}
+
+/** 复制选中请求的请求体原始文本 */
+async function copyReqBody() {
+  const n = selectedNetwork.value;
+  if (!n?.reqBody) return;
+  await copyText(n.reqBody);
+  flashCopyState(reqCopyState);
 }
 
 /** 关键词搜索（按 URL / 方法 / 状态码） */
@@ -705,6 +787,24 @@ const networkStatusFilter = ref<"all" | "success" | "error">("all");
  * 诊断时需要区分"API 请求"和"静态资源加载"——页面白屏查 resource，接口报错查 fetch/xhr。
  */
 const networkKindFilter = ref<"all" | "fetch" | "xhr" | "ws" | "resource">("all");
+/**
+ * 资源分类筛选：all 全部 / 具体资源大类（css/js/img/font/media/other）
+ *
+ * 与 状态筛选（全部/成功/失败）叠加过滤，用于只看某类资源（如只看 JS）。
+ */
+const networkCategoryFilter = ref<ResourceCategory | "all">("all");
+
+/** 分类筛选可选项（含「全部」） */
+const CATEGORY_OPTIONS: Array<{ value: ResourceCategory | "all"; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "js", label: "JS" },
+  { value: "css", label: "CSS" },
+  { value: "img", label: "IMG" },
+  { value: "font", label: "字体" },
+  { value: "media", label: "媒体" },
+  { value: "other", label: "其他" },
+];
+
 /**
  * 耗时排序：time（默认时间正序）/ desc（耗时降序，慢请求在最上）/ asc（耗时升序）
  *
@@ -735,6 +835,11 @@ const filteredNetwork = computed(() => {
     /** status=0 表示请求未完成（网络中断/CORS 失败），诊断时视为失败 */
     result = result.filter((n) => n.status === 0 || n.status >= 400);
   }
+  /** 资源分类筛选（与状态筛选叠加） */
+  if (networkCategoryFilter.value !== "all") {
+    const cat = networkCategoryFilter.value;
+    result = result.filter((n) => getResourceCategory(n) === cat);
+  }
   const q = networkSearch.value.trim().toLowerCase();
   if (q) {
     result = result.filter(
@@ -744,11 +849,11 @@ const filteredNetwork = computed(() => {
         String(n.status).includes(q),
     );
   }
-  /** 耗时排序：默认 time 不排（保持时间正序），desc/asc 按 duration 排 */
+  /** 耗时排序：默认 time 不排（保持时间正序），desc/asc 按 calcDuration 排（兼容 SSE 动态耗时） */
   if (networkDurationSort.value === "desc") {
-    result = [...result].sort((a, b) => b.duration - a.duration);
+    result = [...result].sort((a, b) => calcDuration(b) - calcDuration(a));
   } else if (networkDurationSort.value === "asc") {
-    result = [...result].sort((a, b) => a.duration - b.duration);
+    result = [...result].sort((a, b) => calcDuration(a) - calcDuration(b));
   }
   return result;
 });
@@ -931,6 +1036,22 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             }}
           </button>
         </div>
+        <!-- 资源分类筛选：全部 / JS / CSS / IMG / 字体 / 媒体 / 其他 -->
+        <div class="flex items-center gap-1 flex-wrap">
+          <button
+            v-for="opt in CATEGORY_OPTIONS"
+            :key="opt.value"
+            @click="networkCategoryFilter = opt.value"
+            class="px-2 py-0.5 text-xs rounded font-medium"
+            :class="
+              networkCategoryFilter === opt.value
+                ? 'bg-indigo-500 text-white'
+                : 'bg-elevated text-secondary bg-elevated-hover'
+            "
+          >
+            {{ opt.label }}
+          </button>
+        </div>
         <!-- 状态筛选：全部 / 成功 / 失败 -->
         <div class="flex items-center gap-1">
           <button
@@ -949,14 +1070,37 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             {{ sf === "all" ? "全部" : sf === "success" ? "成功" : "失败" }}
           </button>
           <button
+            @click="toggleDurationSort"
+            class="px-2 py-0.5 text-xs rounded font-medium"
+            :class="
+              networkDurationSort === 'desc'
+                ? 'bg-amber-500 text-white'
+                : 'bg-elevated text-secondary bg-elevated-hover'
+            "
+            :title="
+              networkDurationSort === 'desc'
+                ? '当前：耗时降序，点击取消恢复原序'
+                : '按耗时降序排列当前列表'
+            "
+          >
+            耗时↓
+          </button>
+          <button
+            @click="exportAllNetwork"
+            class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
+            title="导出当前过滤后的全部请求为 JSON"
+          >
+            ⬇ 导出全部
+          </button>
+          <button
             @click="clearNetwork"
-            class="ml-auto px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
+            class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
             title="清空当前视图（不影响服务端缓冲）"
           >
             🚫 清空
           </button>
-          <span class="text-xs text-faint"
-            >{{ filteredNetwork.length }}/{{ props.network.length }}</span
+          <span class="text-xs text-faint">
+            {{ filteredNetwork.length }}/{{ props.network.length }}</span
           >
         </div>
       </div>
@@ -1064,8 +1208,31 @@ function formatRefetchHeaders(h: Record<string, string>): string {
     <div class="flex-1 overflow-y-auto p-4">
       <template v-if="selectedNetwork">
         <div class="space-y-4">
-          <!-- 工具栏：复制为 cURL -->
-          <div class="flex justify-end">
+          <!-- 工具栏：复制 / 导出 -->
+          <div class="flex justify-end gap-2">
+            <button
+              @click="copyReqBody"
+              :disabled="!selectedNetwork.reqBody"
+              class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="复制请求体原始文本"
+            >
+              {{ reqCopyState === "copied" ? "✓ 已复制" : "复制请求体" }}
+            </button>
+            <button
+              @click="copyResBody"
+              :disabled="!selectedNetwork.resBody"
+              class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="复制响应体原始文本"
+            >
+              {{ resCopyState === "copied" ? "✓ 已复制" : "复制响应" }}
+            </button>
+            <button
+              @click="exportSelectedNetwork"
+              class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
+              title="导出该请求完整信息为 JSON 文件"
+            >
+              导出 JSON
+            </button>
             <button
               @click="copyCurl"
               class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"

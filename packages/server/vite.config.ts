@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vite-plus";
-/** rolldown 类型经 vite-plus-core re-export（rolldown 本体未直接暴露给项目） */
-import type { Plugin } from "@voidzero-dev/vite-plus-core/rolldown";
+
+/** emitFile 所需最小上下文（避免引入 rolldown Plugin 类型依赖） */
+interface EmitFileContext {
+  /** 发射产物文件到输出目录 */
+  emitFile(file: { type: "asset"; fileName: string; source: Buffer }): void;
+}
 
 /**
  * uWS 原生二进制自包含插件
@@ -16,7 +20,7 @@ import type { Plugin } from "@voidzero-dev/vite-plus-core/rolldown";
  * 效果：dist/ 整体 rsync 即可部署，不再需要 node_modules/uWebSockets.js。
  * ABI 由文件名携带（uws_linux_x64_137.node），跨 Node 大版本部署时一眼可辨。
  */
-function uwsNativePlugin(): Plugin {
+function uwsNativePlugin() {
   /** 按构建机平台/ABI 拼出二进制名（与 uws.js 内部的加载逻辑一致） */
   const nodeFile = `uws_${process.platform}_${process.arch}_${process.versions.modules}.node`;
   const virtualId = "\0virtual:uws-native";
@@ -35,7 +39,7 @@ function uwsNativePlugin(): Plugin {
         "",
       ].join("\n");
     },
-    generateBundle() {
+    generateBundle(this: EmitFileContext) {
       const uwsDir = path.resolve(import.meta.dirname, "node_modules/uWebSockets.js");
       this.emitFile({
         type: "asset",

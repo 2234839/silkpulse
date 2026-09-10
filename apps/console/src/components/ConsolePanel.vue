@@ -5,7 +5,8 @@
  * 展示远程设备 console.* 输出，支持级别筛选（all/error/warn/info/debug）、
  * 关键词搜索、点击复制单条、清空视图（仅前端隐藏，server 缓冲不变）。
  *
- * 底部输入行：直接在远程设备 console 上下文执行代码（回车执行，↑/↓ 翻阅历史），
+ * 底部输入行：直接在远程设备 console 上下文执行代码（Enter 执行，Shift+Enter 换行，↑/↓ 翻阅历史），
+ * 多行输入时 textarea 自动增高（最多约 6 行），执行后清空并缩回 1 行。
  * 复用 /api/devices/:id/exec 端点，结果以日志样式展示在列表下方。
  *
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入。
@@ -248,10 +249,33 @@ const execInput = ref("");
 /** 执行中标记（防重复提交） */
 const execRunning = ref(false);
 
+/** textarea 单行基础高度（px）与最大行数限制 */
+const TEXTAREA_LINE_HEIGHT = 20;
+/** textarea 最大可见行数（超过后内部滚动） */
+const TEXTAREA_MAX_LINES = 6;
+
+/**
+ * 按内容自适应 textarea 高度：无换行时 1 行，换行后增高，封顶 6 行
+ */
+function autoResizeExecInput() {
+  const el = execInputEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  const maxHeight = TEXTAREA_LINE_HEIGHT * TEXTAREA_MAX_LINES;
+  const h = Math.min(el.scrollHeight, maxHeight);
+  el.style.height = `${h}px`;
+  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
+/** 输入内容变化时同步高度 */
+watch(execInput, () => {
+  nextTick(autoResizeExecInput);
+});
+
 /* -------- 代码补全（autocomplete） -------- */
 
-/** 输入框 ref（获取光标位置） */
-const execInputEl = useTemplateRef<HTMLInputElement>("execInputEl");
+/** 输入框 ref（获取光标位置），textarea 支持多行输入 */
+const execInputEl = useTemplateRef<HTMLTextAreaElement>("execInputEl");
 /** 补全建议列表 */
 const completionItems = ref<CompletionItem[]>([]);
 /** 当前选中的补全项索引（-1 = 未选中） */
@@ -401,6 +425,8 @@ async function runExecInput() {
     execResults.value = [...execResults.value, { code, output, resultValue, ok, time }];
     recordExec(code, ok);
     execInput.value = "";
+    /** 执行后缩回 1 行 */
+    nextTick(autoResizeExecInput);
     historyCursor.value = -1;
     inputDraft.value = "";
     execRunning.value = false;
@@ -659,9 +685,10 @@ function clearExecResults() {
         @hover="completionActive = $event"
       />
       <span class="text-blue-500 font-mono text-sm select-none">›</span>
-      <input
+      <textarea
         ref="execInputEl"
         v-model="execInput"
+        rows="1"
         @keydown="handleExecKeydown"
         @input="triggerCompletion"
         @blur="onInputBlur"
@@ -670,8 +697,10 @@ function clearExecResults() {
         autocapitalize="off"
         autocorrect="off"
         :disabled="execRunning || !deviceId"
-        :placeholder="deviceId ? '输入代码，回车执行 · Tab 补全 · ↑↓ 历史' : '请先选择设备'"
-        class="flex-1 text-sm font-mono bg-transparent text-primary focus:outline-none placeholder:text-faint disabled:opacity-50"
+        :placeholder="
+          deviceId ? '输入代码，Enter 执行 · Shift+Enter 换行 · Tab 补全 · ↑↓ 历史' : '请先选择设备'
+        "
+        class="flex-1 resize-none text-sm font-mono bg-transparent text-primary focus:outline-none placeholder:text-faint disabled:opacity-50 leading-5"
       />
       <span v-if="acLoading" class="text-xs text-faint shrink-0">采集上下文...</span>
       <span v-else-if="execRunning" class="text-xs text-faint shrink-0">执行中...</span>

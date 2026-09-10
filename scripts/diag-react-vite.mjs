@@ -162,7 +162,7 @@ async function runCase(name, url, preInject) {
     /** prod minified 名字是压缩后的（Sd/wd）——官方 React DevTools 同样，
      * 断言树结构非空 + 有层级（children），不检查源码名 */
     const nodes = tree?.tree ?? [];
-    const hasNesting = nodes.length > 0 && nodes.some((n) => (n.children?.length ?? 0) > 0);
+    const hasNesting = nodes.some((n) => (n.children?.length ?? 0) > 0);
     hasNesting
       ? ok(`组件树完整（${nodes.length} 根节点含子层级，prod minified 名）`)
       : fail("组件树缺失", tj.slice(0, 300));

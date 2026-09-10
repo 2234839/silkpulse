@@ -28,7 +28,7 @@ export function dispatchServerMessage(msg: ServerToDeviceMessage): void {
     try {
       handler(msg);
     } catch {
-      /** 单个监听器异常不影响其他监听器和主链路 */
+      /** 静默原因：单个监听器异常不影响其他监听器和主链路 */
     }
   }
 }

@@ -616,6 +616,7 @@ onMounted(async () => {
       v-if="selectedDevice"
       v-model="showAiModal"
       :device-id="selectedDevice.id"
+      :device="selectedDevice"
       :title="selectedDevice.title"
       :url="selectedDevice.url"
       :errors="errors"

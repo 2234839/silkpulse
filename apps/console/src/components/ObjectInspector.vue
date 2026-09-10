@@ -85,6 +85,8 @@ const props = withDefaults(
     syncKey?: string;
     /** 是否启用同步展开（配合 syncKey），仅根实例需要传 */
     syncExpand?: boolean;
+    /** 搜索关键词：非空时在整棵树中定位并展开匹配节点（大小写不敏感包含），仅根实例响应 */
+    searchQuery?: string;
   }>(),
   {
     depth: 0,
@@ -94,6 +96,7 @@ const props = withDefaults(
     diffSide: undefined,
     syncKey: undefined,
     syncExpand: false,
+    searchQuery: undefined,
   },
 );
 
@@ -1281,6 +1284,107 @@ function typeBadge(type: string): string {
 }
 
 /** 处理子组件冒泡上来的右键菜单事件：非根时前置自身 keyName 继续向上冒泡 */
+/* ==================== 搜索：整棵树扫描 + 展开广播 + 命中高亮（仅根实例） ==================== */
+
+/** 命中节点路径集合（逗号 join 的 childIndex 链）：根实例持有并 provide，子实例 inject */
+const matchedPaths = isRoot
+  ? ref<Set<string>>(new Set())
+  : inject<Ref<Set<string>>>("oi-matched-paths", ref<Set<string>>(new Set()));
+provide("oi-matched-paths", matchedPaths);
+/** 自己的 path 是否命中（子节点 inject 后判断） */
+const searchMatched = computed(() => matchedPaths.value.has(nodePathStr.value));
+
+/**
+ * 搜索命中节点的全部祖先路径集合：子节点 watch 它自动展开。
+ * 仿 diff changedAncestors 模式——比一次性广播 remoteExpand 更可靠：
+ * 广播只发生一次，而子节点可能在广播后才挂载（父级折叠时未渲染）。
+ */
+const searchAncestors = isRoot
+  ? ref<Set<string>>(new Set())
+  : inject<Ref<Set<string>>>("oi-search-ancestors", ref<Set<string>>(new Set()));
+provide("oi-search-ancestors", searchAncestors);
+
+/**
+ * 搜索命中时自动展开：自己是命中节点的祖先（含自身）就展开。
+ * 只自动展开不自动折叠——与 diff changedAncestors 同策略。
+ * 注意：nodePathStr 声明在后面，此 watch 回调惰性执行，无 TDZ 问题。
+ */
+watch(searchAncestors, (newSet) => {
+  if (newSet.has(nodePathStr.value) && !manualExpanded.value) {
+    manualExpanded.value = true;
+  }
+});
+
+/**
+ * 在 raw 树上递归扫描：匹配 key 或 value 的 string 形式，收集命中节点路径
+ *
+ * 路径规则必须与 nodePathStr 一致：逗号 join 的 **childIndex 链**
+ * （childIndex = 该节点在父节点 children 中的序号，根的直接子节点从 0 编号）。
+ */
+function scanSearchHits(root: unknown, query: string, basePath = ""): Set<string> {
+  const hits = new Set<string>();
+  const q = query.toLowerCase();
+
+  function walk(val: unknown, path: string) {
+    if (val === null || val === undefined) return;
+    const t = typeof val;
+    if (t !== "object") {
+      /** 叶子：值的 string 形式匹配 */
+      if (String(val).toLowerCase().includes(q)) hits.add(path);
+      return;
+    }
+    const entries = Object.entries(val as Record<string, unknown>);
+    entries.forEach(([key, child], idx) => {
+      const childPath = path ? `${path},${idx}` : basePath ? `${basePath},${idx}` : String(idx);
+      /** key 匹配也算命中（keyName 渲染在行上） */
+      if (key.toLowerCase().includes(q)) hits.add(childPath);
+      walk(child, childPath);
+    });
+  }
+
+  walk(root, "");
+  return hits;
+}
+
+/** 搜索防抖定时器（仅根实例使用） */
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+if (isRoot) {
+  watch(
+    () => props.searchQuery,
+    (query) => {
+      if (searchTimer) clearTimeout(searchTimer);
+      const q = (query ?? "").trim();
+      /** 清空：立即清除高亮（保留展开状态） */
+      if (!q) {
+        matchedPaths.value = new Set();
+        searchAncestors.value = new Set();
+        return;
+      }
+      searchTimer = setTimeout(() => {
+        const hits = scanSearchHits(props.raw, q, nodePathStr.value);
+        matchedPaths.value = hits;
+        /**
+         * 收集命中节点的所有祖先（含自身）：写入 searchAncestors。
+         * 祖先链上的节点 watch 到自己在集合里就自动展开，已挂载/后挂载都能覆盖。
+         */
+        const ancestors = new Set<string>();
+        for (const p of hits) {
+          const segs = p.split(",");
+          for (let i = 1; i <= segs.length; i++) {
+            ancestors.add(segs.slice(0, i).join(","));
+          }
+        }
+        searchAncestors.value = ancestors;
+      }, 250);
+    },
+  );
+  /** 组件销毁时清理防抖定时器 */
+  onScopeDispose(() => {
+    if (searchTimer) clearTimeout(searchTimer);
+  });
+}
+
 function handleChildContextMenu(ctx: MenuContext) {
   if (isRoot) {
     onChildContextMenu(ctx);
@@ -1303,6 +1407,7 @@ function handleChildContextMenu(ctx: MenuContext) {
         'oi-diff-removed': isDiffMode && diffStatus === 'removed',
         'oi-diff-modified': isDiffMode && diffStatus === 'modified',
         'oi-diff-children-changed': isDiffMode && diffStatus === 'children-changed',
+        'oi-search-hit': searchMatched,
       }"
       @click.stop="toggle"
       @contextmenu="onContextMenu"
@@ -1517,6 +1622,12 @@ function handleChildContextMenu(ctx: MenuContext) {
   white-space: nowrap;
   padding: 0 2px;
   border-radius: 3px;
+}
+
+/* 搜索命中行：黄色高亮 */
+.oi-row.oi-search-hit {
+  background: rgba(250, 204, 21, 0.2);
+  border-left: 2px solid rgba(250, 204, 21, 0.7);
 }
 
 .oi-row:hover {

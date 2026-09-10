@@ -11,7 +11,6 @@
 import { ref, computed, watch } from "vue";
 import ObjectInspector from "./ObjectInspector.vue";
 import { apiFetch } from "../utils/api";
-
 type StorageType = "local" | "session" | "cookie" | "indexeddb";
 
 /**
@@ -73,6 +72,8 @@ const storageAdding = ref(false);
 const storageNewValue = ref("");
 /** 操作反馈（"已保存" / "已删除"） */
 const storageFeedback = ref("");
+/** 反馈是否为错误提示（红色显示） */
+const storageFeedbackError = ref(false);
 /**
  * 竞态保护策略
  *
@@ -286,12 +287,129 @@ async function deleteStorage(key: string) {
   }
 }
 
-/** 显示操作反馈（1.5s 后消失） */
-function showStorageFeedback(msg: string) {
+/**
+ * 显示操作反馈（1.5s 后消失）
+ *
+ * @param msg   提示文本
+ * @param isError 是否为错误提示（红色）
+ */
+function showStorageFeedback(msg: string, isError = false) {
   storageFeedback.value = msg;
+  storageFeedbackError.value = isError;
   setTimeout(() => {
     storageFeedback.value = "";
+    storageFeedbackError.value = false;
   }, 1500);
+}
+
+/** 搜索关键词（对 key/value 做大小写不敏感的包含匹配） */
+const storageSearch = ref("");
+/** 隐藏的文件选择 input（导入用） */
+const importFileInput = ref<HTMLInputElement | null>(null);
+
+/** 当前 tab 类型标签（导出文件名用） */
+const storageTypeLabel = computed(() =>
+  storageType.value === "local"
+    ? "localstorage"
+    : storageType.value === "session"
+      ? "sessionstorage"
+      : storageType.value === "cookie"
+        ? "cookies"
+        : "indexeddb",
+);
+
+/**
+ * 按搜索词过滤后的 storage 数据
+ *
+ * key 或 value 任一命中（大小写不敏感包含）即保留。
+ */
+const filteredStorage = computed(() => {
+  const q = storageSearch.value.trim().toLowerCase();
+  const entries = Object.entries(storageData.value);
+  if (!q) return entries;
+  return entries.filter(
+    ([key, value]) => key.toLowerCase().includes(q) || value.toLowerCase().includes(q),
+  );
+});
+
+/**
+ * 字节数格式化为人类可读形式（B/KB/MB）
+ */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** 计算字符串的字节数（UTF-8 编码，比 str.length 更准确） */
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+/**
+ * 导出当前 tab 的全部条目为 JSON 文件下载
+ */
+function exportStorage() {
+  const payload = JSON.stringify(storageData.value, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `silkpulse-storage-${storageTypeLabel.value}-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showStorageFeedback("✓ 已导出");
+}
+
+/**
+ * 触发文件选择（导入入口）
+ */
+function triggerImport() {
+  importFileInput.value?.click();
+}
+
+/**
+ * 读取导入的 JSON 文件，逐条写入远端后刷新列表
+ */
+async function onImportFile(e: Event) {
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const file = target.files?.[0];
+  target.value = "";
+  if (!file || !props.deviceId) return;
+  let entries: Record<string, string>;
+  try {
+    const parsed: unknown = JSON.parse(await file.text());
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("bad format");
+    }
+    /** 逐项校验：所有值都必须是 string，否则视为格式不正确 */
+    const obj = parsed as Record<string, unknown>;
+    if (!Object.values(obj).every((v) => typeof v === "string")) {
+      throw new Error("bad value type");
+    }
+    entries = obj;
+  } catch {
+    showStorageFeedback("导入失败：文件格式不正确", true);
+    return;
+  }
+  let ok = 0;
+  for (const [key, value] of Object.entries(entries)) {
+    const res = await apiFetch(`/api/devices/${props.deviceId}/storage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "set",
+        type: storageType.value,
+        key,
+        value: String(value),
+      }),
+    });
+    if (res.ok) ok++;
+  }
+  await loadStorage(true);
+  showStorageFeedback(`✓ 已导入 ${ok}/${Object.keys(entries).length} 条`);
 }
 
 /** IndexedDB store 展开/收起 */
@@ -445,12 +563,41 @@ const isNewValueJson = computed(() => {
         </button>
       </div>
 
-      <!-- 更新时间（收到过 storage-change 才显示） -->
+      <!-- 更新时间 + 搜索 + 导入导出（收到过 storage-change 才显示实时标记） -->
       <div class="ml-auto flex items-center gap-2">
         <span v-if="formattedUpdateTime" class="text-[10px] text-faint flex items-center gap-1">
           <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
           实时 · {{ formattedUpdateTime }}
         </span>
+        <!-- 搜索（仅平铺 storage 类型） -->
+        <input
+          v-if="storageType !== 'indexeddb'"
+          v-model="storageSearch"
+          placeholder="搜索 key / value..."
+          class="w-44 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+        />
+        <!-- 导出/导入（仅平铺 storage 类型） -->
+        <template v-if="storageType !== 'indexeddb'">
+          <button
+            @click="exportStorage"
+            class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
+          >
+            导出
+          </button>
+          <button
+            @click="triggerImport"
+            class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
+          >
+            导入
+          </button>
+          <input
+            ref="importFileInput"
+            type="file"
+            accept="application/json,.json"
+            class="hidden"
+            @change="onImportFile"
+          />
+        </template>
         <button
           v-if="!storageAdding && storageType !== 'indexeddb'"
           @click="startAddStorage"
@@ -466,7 +613,12 @@ const isNewValueJson = computed(() => {
         >
           {{ storageLoading ? "..." : "刷新" }}
         </button>
-        <span v-if="storageFeedback" class="text-xs text-green-600">{{ storageFeedback }}</span>
+        <span
+          v-if="storageFeedback"
+          class="text-xs"
+          :class="storageFeedbackError ? 'text-red-500' : 'text-green-600'"
+          >{{ storageFeedback }}</span
+        >
       </div>
     </div>
 
@@ -547,15 +699,16 @@ const isNewValueJson = computed(() => {
             <tr>
               <th class="text-left px-3 py-2 w-1/4">Key</th>
               <th class="text-left px-3 py-2">Value</th>
+              <th class="text-left px-3 py-2 w-16">大小</th>
               <th class="text-left px-3 py-2 w-28">更新时间</th>
               <th class="text-right px-3 py-2 w-16">操作</th>
             </tr>
           </thead>
           <tbody>
-            <!-- 已有数据行 -->
-            <template v-if="Object.keys(storageData).length > 0">
+            <!-- 已有数据行（搜索过滤后） -->
+            <template v-if="filteredStorage.length > 0">
               <tr
-                v-for="(value, key) in storageData"
+                v-for="[key, value] in filteredStorage"
                 :key="key"
                 class="border-b border-light hover:bg-blue-soft"
                 :class="{ 'bg-blue-soft': selectedKey === String(key) }"
@@ -568,6 +721,9 @@ const isNewValueJson = computed(() => {
                 >
                   <div v-if="value.length > 200" class="max-h-24 overflow-y-auto">{{ value }}</div>
                   <template v-else>{{ value }}</template>
+                </td>
+                <td class="px-3 py-2 text-xs text-faint whitespace-nowrap font-mono">
+                  {{ formatSize(byteLength(value)) }}
                 </td>
                 <td class="px-3 py-2 text-xs text-faint whitespace-nowrap">
                   {{ getKeyTime(String(key)) ?? "" }}
@@ -582,9 +738,13 @@ const isNewValueJson = computed(() => {
                 </td>
               </tr>
             </template>
+            <!-- 搜索无命中 -->
+            <tr v-else-if="storageSearch.trim()">
+              <td :colspan="4" class="text-faint text-center py-8 text-sm">无匹配项</td>
+            </tr>
             <!-- 空状态 -->
             <tr v-else-if="!storageAdding">
-              <td colspan="4" class="text-faint text-center py-8 text-sm">
+              <td :colspan="4" class="text-faint text-center py-8 text-sm">
                 {{
                   storageType === "cookie"
                     ? "暂无 Cookie"

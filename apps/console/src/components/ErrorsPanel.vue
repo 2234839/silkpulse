@@ -18,16 +18,57 @@ const props = defineProps<{
 
 /** 关键词搜索（按 message / stack / mapped.source） */
 const errorSearch = ref("");
+
+/** 时间范围筛选选项 */
+const timeRangeOptions = [
+  /** 全部时间 */
+  { value: "all", label: "全部" },
+  /** 最近 1 小时 */
+  { value: "1h", label: "最近 1 小时" },
+  /** 最近 10 分钟 */
+  { value: "10m", label: "最近 10 分钟" },
+] as const;
+/** 当前选中的时间范围 */
+const timeRange = ref<"all" | "1h" | "10m">("all");
+
 /**
  * 正在复制的错误 timestamp（标识哪条错误卡片显示"已复制"反馈）
  *
  * 用 timestamp 而非索引：filteredErrors 过滤后索引不稳定，timestamp 是错误唯一标识。
  */
 const copyingErrorTs = ref<string | null>(null);
+/** 正在复制「源码位置」的错误 timestamp（短暂显示 ✓） */
+const copyingLocationTs = ref<string | null>(null);
+
+/** 复制 source map 解析出的原始位置全文（source:line:col） */
+async function copyMappedLocation(e: ErrorEntry) {
+  if (!e.mapped) return;
+  const text = `${e.mapped.source}:${e.mapped.line}:${e.mapped.column}`;
+  const ok = await copyText(text);
+  if (ok) {
+    copyingLocationTs.value = e.timestamp;
+    setTimeout(() => {
+      if (copyingLocationTs.value === e.timestamp) copyingLocationTs.value = null;
+    }, 1500);
+  }
+}
+
+/** 时间范围对应的最早时间戳（"all" 返回 0 = 不过滤） */
+const rangeStartTs = computed(() => {
+  if (timeRange.value === "1h") return Date.now() - 60 * 60 * 1000;
+  if (timeRange.value === "10m") return Date.now() - 10 * 60 * 1000;
+  return 0;
+});
+
 const filteredErrors = computed(() => {
+  let result = props.errors;
+  /** 时间范围过滤（与搜索叠加） */
+  if (rangeStartTs.value > 0) {
+    result = result.filter((e) => new Date(e.timestamp).getTime() >= rangeStartTs.value);
+  }
   const q = errorSearch.value.trim().toLowerCase();
-  if (!q) return props.errors;
-  return props.errors.filter((e) => {
+  if (!q) return result;
+  return result.filter((e) => {
     if (e.message.toLowerCase().includes(q)) return true;
     if (e.stack && e.stack.toLowerCase().includes(q)) return true;
     if (e.mapped && e.mapped.source.toLowerCase().includes(q)) return true;
@@ -116,6 +157,14 @@ async function copyAllErrors() {
         title="长会话缓冲区已满，最早的记录已被滚动淘汰（新日志不受影响）"
         >⚠ 已滚动丢弃最早 {{ props.droppedCount }} 条</span
       >
+      <select
+        v-model="timeRange"
+        class="shrink-0 text-xs px-1.5 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
+      >
+        <option v-for="opt in timeRangeOptions" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
       <input
         v-model="errorSearch"
         placeholder="搜索错误（message / 堆栈 / 源码位置）"
@@ -163,6 +212,14 @@ async function copyAllErrors() {
         >
           ↳ {{ e.mapped.source }}:{{ e.mapped.line }}:{{ e.mapped.column
           }}<span v-if="e.mapped.name" class="text-blue-400"> ({{ e.mapped.name }})</span>
+          <!-- 复制位置：复制 source:line:col 全文，点击后短暂显示 ✓ -->
+          <button
+            @click.stop="copyMappedLocation(e)"
+            class="ml-1.5 text-[10px] px-1 py-0 rounded border border-blue-soft bg-elevated hover:bg-elevated-hover text-secondary transition-colors align-middle"
+            :title="`复制位置 ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}`"
+          >
+            {{ copyingLocationTs === e.timestamp ? "✓" : "复制位置" }}
+          </button>
         </div>
         <div v-else-if="e.source" class="mt-1 text-xs text-faint font-mono">
           ↳ {{ e.source }}:{{ e.line }}:{{ e.col }}

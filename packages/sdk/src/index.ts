@@ -85,6 +85,7 @@ function tryHoldTabLock(deviceId: string): Promise<boolean> {
         /** 持锁直到页面卸载（永不 settle，锁随页面自动释放） */
         await new Promise<void>(() => {});
       })
+      /** 静默原因：Web Locks 不可用/异常时乐观放行，由 server 的 sessionToken 仲裁兜底 */
       .catch(() => resolve(true));
   });
 }
@@ -108,6 +109,7 @@ async function resolveDeviceId(): Promise<string> {
   try {
     sid = sessionStorage.getItem(DEVICE_ID_KEY) ?? "";
   } catch {
+    /** 静默原因：存储不可用（隐私模式）→ 落到持久 id 层 */
     sid = "";
   }
   if (sid && (await tryHoldTabLock(sid))) return sid;
@@ -117,6 +119,7 @@ async function resolveDeviceId(): Promise<string> {
   try {
     persisted = localStorage.getItem(DEVICE_ID_KEY) ?? "";
   } catch {
+    /** 静默原因：存储不可用（隐私模式）→ 落到随机 id 层 */
     persisted = "";
   }
   if (!persisted) persisted = generateDeviceId();
@@ -205,7 +208,7 @@ async function collectPageIconDataUrl(): Promise<string | undefined> {
       });
       if (dataUrl) return dataUrl;
     } catch {
-      /** fetch 失败（跨域/网络）：试下一个候选 */
+      /** 静默原因：fetch 失败（跨域/网络）属预期，继续试下一个候选，最终兜底返回 link URL */
     }
   }
   /** 所有候选都失败：兜底返回 link URL（至少控制台还能尝试加载） */
@@ -369,8 +372,9 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   /** 4. 注册 server 消息处理器（exec + set-watchers 按需采集） */
   onMessage((msg: ServerToDeviceMessage) => {
     if (msg.type === "exec") {
-      handleExec(msg.code, msg.execId).catch(() => {
-        /** handleExec 内部已捕获错误并回传，这里是兜底 */
+      handleExec(msg.code, msg.execId).catch((e) => {
+        /** handleExec 内部已捕获用户代码错误并回传，这里兜底处理路由本身的异常，不能吞 */
+        console.error("[silkpulse] exec 路由兜底失败:", e);
       });
     } else if (msg.type === "set-watchers") {
       /** 控制台打开对应面板时启用采集器，关闭时停用（按需采集减少不必要的数据传输） */

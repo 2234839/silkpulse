@@ -295,7 +295,7 @@ function installFetchHook(
           reqBodyTruncated = truncated;
         }
       } catch {
-        /** clone 或读取失败（stream 已消费/locked）忽略，不影响请求 */
+        /** 静默原因：clone 或读取失败（stream 已消费/locked）属预期，不影响请求本身 */
       }
     }
     /** 请求头：合并 input（若是 Request 对象）与 init 的 headers */
@@ -388,8 +388,10 @@ function installFetchHook(
                 }
               }
             }
-          } catch {
-            /** reader 读取失败（连接中断等）：静默，关闭事件会通过 sink 通知 */
+          } catch (e) {
+            /** reader 读取失败（连接中断等）属预期，关闭事件会通过 sink 通知；
+             * 但输出日志便于区分「连接正常关闭」和「读取异常」 */
+            console.warn("[silkpulse] SSE 流读取中断:", e);
           }
           /** 流结束：上报 closed 状态（用 ws-state 复用关闭信号路径不行，这里用特殊事件） */
           sseEventSink(sseEntrySeq, {
@@ -1091,7 +1093,11 @@ function cloneAndRead(
           reader.onerror = () => cb(`[图片 ${mime} ${blob.size}b]`, "info", mime);
           reader.readAsDataURL(blob);
         })
-        .catch(() => cb(undefined));
+        .catch((e) => {
+          /** 静默原因：clone/blob 失败时降级为 undefined，body 摘要缺失不影响采集主链路 */
+          console.warn("[silkpulse] 图片资源 body 读取失败:", e);
+          cb(undefined);
+        });
       return;
     }
 
@@ -1102,7 +1108,11 @@ function cloneAndRead(
         .clone()
         .blob()
         .then((blob) => cb(`[二进制 ${mime} ${blob.size}b]`, "info", mime))
-        .catch(() => cb(undefined));
+        .catch((e) => {
+          /** 静默原因：clone 失败降级为 undefined，body 摘要缺失不影响采集主链路 */
+          console.warn("[silkpulse] 二进制资源 body 读取失败:", e);
+          cb(undefined);
+        });
       return;
     }
 
@@ -1111,8 +1121,13 @@ function cloneAndRead(
       .clone()
       .text()
       .then((text) => cb(text))
-      .catch(() => cb(undefined));
-  } catch {
+      .catch((e) => {
+        /** 静默原因：clone/text 失败降级为 undefined，body 摘要缺失不影响采集主链路 */
+        console.warn("[silkpulse] 文本资源 body 读取失败:", e);
+        cb(undefined);
+      });
+  } catch (e) {
+    console.warn("[silkpulse] 资源 body 读取准备阶段失败:", e);
     cb(undefined);
   }
 }

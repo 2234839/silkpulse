@@ -43,6 +43,7 @@ async function tryResolveMap(entry: ErrorEntry): Promise<ErrorEntry> {
     ]);
     return mapped ? { ...entry, mapped } : entry;
   } catch {
+    /** 静默原因：source map 解析失败不影响原始错误上报，返回原始 entry 兜底 */
     return entry;
   }
 }
@@ -171,7 +172,13 @@ export function installErrorCatcher(sink: ErrorSink): void {
   /** flush 时：有 source 位置则解析 source map，否则直接上报 */
   const deduper = new ErrorDeduper((entry) => {
     if (entry.source && entry.line && entry.col) {
-      tryResolveMap(entry).then(sink);
+      /** fire-and-forget：tryResolveMap 内部已有 try/catch 兜底返回原始 entry，
+       * 但 .then(sink) 本身若 sink 抛错需可见，不吞 */
+      void tryResolveMap(entry)
+        .then(sink)
+        .catch((e) => {
+          console.error("[silkpulse] source map 解析后上报失败:", e);
+        });
     } else {
       sink(entry);
     }

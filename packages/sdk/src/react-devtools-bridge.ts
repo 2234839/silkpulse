@@ -678,8 +678,9 @@ async function reactivateBackend(): Promise<void> {
 
     activeBridge = bridge as unknown as { shutdown: () => void };
     completeActivationHandshake(dispatch);
-  } catch {
-    /** 重建失败保留旧状态（下次 activate 再试） */
+  } catch (e) {
+    /** 重建失败保留旧状态（下次 activate 再试），但要可见便于定位注入问题 */
+    console.error("[silkpulse] react-devtools backend 激活失败:", e);
   }
 }
 
