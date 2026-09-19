@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T">
 /**
  * VirtualList —— 轻量滚动窗口虚拟列表（无第三方依赖）
  *
@@ -10,10 +10,10 @@
  */
 import { ref, computed } from "vue";
 
-/** 列表数据项（泛型） */
+/** 全量数据 */
 const props = defineProps<{
   /** 全量数据 */
-  items: unknown[];
+  items: T[];
   /** 单条固定行高 px */
   itemHeight: number;
   /** 容器高度 px（超出滚动） */

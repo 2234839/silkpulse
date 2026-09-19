@@ -13,9 +13,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { type JsonParseMode } from "../utils/json-tools";
 import JsonTool from "./tools/JsonTool.vue";
-import StreamTool from "./tools/StreamTool.vue";
+import LogTool from "./tools/LogTool.vue";
 import CodecTool from "./tools/CodecTool.vue";
-import TimestampTool from "./tools/TimestampTool.vue";
 import ColorTool from "./tools/ColorTool.vue";
 import RegexTool from "./tools/RegexTool.vue";
 import DiffTool from "./tools/DiffTool.vue";
@@ -29,9 +28,8 @@ onUnmounted(() => clearInterval(nowTimer));
 const tools = [
   { id: "json", icon: "📦", label: "JSON" },
   { id: "diff", icon: "📋", label: "Diff" },
-  { id: "stream", icon: "🌊", label: "Stream" },
+  { id: "log", icon: "📜", label: "日志" },
   { id: "codec", icon: "🔐", label: "编解码" },
-  { id: "timestamp", icon: "⏰", label: "时间戳" },
   { id: "color", icon: "🎨", label: "颜色" },
   { id: "regex", icon: "🔍", label: "正则" },
 ];
@@ -164,14 +162,15 @@ const diffB = ref("");
 const diffTreeSearchA = ref("");
 const diffTreeSearchB = ref("");
 
-/** Stream 工具 */
-const streamInput = ref("");
-const streamMode = ref<"sse" | "jsonl" | "raw">("sse");
-const streamFilter = ref("");
-const streamParserCode = ref("");
+/** 日志工具（原 Stream，可视化日志/流数据） */
+const logInput = ref("");
+const logMode = ref<"sse" | "jsonl" | "raw">("sse");
+const logFilter = ref("");
+const logParserCode = ref("");
+const logControls = ref(false);
 
-/** 编解码工具内类别（JWT/URL/Cookie 并入编解码页，用 URL ?tool= 直达对应类别） */
-const codecKind = ref<"codec" | "jwt" | "url" | "cookie">("codec");
+/** 编解码工具内类别（JWT/URL/Cookie/时间戳并入编解码页，用 URL ?tool= 直达对应类别） */
+const codecKind = ref<"codec" | "jwt" | "url" | "cookie" | "timestamp">("codec");
 
 /* ════════ activeTool 与 URL ?tool= 双向同步 ════════ */
 const route = useRoute();
@@ -180,11 +179,12 @@ const router = useRouter();
 watch(
   () => route.query.tool,
   (v) => {
-    /** 旧页签 id → 编解码内类别（JWT/URL/Cookie 已并入编解码页） */
-    const legacyMap: Record<string, "jwt" | "url" | "cookie"> = {
+    /** 旧页签 id → 编解码内类别（JWT/URL/Cookie/时间戳已并入编解码页） */
+    const legacyMap: Record<string, "jwt" | "url" | "cookie" | "timestamp"> = {
       jwt: "jwt",
       url: "url",
       cookie: "cookie",
+      timestamp: "timestamp",
     };
     if (typeof v === "string" && v in legacyMap) {
       activeTool.value = "codec";
@@ -225,7 +225,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
 <template>
   <div class="h-screen flex flex-col overflow-hidden">
     <!-- 顶部栏 -->
-    <header class="bg-gray-900 text-white px-4 py-2.5 flex items-center gap-4 flex-shrink-0">
+    <header class="bg-gray-900 text-white px-4 py-2.5 flex items-center gap-4 shrink-0">
       <h1 class="text-base font-semibold">🔧 SilkPulse Tools</h1>
       <span class="text-xs text-gray-400" title="快捷键：Alt + 1~9 切换到第 N 个可见工具"
         >Web Debug 工具箱 · 纯前端 · 数据不出域 · Alt+数字切换工具</span
@@ -243,7 +243,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
     </header>
 
     <!-- 工具切换栏 -->
-    <nav class="flex border-b border-base bg-surface overflow-x-auto flex-shrink-0">
+    <nav class="flex border-b border-base bg-surface overflow-x-auto shrink-0">
       <button
         v-for="t in visibleTools"
         :key="t.id"
@@ -275,15 +275,15 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
         v-model:search-a="diffTreeSearchA"
         v-model:search-b="diffTreeSearchB"
       />
-      <StreamTool
-        v-else-if="activeTool === 'stream'"
-        v-model:input="streamInput"
-        v-model:mode="streamMode"
-        v-model:filter="streamFilter"
-        v-model:parser="streamParserCode"
+      <LogTool
+        v-else-if="activeTool === 'log'"
+        v-model:input="logInput"
+        v-model:mode="logMode"
+        v-model:filter="logFilter"
+        v-model:parser="logParserCode"
+        v-model:controls="logControls"
       />
       <CodecTool v-else-if="activeTool === 'codec'" v-model:kind="codecKind" :now="nowTs" />
-      <TimestampTool v-else-if="activeTool === 'timestamp'" />
       <ColorTool v-else-if="activeTool === 'color'" />
       <RegexTool v-else-if="activeTool === 'regex'" />
     </div>
@@ -295,7 +295,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
       @click.self="showToolsSettings = false"
     >
       <div
-        class="bg-surface border border-base rounded-lg shadow-xl w-[420px] max-h-[80vh] flex flex-col"
+        class="bg-surface border border-base rounded-lg shadow-xl w-105 max-h-[80vh] flex flex-col"
       >
         <div class="px-4 py-3 border-b border-base flex items-center">
           <h3 class="text-sm font-semibold">⚙️ 工具页签设置</h3>

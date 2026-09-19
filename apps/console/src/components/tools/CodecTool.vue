@@ -4,13 +4,16 @@
  *
  * 类别切换：
  * - 编解码：Base64（UTF-8 安全）/ URL / URI Component / HTML Entity 双向转换
+ *   双向可编辑：两个框都是输入框，**谁在编辑谁是消息源**，另一框实时换算
+ *   （lastEdited 决定流向）；Auto 模式下消息源的内容签名推断编码类型，
+ *   两个框语义不同（原文框=明文、编码框=密文），天然解决「我这段是原文还是编码」的歧义
  * - JWT 解码：token 解出 Header/Payload + exp 过期检测
  * - URL 解析：各部分拆解 + query 参数表
  * - Cookie 解析：Set-Cookie / Cookie 字符串解析 + 过期检测
  *
- * 结果可复制（带「✓ 已复制」反馈）、反填回输入；清空支持撤销。
+ * 两个框都可单独复制（带「✓ 已复制」反馈）；清空支持撤销。
  */
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { useCopyFlash } from "../../composables/useCopyFlash";
 import { utf8ToBase64, base64ToUtf8 } from "../../utils/json-tools";
 import { useUndoToast } from "../../composables/useUndoToast";
@@ -19,6 +22,7 @@ import UndoToast from "./UndoToast.vue";
 import JwtTool from "./JwtTool.vue";
 import UrlTool from "./UrlTool.vue";
 import CookieTool from "./CookieTool.vue";
+import TimestampTool from "./TimestampTool.vue";
 
 /** 父组件注入的响应式当前时间戳（ms），驱动 JWT/Cookie 过期状态随时间自动变化 */
 const props = defineProps<{ now: number }>();
@@ -35,6 +39,7 @@ const kinds = [
   { id: "jwt", label: "JWT 解码" },
   { id: "url", label: "URL 解析" },
   { id: "cookie", label: "Cookie 解析" },
+  { id: "timestamp", label: "⏰ 时间戳" },
 ] as const;
 /** 工具类别 id */
 type KindId = (typeof kinds)[number]["id"];
@@ -42,28 +47,33 @@ type KindId = (typeof kinds)[number]["id"];
 const kind = defineModel<KindId>("kind", { default: "codec" });
 
 /**
- * Auto 模式：根据输入内容推断最可能的编码类型
+ * 根据输入内容推断最可能的编码类型（签名优先级：HTML Entity > 百分号编码）
  *
- * 优先级：HTML Entity > URI Component > URL > Base64（纯文本输入时 fallback 到 Base64）
+ * 签名不明确的输入（含中文、空格、标点）视为纯文本，归入 Base64 分支。
  */
-function detectCodecMode(s: string): (typeof codecModes)[number] {
+function detectCodecMode(s: string): Exclude<CodecMode, "Auto"> {
   if (/&[a-zA-Z]+;|&#\d+;|&#x[0-9a-fA-F]+;/.test(s)) return "HTML Entity";
   if (/%[0-9a-fA-F]{2}/.test(s))
     return s.includes("?") || s.includes("&") ? "URL" : "URI Component";
-  if (/^[A-Za-z0-9+/_\-=\s]+$/.test(s) && s.length >= 8) return "Base64";
   return "Base64";
 }
 
 const codecModes = ["Auto", "Base64", "URL", "URI Component", "HTML Entity"] as const;
 type CodecMode = (typeof codecModes)[number];
 const codecMode = ref<CodecMode>("Auto");
-const codecInput = ref("");
-const codecResult = ref("");
-const codecError = ref("");
 
-/** Auto 模式下实际生效的编码类型（输入变化时重算；非 Auto 置 null） */
-const detectedMode = computed(() =>
-  codecMode.value === "Auto" ? detectCodecMode(codecInput.value) : null,
+/** 消息源框（谁最后被编辑谁是源；另一框跟随换算） */
+const lastEdited = ref<"plain" | "encoded">("plain");
+/** 原文框（明文） */
+const plainText = ref("");
+/** 编码框（密文） */
+const encodedText = ref("");
+
+/** Auto 模式下实际生效的编码类型（按消息源内容推断；检测器不会返回 Auto） */
+const detectedMode = computed<Exclude<CodecMode, "Auto"> | null>(() =>
+  codecMode.value === "Auto"
+    ? detectCodecMode(lastEdited.value === "plain" ? plainText.value : encodedText.value)
+    : null,
 );
 
 /** 实际生效的模式（Auto → 检测结果；其他 → 所选模式） */
@@ -71,75 +81,121 @@ const effectiveMode = computed(
   () => detectedMode.value ?? (codecMode.value as Exclude<CodecMode, "Auto">),
 );
 
-function doEncode() {
-  codecError.value = "";
-  try {
-    const s = codecInput.value;
-    switch (effectiveMode.value) {
+/** 编解码核心：按模式对字符串做单向转换 */
+function runCodec(mode: Exclude<CodecMode, "Auto">, dir: "encode" | "decode", s: string): string {
+  if (dir === "encode") {
+    switch (mode) {
       case "Base64":
-        codecResult.value = utf8ToBase64(s);
-        break;
+        return utf8ToBase64(s);
       case "URL":
-        codecResult.value = encodeURI(s);
-        break;
+        return encodeURI(s);
       case "URI Component":
-        codecResult.value = encodeURIComponent(s);
-        break;
+        return encodeURIComponent(s);
       case "HTML Entity":
-        codecResult.value = s.replace(
+        return s.replace(
           /[&<>"']/g,
           (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
         );
-        break;
     }
-  } catch (e) {
-    codecError.value = (e as Error).message;
+  }
+  switch (mode) {
+    case "Base64":
+      return base64ToUtf8(s);
+    case "URL":
+      return decodeURI(s);
+    case "URI Component":
+      return decodeURIComponent(s);
+    case "HTML Entity": {
+      const el = document.createElement("div");
+      el.innerHTML = s;
+      return el.textContent ?? "";
+    }
   }
 }
 
-function doDecode() {
-  codecError.value = "";
+/**
+ * 跟随框的即时换算（v-model 赋值驱动 UI 刷新）
+ *
+ * plain 是源 → 编码框 = encode(plain)；encoded 是源 → 原文框 = decode(encoded)。
+ * 无条件回写：即使「结果 = 源」（如 URL 编码纯数字）也要同步跟随框，
+ * 否则跟随框残留旧内容，用户看到的是过期数据。「无变化」仅通过 syncNote 提示。
+ * 解码失败（Base64 非整组、%XX 非法等）→ 空串 + 红字错误，源输入不受影响。
+ */
+function syncFollowText() {
   try {
-    const s = codecInput.value;
-    switch (effectiveMode.value) {
-      case "Base64":
-        codecResult.value = base64ToUtf8(s);
-        break;
-      case "URL":
-        codecResult.value = decodeURI(s);
-        break;
-      case "URI Component":
-        codecResult.value = decodeURIComponent(s);
-        break;
-      case "HTML Entity": {
-        const el = document.createElement("div");
-        el.innerHTML = s;
-        codecResult.value = el.textContent ?? "";
-        break;
+    if (lastEdited.value === "plain") {
+      const s = plainText.value;
+      if (!s) {
+        encodedText.value = "";
+        return;
       }
+      encodedText.value = runCodec(effectiveMode.value, "encode", s);
+    } else {
+      const s = encodedText.value;
+      if (!s) {
+        plainText.value = "";
+        return;
+      }
+      plainText.value = runCodec(effectiveMode.value, "decode", s);
     }
   } catch (e) {
-    codecError.value = (e as Error).message;
+    if (lastEdited.value === "plain") encodedText.value = "";
+    else plainText.value = "";
+    syncNote.value = `⚠ ${(e as Error).message}`;
   }
 }
 
-/** 把编解码结果反填回输入框 */
-function codecBackfill() {
-  codecInput.value = codecResult.value;
+/** 提示文案：错误红字（跟随框置空），无变化灰字（跟随框保留源原文以便修正） */
+const syncNote = ref("");
+
+/** 源框输入：定消息源 → 即时换算另一框 */
+function onSourceInput(target: "plain" | "encoded") {
+  lastEdited.value = target;
+  syncNote.value = "";
+  const s = target === "plain" ? plainText.value : encodedText.value;
+  const dir = target === "plain" ? "encode" : "decode";
+  let note = "";
+  if (s) {
+    try {
+      if (runCodec(effectiveMode.value, dir, s) === s) {
+        note =
+          dir === "encode"
+            ? "输入已是编码形式，再次编码无变化"
+            : `按 ${effectiveMode.value} 解码后无变化（输入可能不是该编码）`;
+      }
+    } catch {
+      note = ""; // 错误由 syncFollowText 统一给出
+    }
+  }
+  syncFollowText();
+  // 换算已报 ⚠ 错误时不覆盖，错误优先于「无变化」灰字
+  if (!syncNote.value.startsWith("⚠")) syncNote.value = note;
 }
 
-/** 清空编解码输入与结果（暂存内容，5s 内可撤销） */
+/** 模式切换 / 切回编解码页签：按当前消息源强制重算跟随框（lastEdited 不变；跟随框可能残留上一模式的旧结果，必须无条件刷新） */
+function resyncFollow() {
+  syncNote.value = "";
+  if (plainText.value || encodedText.value) syncFollowText();
+}
+watch(effectiveMode, resyncFollow);
+watch(kind, (k) => {
+  if (k === "codec") resyncFollow();
+});
+
+/** 清空两个框（暂存内容，5s 内可撤销） */
 function codecClear() {
-  const input = codecInput.value;
-  const result = codecResult.value;
-  if (!input && !result) return;
-  codecInput.value = "";
-  codecResult.value = "";
-  codecError.value = "";
+  if (!plainText.value && !encodedText.value) return;
+  const p = plainText.value;
+  const e = encodedText.value;
+  const src = lastEdited.value;
+  plainText.value = "";
+  encodedText.value = "";
+  syncNote.value = "";
   clearWithUndo(() => {
-    codecInput.value = input;
-    codecResult.value = result;
-  }, "已清空输入与结果");
+    plainText.value = p;
+    encodedText.value = e;
+    lastEdited.value = src;
+  }, "已清空输入");
 }
 
 /** JWT 状态桥（切类别不丢输入；Url/Cookie 工具输入为内部状态，切类别会重置） */
@@ -192,43 +248,29 @@ const isCodec = computed(() => kind.value === "codec");
           "
         >
           {{ c }}
-          <template v-if="c === 'Auto' && detectedMode">（{{ detectedMode }}）</template>
+          <template v-if="c === 'Auto' && detectedMode">
+            （{{ detectedMode }}·{{ lastEdited === "plain" ? "编码" : "解码" }}）
+          </template>
         </button>
       </div>
-      <label class="text-xs text-muted">输入</label>
+      <label class="text-xs text-muted">
+        原文
+        <span v-if="lastEdited === 'plain'" class="text-blue-500">（数据源）</span>
+        <span class="text-faint ml-1">{{ plainText.length }} 字符</span>
+      </label>
       <textarea
-        v-model="codecInput"
+        v-model="plainText"
         spellcheck="false"
-        class="w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
+        class="w-full bg-input border rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none"
+        :class="lastEdited === 'plain' ? 'border-blue-500' : 'border-base'"
         :style="{ height: inputHeight + 'px' }"
+        @input="onSourceInput('plain')"
       ></textarea>
-      <div class="text-xs text-faint">{{ codecInput.length }} 字符</div>
-      <div class="flex gap-2">
-        <button
-          @click="doEncode"
-          class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
-        >
-          ↑ 编码
-        </button>
-        <button
-          @click="doDecode"
-          class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
-          :title="`按 ${effectiveMode} 解码`"
-        >
-          ↓ 解码
-        </button>
-        <button
-          @click="codecClear"
-          class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
-        >
-          清空
-        </button>
-      </div>
     </template>
     <!-- 输入区高度拖拽手柄（仅编解码类别） -->
     <template v-if="isCodec">
       <div
-        class="group relative h-1.5 cursor-row-resize flex-shrink-0 -my-1 z-10"
+        class="group relative h-1.5 cursor-row-resize shrink-0 -my-1 z-10"
         title="拖拽调整输入区高度"
         @mousedown="onInputHeightDrag"
       >
@@ -239,38 +281,62 @@ const isCodec = computed(() => kind.value === "codec");
       </div>
     </template>
 
-    <!-- 编解码结果 -->
+    <!-- 编解码结果（可编辑：编辑此框即成为消息源，原文框跟随解码） -->
     <template v-if="isCodec">
-      <label class="text-xs text-muted">结果</label>
+      <label class="text-xs text-muted">
+        编码结果
+        <span v-if="lastEdited === 'encoded'" class="text-blue-500">（数据源）</span>
+        <span class="text-faint ml-1">{{ encodedText.length }} 字符</span>
+      </label>
       <textarea
-        :value="codecResult"
+        v-model="encodedText"
         rows="14"
-        readonly
         spellcheck="false"
-        class="flex-1 min-h-0 w-full bg-surface border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none"
+        class="flex-1 min-h-0 w-full bg-surface border rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none"
+        :class="
+          lastEdited === 'encoded'
+            ? 'border-blue-500 bg-blue-500/5 focus:border-blue-500'
+            : 'border-base focus:border-blue-500'
+        "
+        @input="onSourceInput('encoded')"
       ></textarea>
       <div class="flex items-center gap-2">
         <button
-          @click="codecBackfill"
+          @click="codecClear"
           class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          ↩ 反填到输入
+          清空
         </button>
         <button
-          v-if="codecResult"
-          @click="copyWithFlash('codec', codecResult)"
+          v-if="plainText"
+          @click="copyWithFlash('codec:plain', plainText)"
           class="px-3 py-1.5 text-xs rounded border"
           :class="
-            copiedKey === 'codec'
+            copiedKey === 'codec:plain'
               ? 'border-green-500 text-green-500'
               : 'border-base text-primary hover:border-blue-500'
           "
         >
-          {{ copiedKey === "codec" ? "✓ 已复制" : "📋 复制结果" }}
+          {{ copiedKey === "codec:plain" ? "✓ 已复制" : "📋 复制原文" }}
         </button>
-        <span class="text-xs text-faint">{{ codecResult.length }} 字符</span>
+        <button
+          v-if="encodedText"
+          @click="copyWithFlash('codec:encoded', encodedText)"
+          class="px-3 py-1.5 text-xs rounded border"
+          :class="
+            copiedKey === 'codec:encoded'
+              ? 'border-green-500 text-green-500'
+              : 'border-base text-primary hover:border-blue-500'
+          "
+        >
+          {{ copiedKey === "codec:encoded" ? "✓ 已复制" : "📋 复制编码结果" }}
+        </button>
+        <span class="text-xs text-faint ml-1">
+          编辑哪一框，哪一框就是数据源
+          <span v-if="syncNote && !syncNote.startsWith('⚠')">{{ syncNote }}</span>
+          <span v-if="syncNote.startsWith('⚠')" class="text-red-500">{{ syncNote }}</span>
+        </span>
       </div>
-      <p v-if="codecError" class="text-xs text-red-500">⚠ {{ codecError }}</p>
     </template>
 
     <!-- JWT 解码 -->
@@ -279,6 +345,8 @@ const isCodec = computed(() => kind.value === "codec");
     <UrlTool v-else-if="kind === 'url'" />
     <!-- Cookie 解析 -->
     <CookieTool v-else-if="kind === 'cookie'" :now="props.now" />
+    <!-- 时间戳 -->
+    <TimestampTool v-else-if="kind === 'timestamp'" />
   </div>
   <UndoToast :visible="undoVisible" :message="toastMessage" @undo="doUndo" />
 </template>
