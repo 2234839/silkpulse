@@ -74,6 +74,9 @@ const injectProjectId = computed(() => {
   return undefined;
 });
 
+/** 是否开启 Alt 点选元素（Element Picker）：开启后页面上 Alt+点击任意元素可弹出定位信息并复制发给 AI */
+const elementPicker = ref(false);
+
 /**
  * script 标签方式（前端自己拼，最简单）
  * ⚠️ 不能直接写 HTML 标签字符串字面量（含尖括号）：
@@ -84,10 +87,10 @@ const scriptSnippet = computed(() => {
   const gt = String.fromCharCode(62);
   const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`;
   /** 归属项目时带 projectId（公开标识，可外发）；未分组/未启用鉴权不带也能接入 */
-  if (injectProjectId.value) {
-    return `${base} data-project-id="${injectProjectId.value}"${gt}${lt}/script${gt}`;
-  }
-  return `${base}${gt}${lt}/script${gt}`;
+  let s = injectProjectId.value ? `${base} data-project-id="${injectProjectId.value}"` : base;
+  /** Alt 点选元素（Element Picker）开关 */
+  if (elementPicker.value) s += " data-element-picker=1";
+  return `${s}${gt}${lt}/script${gt}`;
 });
 
 /**
@@ -99,6 +102,7 @@ const injectScriptCode = computed(() => {
   const dataAttrs = [
     `s.dataset.server='${serverOrigin}'`,
     injectProjectId.value ? `s.dataset.projectId='${injectProjectId.value}'` : "",
+    elementPicker.value ? "s.dataset.elementPicker='1'" : "",
   ]
     .filter(Boolean)
     .join(";");
@@ -216,6 +220,15 @@ async function copyInject() {
       </div>
 
       <p class="text-xs text-muted mb-2">{{ scenarioText }}</p>
+
+      <!-- Alt 点选元素开关：开启后接入片段带 data-element-picker -->
+      <label
+        class="flex items-center gap-2 mb-3 text-xs text-secondary cursor-pointer select-none"
+        title="开启后，页面里按住 Alt 点击任意元素会弹出定位信息面板，可一键复制定位 + 提示词 + 接入调用方法发给 AI"
+      >
+        <input v-model="elementPicker" type="checkbox" class="accent-blue-600" />
+        开启「Alt 点选元素」—— 选中页面元素后一键复制定位信息，发给 AI 直接指哪改哪
+      </label>
 
       <!-- 超管：选择设备归属（默认未分组，全局可见；需要归组管理时再选项目） -->
       <div

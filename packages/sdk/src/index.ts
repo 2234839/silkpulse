@@ -27,6 +27,7 @@ import { installStorageWatcher, setStorageWatcherActive } from "./storage-watche
 import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from "./dom-watcher.js";
 import { startScreenShare, stopScreenShare } from "./screen-capture.js";
 import { startMouseTracker } from "./mouse-tracker.js";
+import { startElementPicker } from "./element-picker.js";
 import { initVueDevToolsBridge } from "./devtools-bridge.js";
 import { initReactDevToolsBridge } from "./react-devtools-bridge.js";
 import { dispatchServerMessage } from "./message-router.js";
@@ -156,6 +157,8 @@ export interface InitOptions {
   note?: string;
   /** 项目 ID（标记设备归属哪个项目，设备端无需密钥） */
   projectId?: string;
+  /** 是否开启 Alt 点选元素（Element Picker），默认关闭 */
+  elementPicker?: boolean;
 }
 
 /** 采集页面图标 URL（优先 meta link，兜底 /favicon.ico） */
@@ -428,6 +431,9 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   /** 5.0 启动鼠标采集（始终开启，轻量数据，价值高） */
   startMouseTracker((mouse) => send({ type: "device-mouse", mouse }));
 
+  /** 5.0.1 Alt 点选元素（可选开启，默认关闭；开启后 Alt+点击任意元素弹出定位信息面板） */
+  if (options.elementPicker) startElementPicker();
+
   /** 5.1 异步采集 base64 icon（避免跨域 ORB/CORS 拦截，控制台直接渲染 data URL） */
   collectPageIconDataUrl().then((iconDataUrl) => {
     if (iconDataUrl) {
@@ -570,8 +576,10 @@ function autoInit(): void {
   const note = script?.dataset.note || undefined;
   /** 项目归属：data-project-id */
   const projectId = script?.dataset.projectId || undefined;
+  /** Alt 点选元素开关：data-element-picker（任意非空值开启） */
+  const elementPicker = script?.dataset.elementPicker != null;
 
-  const start = () => init({ server, tags, note, projectId });
+  const start = () => init({ server, tags, note, projectId, elementPicker });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
   } else {
