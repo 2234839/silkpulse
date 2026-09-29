@@ -19,6 +19,8 @@ export default defineConfig({
         ws: true,
       },
       "/sdk.js": "http://localhost:8080",
+      /** devtools client 静态资源（vue/react devtools iframe）也在 server 的 public 下，dev 模式必须代理，否则 SPA fallback 会返回 console 首页导致面板握手永远卡在「连接中」 */
+      "/plugins": "http://localhost:8080",
     },
   },
   fmt: {},

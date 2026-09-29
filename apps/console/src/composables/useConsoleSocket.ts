@@ -5,7 +5,7 @@
  * - 设备列表（上线/下线事件）
  * - 选中设备的 log/network/error 实时推送
  */
-import { ref, shallowRef, onUnmounted } from "vue";
+import { ref, shallowRef, onUnmounted, watch } from "vue";
 import type {
   DeviceInfo,
   LogEntry,
@@ -531,6 +531,21 @@ export function useConsoleSocket() {
     }
     stopHeartbeat();
     ws?.close();
+  });
+
+  /**
+   * 密钥变化（兄弟 tab 广播同步 / URL 注入 / 登出）→ 立即用新 token 重连。
+   * 不等指数退避：跨 tab 采纳新 key 后旧连接可能已被 server 认定未鉴权，
+   * 靠退避重连会有最长 30s 的空窗。
+   */
+  watch(apiKey, () => {
+    if (intentionalClose) return;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+    ws?.close();
+    connect();
   });
 
   return {

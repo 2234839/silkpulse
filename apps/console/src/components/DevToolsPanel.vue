@@ -24,6 +24,7 @@
  *   请求设备端激活 backend Agent
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { devToolsDocks, getDock } from "../utils/devtools-docks";
 
 /**
  * devtools relay 桥接函数（由父组件从 useConsoleSocket 传入，避免重复建连） */
@@ -36,71 +37,47 @@ const props = defineProps<{
   frameworks?: string[];
   /** 注册 devtools relay 监听器（useConsoleSocket 的 onDevtoolsRelay） */
   onRelay: (
-    listener: (msg: { deviceId: string; plugin: "vue" | "react"; payload: unknown }) => void,
+    listener: (msg: { deviceId: string; plugin: string; payload: unknown }) => void,
   ) => () => void;
   /** 注册设备 reload 重连监听器（useConsoleSocket 的 onDeviceReconnect） */
   onReconnect: (listener: (deviceId: string) => void) => () => void;
   /** 发送 devtools relay 消息（useConsoleSocket 的 sendDevtoolsRelay） */
   send: (
     deviceId: string,
-    plugin: "vue" | "react",
+    plugin: string,
     payload: string | Record<string, unknown>,
   ) => void;
 }>();
 
-/** 插件静态资源路径（server public/plugins/ 下，构建时从 plugins/ 复制） */
-const PLUGIN_SRC: Record<string, string> = {
-  vue: "/plugins/vue-devtools/index.html",
-  react: "/plugins/react-devtools/index.html",
-};
-
-/** 插件中文名（状态条提示用） */
-const PLUGIN_LABEL: Record<string, string> = {
-  vue: "Vue",
-  react: "React",
-};
-
-/** 与官方 iframe channel 一致的消息信封 key */
-const IFRAME_MESSAGING_EVENT_KEY = "__devtools-kit-iframe-messaging-event-key__";
-
 const iframeRef = ref<HTMLIFrameElement | null>(null);
 /** 连接状态：收到第一条 backend 消息即认为链路通 */
 const relayActive = ref(false);
-/** 当前插件（探测到唯一框架时自动选中，否则默认 vue） */
-const activePlugin = ref<"vue" | "react">((props.plugin as "vue" | "react") ?? "vue");
+
+/** 当前激活的 dock（由注册表驱动；plugin 取值受限于注册表） */
+const activePlugin = ref<string>((props.plugin as string) ?? devToolsDocks[0].plugin);
+const activeDock = computed(() => getDock(activePlugin.value));
 /** 用户是否手动切换过插件（手动选择优先于自动探测） */
 const userPicked = ref(false);
 
-/** 设备框架探测结果到达 / 变化时：唯一框架自动选中 */
+/** 设备框架探测结果到达 / 变化时：唯一可用的 dock 自动选中 */
 watch(
   () => props.frameworks,
   (fws) => {
     if (userPicked.value || !fws || fws.length !== 1) return;
-    const only = fws[0] as "vue" | "react";
-    if (only === "vue" || only === "react") activePlugin.value = only;
+    const only = devToolsDocks.find((d) => fws.includes(d.plugin));
+    if (only) activePlugin.value = only.plugin;
   },
   { immediate: true },
 );
 
 /**
- * 当前插件是否不被目标页支持
- *
- * 两种情况判定不支持（探测结果已上报的前提下）：
- * 1. 框架列表不含当前插件（如 React 页切到 Vue 插件）
- * 2. 框架列表为空数组——页面既没有 Vue 也没有 React（SDK 探测含 DOM 锚点兑底，
- *    后注入恢复前也能报对），此时两个插件都提示不支持，不无限转圈
- * frameworks 为 undefined（尚未上报）时不判定——保持尝试连接
+ * 当前 dock 是否不被目标页支持（委托 dock.isSupported 判定）
  */
-const pluginUnsupported = computed(() => {
-  const fws = props.frameworks;
-  if (!fws) return false;
-  if (fws.length === 0) return true;
-  return !fws.includes(activePlugin.value);
-});
+const pluginUnsupported = computed(() => !activeDock.value.isSupported(props.frameworks));
 
 /** 目标页实际检测到的框架名（不支持提示文案用，未知框架名原样显示） */
 const detectedLabel = computed(
-  () => (props.frameworks ?? []).map((f) => PLUGIN_LABEL[f] ?? f).join(" + ") || "无",
+  () => (props.frameworks ?? []).join(" + ") || "无",
 );
 
 /** 探测结果到达后当前插件已不支持 → 重置连接状态（不再显示「已连接」误导） */
@@ -154,10 +131,11 @@ function refreshData(): void {
   if (pluginUnsupported.value || refreshing.value) return;
   refreshing.value = true;
   refreshTimer = setTimeout(finishRefresh, 2000);
-  if (activePlugin.value === "vue") {
-    props.send(props.deviceId, "vue", "__silkpulse_refresh__");
+  const dock = activeDock.value;
+  if (dock.refreshPayload !== undefined) {
+    props.send(props.deviceId, dock.plugin, dock.refreshPayload);
   } else {
-    /** react：重载 frontend iframe（而非 backend reactivate）
+    /** 无原地刷新语义的 dock（react）→ 重载 frontend iframe
      *
      * reactivate 虽然单发全量树（backend 侧已修复单次 flush），但 frontend
      * Store 是长驻的——旧树节点不会因新 operations 到达而清理，每次全量
@@ -170,71 +148,30 @@ function refreshData(): void {
   }
 }
 
-/** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
-function isVueEnvelope(data: unknown): data is string {
-  return typeof data === "string" && data.includes(IFRAME_MESSAGING_EVENT_KEY);
-}
-
-/** react 消息校验：{ event: string, ... } 对象（fromBackend 标记来自设备端） */
-function isReactFromFrontend(data: unknown): data is { event: string; payload?: unknown } {
-  if (typeof data !== "object" || data === null) return false;
-  const obj = data as Record<string, unknown>;
-  return typeof obj.event === "string" && obj.fromBackend !== true;
-}
-
-/** react frontend 就绪信号（宿主 HTML 发的内部事件） */
-function isReactFrontendReady(data: unknown): boolean {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    (data as Record<string, unknown>).event === "__silkpulse_frontend_ready__"
-  );
-}
-
-/** iframe → 设备：client 发来的消息，转发到 WS */
+/** iframe → 设备：client 发来的消息，由当前 dock 编码后转发到 WS */
 function onWindowMessage(event: MessageEvent) {
   const iframe = iframeRef.value;
   /** 只接受我们自己 iframe 的消息（防串扰） */
   if (!iframe || event.source !== iframe.contentWindow) return;
-
-  if (activePlugin.value === "vue") {
-    if (!isVueEnvelope(event.data)) return;
-    props.send(props.deviceId, "vue", event.data);
-    return;
-  }
-
-  /** react：frontend 就绪信号 → 请求设备激活 backend */
-  if (isReactFrontendReady(event.data)) {
-    relayActive.value = false;
-    props.send(props.deviceId, "react", { activate: true });
-    return;
-  }
-  /** react：普通消息 → 透传给设备 backend */
-  if (!isReactFromFrontend(event.data)) return;
-  const { event: evt, payload } = event.data;
-  props.send(props.deviceId, "react", { event: evt, payload });
+  const dock = activeDock.value;
+  const payload = dock.encodeFromClient(event.data);
+  if (payload === undefined) return;
+  /** 握手信号（如 react activate 指令）：重置连接状态，等 backend 首条响应点亮 */
+  if (dock.isHandshake?.(payload)) relayActive.value = false;
+  props.send(props.deviceId, dock.plugin, payload);
 }
 
-/** 设备 → iframe：backend 的响应，postMessage 回 iframe。
+/** 设备 → iframe：backend 的响应，由当前 dock 校验后 postMessage 回 iframe。
  *  另：刷新周期中收到广播 = 拉新已生效，提前结束转圈 */
 const unsubscribeRelay = props.onRelay((msg) => {
   if (msg.deviceId !== props.deviceId || msg.plugin !== activePlugin.value) return;
   const iframe = iframeRef.value;
   if (!iframe) return;
   if (refreshing.value) finishRefresh();
-
-  if (activePlugin.value === "react") {
-    /** react：backend 消息 { event, payload, fromBackend } → 原样 postMessage 给 frontend */
-    const data = msg.payload as { event?: string; fromBackend?: boolean } | undefined;
-    if (typeof data !== "object" || data === null || typeof data.event !== "string") return;
-    relayActive.value = true;
-    iframe.contentWindow?.postMessage(data, "*");
-    return;
-  }
-
-  /** vue：backend 消息是 SuperJSON 信封字符串 → 原样回传 */
+  const data = activeDock.value.decodeFromBackend(msg.payload);
+  if (data === undefined) return;
   relayActive.value = true;
-  iframe.contentWindow?.postMessage(msg.payload, "*");
+  iframe.contentWindow?.postMessage(data, "*");
 });
 
 /** 重载 devtools iframe（frontend 重新握手：react 重发 activate，vue 重建 RPC channel） */
@@ -242,7 +179,7 @@ function reloadIframe() {
   const iframe = iframeRef.value;
   if (!iframe) return;
   relayActive.value = false;
-  iframe.src = PLUGIN_SRC[activePlugin.value];
+  iframe.src = activeDock.value.src;
 }
 
 /** 设备 reload 重连 → 重载 iframe（react 需重发 activate，vue 需重新握手 RPC channel） */
@@ -279,20 +216,22 @@ onBeforeUnmount(() => {
     <!-- 插件切换（vue / react） -->
     <div class="px-3 py-1.5 border-b border-base flex items-center gap-3 text-xs bg-surface">
       <button
-        v-for="p in ['vue', 'react'] as const"
-        :key="p"
+        v-for="d in devToolsDocks"
+        :key="d.plugin"
         :class="[
           'px-2.5 py-1 rounded-md transition-colors',
-          activePlugin === p ? 'bg-blue-600 text-white font-medium' : 'text-muted hover:bg-base',
+          activePlugin === d.plugin
+            ? 'bg-blue-600 text-white font-medium'
+            : 'text-muted hover:bg-base',
         ]"
         @click="
           userPicked = true;
-          activePlugin = p;
+          activePlugin = d.plugin;
         "
       >
-        {{ PLUGIN_LABEL[p] }}
+        {{ d.label }}
         <span
-          v-if="frameworks?.includes(p)"
+          v-if="frameworks?.includes(d.plugin)"
           class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle"
           title="目标页检测到该框架"
         />
@@ -330,8 +269,8 @@ onBeforeUnmount(() => {
       class="px-3 py-1.5 text-xs text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20 border-b border-base flex items-center gap-2"
     >
       <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-      正在连接目标页的 {{ PLUGIN_LABEL[activePlugin] }} DevTools backend…（需要目标页注入了
-      SilkPulse SDK 且运行 {{ PLUGIN_LABEL[activePlugin] }} 应用）
+      正在连接目标页的 {{ activeDock.label }} DevTools backend…（需要目标页注入了
+      SilkPulse SDK 且运行 {{ activeDock.label }} 应用）
     </div>
     <!-- 插件明确不支持：明确提示，不加载 client（避免无意义的转圈等待） -->
     <div
@@ -340,7 +279,7 @@ onBeforeUnmount(() => {
     >
       <div class="text-3xl">🚫</div>
       <div class="text-sm font-medium">
-        当前页面不支持 {{ PLUGIN_LABEL[activePlugin] }} DevTools
+        当前页面不支持 {{ activeDock.label }} DevTools
       </div>
       <div v-if="(frameworks ?? []).length > 0" class="text-xs">
         目标页是 {{ detectedLabel }} 应用，请切换到对应插件
@@ -353,9 +292,9 @@ onBeforeUnmount(() => {
     <iframe
       v-else
       ref="iframeRef"
-      :src="PLUGIN_SRC[activePlugin]"
+      :src="activeDock.src"
       class="flex-1 w-full border-0 bg-white"
-      :title="PLUGIN_LABEL[activePlugin] + ' DevTools'"
+      :title="activeDock.label + ' DevTools'"
       allow="clipboard-write"
     />
   </div>

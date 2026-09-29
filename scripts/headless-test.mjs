@@ -3219,17 +3219,18 @@ async function main() {
         if (!ctxText) {
           fail("AI 诊断上下文弹窗未展示文本");
         } else {
-          const hasSlowSection = /慢请求 Top/.test(ctxText);
-          const hasRequestLine = /\d+ms.*?(GET|POST|PUT|DELETE|PATCH)/.test(ctxText);
-          const hasErrorSection = /## 错误/.test(ctxText);
-          const hasSnapshotSection = /## 页面快照/.test(ctxText);
-          if (hasSlowSection && hasRequestLine && hasErrorSection && hasSnapshotSection) {
+          /** 断言对齐 AiContextModal.assemble() 的 section 标题（环境/最近错误/最近请求/Storage 摘要） */
+          const hasEnvSection = /## 环境/.test(ctxText);
+          const hasRequestLine = /## 最近请求/.test(ctxText);
+          const hasErrorSection = /## 最近错误/.test(ctxText);
+          const hasStorageSection = /## Storage 摘要/.test(ctxText);
+          if (hasEnvSection && hasRequestLine && hasErrorSection && hasStorageSection) {
             ok(
-              `AI 诊断上下文含慢请求段（对齐 inspect CLI：错误 ✓ 快照 ✓ 慢请求 ✓ 请求行 ✓，共 ${ctxText.length} 字符）`,
+              `AI 诊断上下文 section 完整（环境 ✓ 错误 ✓ 请求 ✓ Storage ✓，共 ${ctxText.length} 字符）`,
             );
           } else {
             fail(
-              `AI 上下文内容不完整：slow=${hasSlowSection} reqLine=${hasRequestLine} err=${hasErrorSection} snap=${hasSnapshotSection}`,
+              `AI 上下文内容不完整：env=${hasEnvSection} req=${hasRequestLine} err=${hasErrorSection} storage=${hasStorageSection}`,
             );
           }
         }
