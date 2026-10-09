@@ -25,7 +25,7 @@
  * - 计算变化像素的包围盒（bounding box）
  * - 从原始画面裁剪包围盒区域编码成 JPEG
  */
-import { snapdom } from "@zumer/snapdom";
+import { captureElement } from "./capture-engine.js";
 import type { ScreenFrame, ScreenShareStatus } from "@silkpulse/shared";
 
 /** 抓帧间隔 ms（1fps，调试场景够用，SnapDOM 重开销需控制频率） */
@@ -250,50 +250,17 @@ async function captureFrame(): Promise<void> {
 /**
  * 截取当前页面可视区域（viewport）
  *
- * 用 SnapDOM 的 clip: 'viewport' 选项只捕获视口可见区域，
- * 而非整个 body（包括滚动区域外的内容）。
+ * 通过 capture-engine 自动选择最优路径：
+ * - Chrome drawElementImage API（零序列化开销）
+ * - 降级到 @zumer/snapdom
  */
 async function screenshotViewport(): Promise<HTMLCanvasElement | null> {
-  const vw = document.documentElement.clientWidth;
-  const vh = window.innerHeight;
-
-  /**
-   * baseCSS 修复 flex/grid 容器内 truncate 文字溢出：
-   *
-   * snapdom 克隆 DOM 到 foreignObject 时，对 flex/grid 子项做 min-width:0 处理，
-   * 但当子项 white-space:nowrap（如 Tailwind truncate）时该处理被跳过，
-   * 导致 overflow:hidden + text-overflow:ellipsis 失效，文字溢出容器。
-   *
-   * 注入 !important 的 min-width:0 强制覆盖所有情况，
-   * 因为 baseCSS 在 snapdom 的 <style> 中先于克隆 DOM 的 inline style，
-   * 必须用 !important 才能生效。
-   */
-  /**
-   * per-capture plugin：修复 flex/grid 容器内 truncate 文字溢出
-   *
-   * snapdom SnapdomOptions 没有 baseCSS 字段（仅内部 CaptureContext 有）,
-   * 通过 afterClone 钩子向克隆 DOM 注入 <style> 实现等效效果。
-   */
-  const minWidthPlugin = {
-    name: "fix-min-width",
-    afterClone(ctx: { clone?: HTMLElement | SVGElement | null }) {
-      if (!ctx.clone) return;
-      const style = document.createElement("style");
-      style.textContent = `* { min-width: 0 !important; }`;
-      ctx.clone.prepend(style);
-    },
-  };
-
-  const canvas = await snapdom.toCanvas(document.documentElement, {
-    width: vw,
-    height: vh,
-    backgroundColor: "#ffffff",
-    fast: true,
-    clip: "viewport",
-    plugins: [minWidthPlugin],
-  });
-
-  return canvas;
+  try {
+    return await captureElement(document.documentElement, { viewport: true });
+  } catch (e) {
+    console.warn("[silkpulse] 视口截图失败:", e);
+    return null;
+  }
 }
 
 /**

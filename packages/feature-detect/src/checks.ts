@@ -442,6 +442,14 @@ export const FEATURE_CHECKS: Array<FeatureCheck & { category: FeatureCategory }>
     mdn: "Web/API/WebRTC_API",
     desc: "浏览器间点对点音视频/数据通信",
   },
+  {
+    id: "media.html-in-canvas",
+    label: "HTML-in-Canvas",
+    category: "media",
+    test: `(function(){ try { return 'drawElementImage' in CanvasRenderingContext2D.prototype } catch(e) { return false } })()`,
+    mdn: "",
+    desc: "浏览器原生将 DOM 元素绘制到 Canvas（Chrome 源试用 API），截图场景零序列化开销",
+  },
 
   // ────────────────── Storage ──────────────────
   {
