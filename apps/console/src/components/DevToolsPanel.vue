@@ -31,8 +31,12 @@ import { devToolsDocks, getDock } from "../utils/devtools-docks";
 const props = defineProps<{
   /** 当前选中设备 ID（devtools-relay 路由用） */
   deviceId: string;
-  /** devtools 插件类型（vue / react） */
-  plugin?: "vue" | "react";
+  /** devtools 插件类型（docks 注册表里的 plugin 标识，如 vue / react / elements） */
+  plugin?: string;
+  /** 锁定单个 dock（如 Element 页签锁 elements）：隐藏切换条且不受框架探测影响 */
+  lockedPlugin?: string;
+  /** 链路接通后自动把官方 frontend 切到此面板（如 Console 页签锁 elements dock 但聚焦官方面板栏的 Console） */
+  focusPanel?: "console" | "elements";
   /** 设备上报的框架探测结果（自动选中用：只探测到一种时默认选它） */
   frameworks?: string[];
   /** 注册 devtools relay 监听器（useConsoleSocket 的 onDevtoolsRelay） */
@@ -42,28 +46,24 @@ const props = defineProps<{
   /** 注册设备 reload 重连监听器（useConsoleSocket 的 onDeviceReconnect） */
   onReconnect: (listener: (deviceId: string) => void) => () => void;
   /** 发送 devtools relay 消息（useConsoleSocket 的 sendDevtoolsRelay） */
-  send: (
-    deviceId: string,
-    plugin: string,
-    payload: string | Record<string, unknown>,
-  ) => void;
+  send: (deviceId: string, plugin: string, payload: string | Record<string, unknown>) => void;
 }>();
 
 const iframeRef = ref<HTMLIFrameElement | null>(null);
 /** 连接状态：收到第一条 backend 消息即认为链路通 */
 const relayActive = ref(false);
 
-/** 当前激活的 dock（由注册表驱动；plugin 取值受限于注册表） */
-const activePlugin = ref<string>((props.plugin as string) ?? devToolsDocks[0].plugin);
+/** 当前激活的 dock（由注册表驱动；plugin 取值受限于注册表；lockedPlugin 时恒定） */
+const activePlugin = ref<string>(props.lockedPlugin ?? props.plugin ?? devToolsDocks[0].plugin);
 const activeDock = computed(() => getDock(activePlugin.value));
 /** 用户是否手动切换过插件（手动选择优先于自动探测） */
 const userPicked = ref(false);
 
-/** 设备框架探测结果到达 / 变化时：唯一可用的 dock 自动选中 */
+/** 设备框架探测结果到达 / 变化时：唯一可用的 dock 自动选中（锁定模式不参与） */
 watch(
   () => props.frameworks,
   (fws) => {
-    if (userPicked.value || !fws || fws.length !== 1) return;
+    if (props.lockedPlugin || userPicked.value || !fws || fws.length !== 1) return;
     const only = devToolsDocks.find((d) => fws.includes(d.plugin));
     if (only) activePlugin.value = only.plugin;
   },
@@ -76,9 +76,7 @@ watch(
 const pluginUnsupported = computed(() => !activeDock.value.isSupported(props.frameworks));
 
 /** 目标页实际检测到的框架名（不支持提示文案用，未知框架名原样显示） */
-const detectedLabel = computed(
-  () => (props.frameworks ?? []).join(" + ") || "无",
-);
+const detectedLabel = computed(() => (props.frameworks ?? []).join(" + ") || "无");
 
 /** 探测结果到达后当前插件已不支持 → 重置连接状态（不再显示「已连接」误导） */
 watch(pluginUnsupported, (unsupported) => {
@@ -98,7 +96,8 @@ watch(pluginUnsupported, (unsupported) => {
 watch(
   () => props.frameworks,
   (after, before) => {
-    if (pluginUnsupported.value) return;
+    /** 锁定模式（elements）不依赖框架探测，不重载 */
+    if (props.lockedPlugin || pluginUnsupported.value) return;
     /** 内容没变（纯引用变化，心跳刷新的常态）→ 不动 iframe */
     if (before && after && before.join(",") === after.join(",")) return;
     reloadIframe();
@@ -170,8 +169,16 @@ const unsubscribeRelay = props.onRelay((msg) => {
   if (refreshing.value) finishRefresh();
   const data = activeDock.value.decodeFromBackend(msg.payload);
   if (data === undefined) return;
+  const wasInactive = !relayActive.value;
   relayActive.value = true;
   iframe.contentWindow?.postMessage(data, "*");
+  /** 链路首次接通：聚焦指定官方面板（iframe 宿主脚本轮询等面板栏渲染完成后点击） */
+  if (wasInactive && props.focusPanel) {
+    iframe.contentWindow?.postMessage(
+      { event: "__silkpulse_switch_panel__", panel: props.focusPanel },
+      "*",
+    );
+  }
 });
 
 /** 重载 devtools iframe（frontend 重新握手：react 重发 activate，vue 重建 RPC channel） */
@@ -213,29 +220,31 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- 插件切换（vue / react） -->
+    <!-- 插件切换（锁定模式隐藏：Element 页签只渲染官方 Elements 面板） -->
     <div class="px-3 py-1.5 border-b border-base flex items-center gap-3 text-xs bg-surface">
-      <button
-        v-for="d in devToolsDocks"
-        :key="d.plugin"
-        :class="[
-          'px-2.5 py-1 rounded-md transition-colors',
-          activePlugin === d.plugin
-            ? 'bg-blue-600 text-white font-medium'
-            : 'text-muted hover:bg-base',
-        ]"
-        @click="
-          userPicked = true;
-          activePlugin = d.plugin;
-        "
-      >
-        {{ d.label }}
-        <span
-          v-if="frameworks?.includes(d.plugin)"
-          class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle"
-          title="目标页检测到该框架"
-        />
-      </button>
+      <template v-if="!lockedPlugin">
+        <button
+          v-for="d in devToolsDocks"
+          :key="d.plugin"
+          :class="[
+            'px-2.5 py-1 rounded-md transition-colors',
+            activePlugin === d.plugin
+              ? 'bg-blue-600 text-white font-medium'
+              : 'text-muted hover:bg-base',
+          ]"
+          @click="
+            userPicked = true;
+            activePlugin = d.plugin;
+          "
+        >
+          {{ d.label }}
+          <span
+            v-if="frameworks?.includes(d.plugin)"
+            class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle"
+            title="目标页检测到该框架"
+          />
+        </button>
+      </template>
       <div class="ml-auto flex items-center gap-2">
         <!-- 手动刷新：backend 原地广播最新树/状态（保留展开/选中状态，不重载 client）。
              生产构建的页面框架更新事件被编译时移除（无响应式推送），
@@ -269,8 +278,8 @@ onBeforeUnmount(() => {
       class="px-3 py-1.5 text-xs text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20 border-b border-base flex items-center gap-2"
     >
       <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-      正在连接目标页的 {{ activeDock.label }} DevTools backend…（需要目标页注入了
-      SilkPulse SDK 且运行 {{ activeDock.label }} 应用）
+      正在连接目标页的 {{ activeDock.label }} DevTools backend…（需要目标页注入了 SilkPulse SDK
+      且运行 {{ activeDock.label }} 应用）
     </div>
     <!-- 插件明确不支持：明确提示，不加载 client（避免无意义的转圈等待） -->
     <div
@@ -278,9 +287,7 @@ onBeforeUnmount(() => {
       class="flex-1 flex flex-col items-center justify-center gap-2 bg-surface text-muted p-6 text-center"
     >
       <div class="text-3xl">🚫</div>
-      <div class="text-sm font-medium">
-        当前页面不支持 {{ activeDock.label }} DevTools
-      </div>
+      <div class="text-sm font-medium">当前页面不支持 {{ activeDock.label }} DevTools</div>
       <div v-if="(frameworks ?? []).length > 0" class="text-xs">
         目标页是 {{ detectedLabel }} 应用，请切换到对应插件
       </div>

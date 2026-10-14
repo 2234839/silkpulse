@@ -132,10 +132,10 @@ export function useConsoleSocket() {
     return () => devtoolsRelayListeners.delete(id);
   }
 
-  /** 发送 devtools relay 消息到设备（DevToolsPanel 的 iframe → WS → 设备 backend） */
+  /** 发送 devtools relay 消息到设备（DevToolsPanel 的 iframe → WS → 设备 backend；plugin 由 dock 注册表决定） */
   function sendDevtoolsRelay(
     deviceId: string,
-    plugin: "vue" | "react",
+    plugin: string,
     payload: string | Record<string, unknown>,
   ): void {
     if (ws && ws.readyState === WebSocket.OPEN) {

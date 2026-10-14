@@ -62,6 +62,12 @@ const builders = {
       cwd: ROOT,
       stdio: "inherit",
     }),
+  /** Chrome Elements 面板（chii frontend + chobitsu，vendor 脚本自管增量） */
+  chrome: () =>
+    execSync("node scripts/vendor-chrome-devtools.mjs", {
+      cwd: ROOT,
+      stdio: "inherit",
+    }),
 };
 
 for (const plugin of Object.keys(builders)) {

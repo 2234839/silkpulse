@@ -30,6 +30,7 @@ import { startMouseTracker } from "./mouse-tracker.js";
 import { startElementPicker } from "./element-picker.js";
 import { initVueDevToolsBridge } from "./devtools-bridge.js";
 import { initReactDevToolsBridge } from "./react-devtools-bridge.js";
+import { initElementsBridge, feedNetworkEntry, feedNetworkUpdate, feedLogEntry } from "./chobitsu-bridge.js";
 import { dispatchServerMessage } from "./message-router.js";
 
 /**
@@ -336,15 +337,27 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
 
   /** 1. 装配采集器，每个 collector 的 sink → WS 上报 */
   installLogCollector(
-    (entry: LogEntry) => send({ type: "log", log: entry }),
+    (entry: LogEntry) => {
+      send({ type: "log", log: entry });
+      /** 同步喂官方 Console 面板（elements 桥未激活时内部静默丢弃，零开销） */
+      feedLogEntry(entry);
+    },
     () => send({ type: "log-repeat" }),
   );
   installNetworkCollector(
-    (entry: NetworkEntry) => send({ type: "network", entry }),
+    (entry: NetworkEntry) => {
+      send({ type: "network", entry });
+      /** 同步喂官方 Network 面板（elements 桥未激活时内部静默丢弃，零开销） */
+      feedNetworkEntry(entry);
+    },
     (seq, frame) => send({ type: "ws-frame", seq, frame }),
     (seq, wsState) => send({ type: "ws-state", seq, wsState }),
     (seq, event) => send({ type: "sse-event", seq, event }),
-    (seq, patch) => send({ type: "network-update", seq, patch }),
+    (seq, patch) => {
+      send({ type: "network-update", seq, patch });
+      /** 同步喂官方 Network 面板（elements 桥未激活时内部静默丢弃，零开销） */
+      feedNetworkUpdate(seq, patch);
+    },
   );
   installErrorCatcher((entry: ErrorEntry) => {
     pushRecentError(entry.message);
@@ -613,3 +626,11 @@ initVueDevToolsBridge();
  * renderers/roots 转交给真 backend（天然支持后注入）。
  */
 initReactDevToolsBridge();
+
+/**
+ * Elements 面板桥初始化（同步注册消息处理）
+ *
+ * 只注册 server 消息监听，不加载 chobitsu——目标页打开控制台 Elements 面板时
+ * 才按需下载 bundle 并激活，避免给普通接入页增加 450KB 脚本负担。
+ */
+initElementsBridge();

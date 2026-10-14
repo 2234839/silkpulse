@@ -54,6 +54,34 @@ export interface DevToolsDock {
 /** 与官方 vue iframe channel 一致的消息信封 key */
 const IFRAME_MESSAGING_EVENT_KEY = "__devtools-kit-iframe-messaging-event-key__";
 
+/* ════════ Elements dock（Chrome DevTools 官方 Elements 面板）════════ */
+
+/** frontend 就绪信号（host HTML onload 发的内部事件，与 react dock 同机制） */
+function isElementsFrontendReady(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as Record<string, unknown>).event === "__silkpulse_frontend_ready__"
+  );
+}
+
+export const elementsDock: DevToolsDock = {
+  plugin: "elements",
+  label: "Elements",
+  src: "/plugins/chrome-devtools/index.html",
+  /** 任何 DOM 页都能用（chobitsu 不依赖框架），注册表首位 = 无框架页面的默认 dock */
+  isSupported: () => true,
+  encodeFromClient: (data) => {
+    /** frontend 就绪信号 → 请求设备加载 chobitsu 并重发文档就绪序列 */
+    if (isElementsFrontendReady(data)) return { activate: true };
+    /** CDP 命令（原始 JSON 字符串）原样透传 */
+    return typeof data === "string" ? data : undefined;
+  },
+  decodeFromBackend: (payload) => (typeof payload === "string" ? payload : undefined),
+  /** 无原地刷新语义：重载 iframe（重发 ready → activate → 设备侧重发文档就绪序列） */
+  refreshPayload: undefined,
+};
+
 /* ════════ Vue dock ════════ */
 
 /** vue 官方信封的最小结构校验（SuperJSON 字符串，不解析内容） */
@@ -65,7 +93,7 @@ export const vueDock: DevToolsDock = {
   plugin: "vue",
   label: "Vue",
   src: "/plugins/vue-devtools/index.html",
-  isSupported: (fws) => !fws || fws.length === 0 ? false : fws.includes("vue"),
+  isSupported: (fws) => (!fws || fws.length === 0 ? false : fws.includes("vue")),
   encodeFromClient: (data) => (isVueEnvelope(data) ? data : undefined),
   decodeFromBackend: (payload) => (typeof payload === "string" ? payload : undefined),
   /** vue：官方 SEND_INSPECTOR_TREE/STATE 事件流，client 原地更新（保留展开/选中状态） */
@@ -115,7 +143,7 @@ export const reactDock: DevToolsDock = {
 /* ════════ 注册表 ════════ */
 
 /** 所有已注册 dock（新框架 devtools 在此追加） */
-export const devToolsDocks: DevToolsDock[] = [vueDock, reactDock];
+export const devToolsDocks: DevToolsDock[] = [elementsDock, vueDock, reactDock];
 
 /** 按 plugin 名取 dock */
 export function getDock(plugin: string): DevToolsDock {
