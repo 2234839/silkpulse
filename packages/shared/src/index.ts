@@ -189,6 +189,8 @@ export interface DeviceInfo {
   note?: string;
   /** 页面检测到的前端框架（devtools 面板自动选中用，如 ["vue"] / ["react"] / ["vue","react"]） */
   frameworks?: string[];
+  /** 下线时刻的时间戳（ms）；undefined = 在线。设备下线后保留在列表中（缓存数据仍可查看） */
+  offlineAt?: number;
 }
 
 /**

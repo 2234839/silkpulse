@@ -24,6 +24,14 @@ const emit = defineEmits<{
   select: [deviceId: string];
 }>();
 
+/** 设备是否在线（server 侧保留离线设备，仅标记 offlineAt） */
+function isOnline(d: DeviceInfo): boolean {
+  return d.offlineAt === undefined;
+}
+
+/** 在线设备数（离线设备保留展示但不计入在线数） */
+const onlineCount = computed(() => props.devices.filter(isOnline).length);
+
 /** 搜索关键字 */
 const deviceSearch = ref("");
 
@@ -169,7 +177,7 @@ function relativeTime(ts: number): string {
           <span class="relative inline-flex w-2 h-2 rounded-full bg-green-500"></span>
         </span>
         在线设备
-        <span class="text-faint font-normal">({{ devices.length }})</span>
+        <span class="text-faint font-normal">({{ onlineCount }}/{{ devices.length }})</span>
       </h2>
       <input
         v-model="deviceSearch"
@@ -190,7 +198,10 @@ function relativeTime(ts: number): string {
             :key="d.id"
             @click="emit('select', d.id)"
             class="px-4 py-3 border-b border-light cursor-pointer hover:bg-base relative transition-colors"
-            :class="selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : ''"
+            :class="[
+              selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : '',
+              !isOnline(d) ? 'opacity-60' : '',
+            ]"
           >
             <!-- 有错误时左侧红条 -->
             <span v-if="d.errorCount > 0" class="absolute left-0 top-0 bottom-0 w-1 bg-red-400" />
@@ -203,6 +214,13 @@ function relativeTime(ts: number): string {
                 alt=""
               /><span v-else class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span
               >{{ d.title }}
+              <!-- 离线徽章：设备保留在列表中，缓存数据仍可查看 -->
+              <span
+                v-if="!isOnline(d)"
+                class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-base text-faint align-middle"
+                :title="`离线于 ${new Date(d.offlineAt!).toLocaleString()}`"
+                >离线</span
+              >
               <!-- 编辑标签按钮 -->
               <button
                 v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
@@ -283,7 +301,7 @@ function relativeTime(ts: number): string {
           </li>
         </template>
         <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
-          暂无在线设备
+          暂无设备
         </li>
         <li
           v-else-if="filteredDevices.length === 0"
@@ -300,7 +318,10 @@ function relativeTime(ts: number): string {
           :key="d.id"
           @click="emit('select', d.id)"
           class="px-4 py-3 border-b border-light cursor-pointer hover:bg-base relative transition-colors"
-          :class="selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : ''"
+          :class="[
+            selectedDeviceId === d.id ? 'bg-blue-soft border-l-2 border-l-blue-500' : '',
+            !isOnline(d) ? 'opacity-60' : '',
+          ]"
         >
           <span v-if="d.errorCount > 0" class="absolute left-0 top-0 bottom-0 w-1 bg-red-400" />
           <div class="text-sm font-medium text-primary truncate">
@@ -312,6 +333,13 @@ function relativeTime(ts: number): string {
               alt=""
             /><span v-else class="mr-1">{{ deviceTypeIcon(d.deviceType) }}</span
             >{{ d.title }}
+            <!-- 离线徽章：设备保留在列表中，缓存数据仍可查看 -->
+            <span
+              v-if="!isOnline(d)"
+              class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-base text-faint align-middle"
+              :title="`离线于 ${new Date(d.offlineAt!).toLocaleString()}`"
+              >离线</span
+            >
             <button
               v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
               @click.stop="startEditTags(d.id)"

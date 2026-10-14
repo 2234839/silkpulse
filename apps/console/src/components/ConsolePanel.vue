@@ -641,13 +641,13 @@ function clearExecResults() {
           :key="i"
           class="py-1 px-1 -mx-1 rounded border-b border-light"
         >
-          <!-- 代码行（> 前缀，模拟终端提示符） -->
+          <!-- 代码行（> 前缀，模拟终端提示符）；pre-wrap 保留多行代码的换行 -->
           <div class="flex items-baseline gap-2">
             <span class="text-faint text-xs shrink-0">{{
               new Date(r.time).toLocaleTimeString()
             }}</span>
             <span class="text-blue-500 shrink-0">›</span>
-            <span class="text-secondary break-all">{{ r.code }}</span>
+            <span class="text-secondary break-all whitespace-pre-wrap">{{ r.code }}</span>
           </div>
           <!-- 结果行（缩进对齐代码，成功绿/失败红） -->
           <div class="flex items-baseline gap-2 mt-0.5">

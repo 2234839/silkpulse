@@ -157,8 +157,8 @@ export class DeviceRegistry {
   /**
    * 最近下线设备摘要（环形缓冲，上限 10 个）
    *
-   * 设备下线后从 devices 删除，但保留一份摘要在此，让 AI 能区分
-   * "从未接入"和"接入过但掉了"。设备重连时移除其旧摘要（已恢复在线）。
+   * 设备下线后在 devices 中保留（标记 offlineAt，缓存数据仍可查看），此处另留一份
+   * 摘要供 AI 区分"从未接入"和"接入过但掉了"。设备重连时移除其旧摘要（已恢复在线）。
    */
   private offlineHistory: OfflineDeviceSummary[] = [];
   private static readonly MAX_OFFLINE_HISTORY = 10;
@@ -179,7 +179,7 @@ export class DeviceRegistry {
   /**
    * 强制踢除某项目的全部设备（项目销毁时用）
    *
-   * 不走宽限期：项目已销毁，设备无家可归；断开连接并彻底移除。
+   * 不走离线保留：项目已销毁，设备无家可归，断开连接并彻底移除。
    */
   evictDevicesOfProject(projectId: string): number {
     const targets: Device[] = [];
@@ -189,7 +189,7 @@ export class DeviceRegistry {
     for (const d of targets) {
       /** 断开所有活连接（close 回调里的清理是幂等的，不会重复 unregister 出问题） */
       for (const ws of d.sockets) ws.close();
-      this.unregister(d.info.id);
+      this.deleteDevice(d.info.id);
     }
     if (targets.length > 0) {
       for (const l of this.evictListeners) l();
@@ -298,6 +298,8 @@ export class DeviceRegistry {
         onlineAt: existing.info.onlineAt,
         tags: mergedTags,
         note: mergedNote,
+        /** 恢复在线：清掉离线标记（离线保留的设备重连回这条路径） */
+        offlineAt: undefined,
       };
       this.emit({ type: "online", device: existing.info });
       return { device: existing, reconnected };
@@ -343,7 +345,13 @@ export class DeviceRegistry {
     }
   }
 
-  /** 设备下线（真正移除：宽限期超时 / 显式清理） */
+  /**
+   * 设备下线：标记 offlineAt 保留在注册表中
+   *
+   * 不再删除设备：logs/network/errors 历史缓冲保留，控制台设备列表保留该设备
+   * 并标记离线，用户仍可查看离线前的缓存数据。设备重连时（registerInner）
+   * 清掉 offlineAt 无缝恢复。项目销毁走 deleteDevice 硬删。
+   */
   unregister(deviceId: string) {
     const graceTimer = this.graceTimers.get(deviceId);
     if (graceTimer) {
@@ -376,6 +384,28 @@ export class DeviceRegistry {
     if (this.offlineHistory.length > DeviceRegistry.MAX_OFFLINE_HISTORY) {
       this.offlineHistory.shift();
     }
+    /** 连接池已空，清掉残留映射（防下次 register 前误用死连接） */
+    device.sockets.clear();
+    device.sessionTokens.clear();
+    device.info.offlineAt = Date.now();
+    this.emit({ type: "offline", deviceId });
+  }
+
+  /** 硬删设备（项目销毁等场景）：设备与全部缓冲数据一并移除 */
+  deleteDevice(deviceId: string) {
+    const graceTimer = this.graceTimers.get(deviceId);
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      this.graceTimers.delete(deviceId);
+    }
+    const device = this.devices.get(deviceId);
+    if (!device) return;
+    for (const [, entry] of device.pendingExecs) {
+      clearTimeout(entry.timer);
+      entry.resolve({ success: false, error: "设备已断开连接" });
+    }
+    device.pendingExecs.clear();
+    this.offlineHistory = this.offlineHistory.filter((o) => o.id !== deviceId);
     this.devices.delete(deviceId);
     this.emit({ type: "offline", deviceId });
   }

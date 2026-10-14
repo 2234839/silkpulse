@@ -308,16 +308,16 @@ export function useConsoleSocket() {
         }
         break;
       }
-      case "device-offline":
-        devices.value = devices.value.filter((d) => d.id !== msg.deviceId);
-        if (selectedDeviceId.value === msg.deviceId) {
-          selectedDeviceId.value = null;
-          logs.value = [];
-          network.value = [];
-          errors.value = [];
-          screenShareStatus.value = null;
+      case "device-offline": {
+        /** 设备离线：保留设备（缓存的历史日志/请求仍可查看），仅标记 offlineAt */
+        const idx = devices.value.findIndex((d) => d.id === msg.deviceId);
+        if (idx !== -1) {
+          const next = devices.value.slice();
+          next[idx] = { ...next[idx], offlineAt: Date.now() };
+          devices.value = next;
         }
         break;
+      }
       case "log":
         if (msg.deviceId === selectedDeviceId.value) {
           logs.value = [...logs.value, msg.log];
