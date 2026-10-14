@@ -36,7 +36,9 @@ ws.on("message", (raw) => {
     frames++;
     if (frames === 1) {
       firstFrameLen = msg.frame.dataUrl.length;
-      console.log(`首帧到达: keyframe=${msg.frame.keyframe} dataUrl=${Math.round(firstFrameLen / 1024)}KB`);
+      console.log(
+        `首帧到达: keyframe=${msg.frame.keyframe} dataUrl=${Math.round(firstFrameLen / 1024)}KB`,
+      );
     }
     if (frames >= 3) {
       clearTimeout(timer);

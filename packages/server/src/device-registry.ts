@@ -7,7 +7,7 @@
  * - exec 等待映射：execId → resolve 回调，设备回传 exec-result 时 resolve
  */
 
-import type { SilkWs } from "./uws/ws-socket.js";
+import type { DeviceConn } from "./device-conn.js";
 import type {
   DeviceInfo,
   OfflineDeviceSummary,
@@ -114,11 +114,11 @@ export interface Device {
    * 复制标签页也会共享 id。数据上行（log/network/...）任意连接都可写入；
    * 指令下行（exec/屏幕共享）走 latestSocket（最后一次 register 的连接）。
    */
-  sockets: Set<SilkWs>;
+  sockets: Set<DeviceConn>;
   /** 最后一次 register 的连接（指令下发的首选目标） */
-  latestSocket: SilkWs;
+  latestSocket: DeviceConn;
   /** 每条连接的 sessionToken（页面加载唯一，reload 变 / WS 重连不变） */
-  sessionTokens: Map<SilkWs, string>;
+  sessionTokens: Map<DeviceConn, string>;
   /** console 日志环形缓冲区 */
   logs: LogBuffer;
   /** network 请求环形缓冲区 */
@@ -215,7 +215,7 @@ export class DeviceRegistry {
    * 返回 null = 检测到复制标签页冲突：deviceId 已被另一个页面（不同 sessionToken）
    * 持有，调用方应告知设备换 id 重新注册（Web Locks 不可用环境的 server 端仲裁）。
    */
-  register(info: DeviceInfo, ws: SilkWs, sessionToken = ""): Device | null {
+  register(info: DeviceInfo, ws: DeviceConn, sessionToken = ""): Device | null {
     const existing = this.devices.get(info.id);
     if (existing && sessionToken) {
       /** 同 id 下已有不同 token 的活连接 → 复制标签页（sessionStorage 快照被复制）
@@ -242,7 +242,7 @@ export class DeviceRegistry {
    */
   private registerInner(
     info: DeviceInfo,
-    ws: SilkWs,
+    ws: DeviceConn,
     sessionToken = "",
   ): { device: Device; reconnected: boolean } | null {
     const existing = this.devices.get(info.id);
@@ -312,7 +312,7 @@ export class DeviceRegistry {
    * 还有其他活连接 → 设备仍在线（多标签页共享一台设备）。
    * 这是最后一条 → 不立即下线，进宽限期等 reload 重连；超时才真正 unregister。
    */
-  detachSocket(deviceId: string, ws: SilkWs): void {
+  detachSocket(deviceId: string, ws: DeviceConn): void {
     const device = this.devices.get(deviceId);
     if (!device) return;
     device.sockets.delete(ws);
@@ -320,7 +320,7 @@ export class DeviceRegistry {
     if (device.sockets.size > 0) {
       /** 指令连接若恰好是摘除的这条，切到池里任意存活连接 */
       if (device.latestSocket === ws) {
-        device.latestSocket = device.sockets.values().next().value as SilkWs;
+        device.latestSocket = device.sockets.values().next().value as DeviceConn;
       }
       return;
     }

@@ -120,9 +120,12 @@ const bookmarkletSnippet = computed(
 /**
  * Tampermonkey userscript —— 自动匹配所有页面注入
  *
- * 用 GM_addElement 走 TM 扩展特权注入，免疫页面 CSP 的 script-src；
- * document.createElement('script') DOM 注入在强 CSP 站会被拦。
- * @grant GM_addElement 仅 Tampermonkey 支持（Violentmonkey 无此 API）。
+ * GM_addElement 特权注入免疫页面 CSP script-src；内置 GM 桥接宿主后，
+ * SDK 与 server 的通信（含 WebSocket 语义的指令通道）全部由
+ * GM_xmlhttpRequest（register/uplink POST + stream SSE）承载，
+ * connect-src 限制的强 CSP 站也能全功能接入。
+ * 宿主标记写在 <html data-silkpulse-bridge>（DOM 跨沙箱与页面共享，
+ * window 属性在隔离世界不互通）。需 Tampermonkey（Violentmonkey 缺这两个 GM API）。
  */
 const userscriptSnippet = computed(() => {
   const dataAttrs = [
@@ -132,16 +135,157 @@ const userscriptSnippet = computed(() => {
   ]
     .filter(Boolean)
     .join(",\n    ");
+  const projectIdQs = injectProjectId.value
+    ? `&projectId=${encodeURIComponent(injectProjectId.value)}`
+    : "";
+  let connectHost = "*";
+  try {
+    connectHost = new URL(serverOrigin).host;
+  } catch {
+    connectHost = "*";
+  }
   return `// ==UserScript==
 // @name         silkpulse 远程调试注入
 // @namespace    silkpulse
-// @version      0.2.0
-// @description  自动注入 silkpulse SDK，将当前页面接入远程调试（GM_addElement 特权注入，免疫页面 CSP）
+// @version      0.3.0
+// @description  自动注入 silkpulse SDK 并内置 GM 桥接宿主，强 CSP 页面（script-src/connect-src 均限制）也可全功能远程调试
 // @match        *://*/*
 // @grant        GM_addElement
+// @grant        GM_xmlhttpRequest
+// @connect      ${connectHost}
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
+  var ORIGIN = '${serverOrigin}';
+  var QS = '?bridge=1${projectIdQs}';
+
+  /** 桥接宿主标记：<html data-silkpulse-bridge="1">（DOM 跨世界共享，SDK 据此切 bridge 传输） */
+  document.documentElement.setAttribute('data-silkpulse-bridge', '1');
+
+  /** ---------- 桥接宿主：GM_xmlhttpRequest 承载 server 通信 ---------- */
+  var session = null; // { id, token, alive, flushTimer, uplinkBuf: [], streamOffset, streamBuf }
+  var pageAlive = false; // 页面侧 BridgeSocket 是否在场
+
+  function toPage(msg) {
+    try { window.postMessage(msg, window.location.origin); } catch (e) { /* 页面即将卸载等场景忽略 */ }
+  }
+  function notifyPage(event, data) {
+    toPage({ __silkpulseHost: true, event: event, data: data });
+  }
+
+  function gm(opts) {
+    opts.url = ORIGIN + opts.url;
+    opts.headers = opts.headers || {};
+    if (opts.data) opts.headers['Content-Type'] = 'application/json';
+    opts.timeout = opts.timeout || 15000;
+    GM_xmlhttpRequest(opts);
+  }
+
+  /** 销毁当前会话；notify=false 时静默销毁（页面重连重建场景，不能向新 BridgeSocket 发 close） */
+  function dropSession(notify) {
+    if (!session) return;
+    var s = session;
+    session = null;
+    s.alive = false;
+    if (s.flushTimer) clearTimeout(s.flushTimer);
+    if (notify !== false && pageAlive) notifyPage('close');
+  }
+
+  /** 建立桥接会话：先 POST register（空消息），SDK 的 register 随后经 uplink 到达 */
+  function createSession() {
+    dropSession(false);
+    gm({
+      method: 'POST',
+      url: '/ws/device-bridge/register' + QS,
+      data: JSON.stringify({ messages: [] }),
+      onload: function (res) {
+        if (res.status !== 200) { retryLater(); return; }
+        var data;
+        try { data = JSON.parse(res.responseText); } catch (e) { retryLater(); return; }
+        session = {
+          id: data.bridgeId, token: data.token, alive: true,
+          flushTimer: null, uplinkBuf: [], streamOffset: 0, streamBuf: ''
+        };
+        /** SSE 下行流：onprogress 增量解析 data: 帧（需 TM ≥ 4.10 流式响应） */
+        gm({
+          method: 'GET',
+          timeout: 0,
+          url: '/ws/device-bridge/stream?bridgeId=' + data.bridgeId + '&token=' + data.token,
+          onprogress: function (res) {
+            if (!session) return;
+            var text = res.responseText.slice(session.streamOffset);
+            session.streamOffset = res.responseText.length;
+            session.streamBuf += text;
+            var frames = session.streamBuf.split('\\n\\n');
+            session.streamBuf = frames.pop();
+            for (var i = 0; i < frames.length; i++) {
+              var line = frames[i];
+              if (line.indexOf('data: ') === 0) notifyPage('down', line.slice(6));
+            }
+          },
+          onerror: function () { dropSession(true); },
+          onabort: function () { dropSession(true); },
+          onload: function () { dropSession(true); }
+        });
+        /** 建好会话即通知页面：BridgeSocket 转 OPEN，SDK 开始发 register */
+        if (pageAlive) notifyPage('open');
+      },
+      onerror: retryLater,
+      ontimeout: retryLater
+    });
+  }
+
+  /** 会话建立失败退避重试 */
+  var retryCount = 0;
+  function retryLater() {
+    var delay = Math.min(1000 * Math.pow(2, retryCount++), 30000);
+    setTimeout(function () {
+      if (pageAlive) createSession();
+    }, delay);
+  }
+
+  /** uplink 批量上行：50ms 聚合窗口，减少请求数 */
+  function flushUplink() {
+    if (!session || !session.alive) return;
+    if (session.uplinkBuf.length === 0) return;
+    var msgs = session.uplinkBuf;
+    session.uplinkBuf = [];
+    gm({
+      method: 'POST',
+      timeout: 10000,
+      url: '/ws/device-bridge/uplink?bridgeId=' + session.id + '&token=' + session.token,
+      data: JSON.stringify({ messages: msgs }),
+      onload: function (res) {
+        if (res.status === 404) dropSession(true); // 会话过期 → 页面重连重建
+      },
+      onerror: function () { dropSession(true); },
+      ontimeout: function () { dropSession(true); }
+    });
+  }
+
+  window.addEventListener('message', function (ev) {
+    if (ev.origin !== window.location.origin) return;
+    var d = ev.data;
+    if (!d || d.__silkpulsePage !== true) return;
+    if (d.cmd === 'init') {
+      pageAlive = true;
+      if (session && session.alive) { notifyPage('open'); return; }
+      createSession();
+      return;
+    }
+    if (d.cmd === 'close') { pageAlive = false; dropSession(true); return; }
+    if (d.cmd === 'send' && session && session.alive && d.msgs) {
+      for (var i = 0; i < d.msgs.length; i++) session.uplinkBuf.push(d.msgs[i]);
+      if (!session.flushTimer) {
+        session.flushTimer = setTimeout(function () {
+          if (session) session.flushTimer = null;
+          flushUplink();
+        }, 50);
+      }
+    }
+  });
+
+  /** ---------- 注入 SDK（GM_addElement 特权通道，免疫页面 CSP script-src） ---------- */
   var k = '__silkpulse_injected__';
   if (window[k]) return;
   window[k] = 1;
@@ -170,7 +314,7 @@ const scenarioText = computed(() => {
     script: "适合：能改源码的项目（自己的网站 / App）",
     iife: "适合：临时调试某个页面，F12 打开 console 粘贴即注入",
     bookmarklet: "适合：改不了源码的线上站，临时接入一次",
-    userscript: "适合：长期调试某个站 / 强 CSP 站，需 Tampermonkey",
+    userscript: "适合：长期调试某个站 / 强 CSP 站（含 connect-src 限制），需 Tampermonkey",
   };
   return map[injectTab.value];
 });
@@ -183,7 +327,7 @@ const locationText = computed(() => {
     iife: "→ F12 打开目标页面的 DevTools console，粘贴上面代码回车即注入（页面刷新后失效）",
     bookmarklet: "→ 复制后新建书签，URL 粘贴为上面的代码；在目标页面点这个书签即注入",
     userscript:
-      "→ 粘贴到 Tampermonkey 新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入可穿过页面 CSP。若站点 CSP 声明了 connect-src，SDK 的 WebSocket 仍可能被拦（需配合剥 CSP 响应头的扩展）",
+      "→ 粘贴到 Tampermonkey 新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入穿过 CSP script-src，内置 GM 桥接宿主用 GM_xmlhttpRequest 承载全部通信，connect-src 限制也不影响（需 Tampermonkey ≥ 4.10）",
   };
   return map[injectTab.value];
 });

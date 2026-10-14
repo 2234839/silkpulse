@@ -131,9 +131,7 @@ function buildAgentPrompt(): string {
   lines.push("```");
   lines.push("");
   lines.push("## 使用建议");
-  lines.push(
-    "先 snapshot 了解页面结构，再 exec 执行点击/填值等操作，操作后重新取快照验证效果。",
-  );
+  lines.push("先 snapshot 了解页面结构，再 exec 执行点击/填值等操作，操作后重新取快照验证效果。");
   lines.push(
     "exec 内可用辅助函数：__silkpulse_click(idx) / __silkpulse_setValue(idx, val) / __silkpulse_scrollIntoView(idx) / __silkpulse_snapshot() 等；也可直接 document.querySelector 定位。",
   );

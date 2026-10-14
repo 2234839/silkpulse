@@ -48,10 +48,7 @@ const minWidthPlugin = {
 /**
  * 计算目标 canvas 尺寸
  */
-function computeSize(
-  target: Element,
-  opts: CaptureOptions,
-): { width: number; height: number } {
+function computeSize(target: Element, opts: CaptureOptions): { width: number; height: number } {
   const scale = opts.scale ?? 1;
 
   if (opts.viewport) {

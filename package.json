@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vp run --filter '!silkpulse' build && pnpm run copy:assets",
-    "copy:assets": "mkdir -p packages/server/public && cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js && cp -r apps/console/dist/* packages/server/public/",
+    "copy:assets": "mkdir -p packages/server/public && cp packages/sdk/dist/index.iife.js packages/server/public/sdk.js",
     "dev": "pnpm run dev:watch",
     "dev:watch": "node scripts/dev-watch.mjs",
     "dev:http": "node --watch packages/server/dist-bin/silkpulse.mjs",

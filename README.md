@@ -232,7 +232,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 **方式三：userscript**（Tampermonkey）
 
-访问 `http://localhost:8080/inject/userscript`，保存为 `.user.js` 安装到 Tampermonkey，自动匹配所有页面注入。通过 `GM_addElement` 扩展特权通道注入 SDK，不受页面 CSP `script-src` 限制——强 CSP 站也能接。注意：仅 Tampermonkey 支持（Violentmonkey 无 `GM_addElement`）；若站点 CSP 还声明了 `connect-src`，SDK 的 WebSocket 连接可能仍被拦，需配合剥 CSP 响应头的扩展使用。
+访问 `http://localhost:8080/inject/userscript`，保存为 `.user.js` 安装到 Tampermonkey，自动匹配所有页面注入。**强 CSP 站（script-src / connect-src 双限制）也能全功能接入**：`GM_addElement` 特权注入穿过 `script-src`；内置 GM 桥接宿主用 `GM_xmlhttpRequest` 承载 SDK 与 server 的全部通信（不受页面任何 CSP 约束），SDK 自动切换 bridge 传输。注意：仅 Tampermonkey 支持（Violentmonkey 缺 `GM_addElement` / `GM_xmlhttpRequest`）；流式下行需 TM ≥ 4.10。
 
 ### AI 接入（skill）
 

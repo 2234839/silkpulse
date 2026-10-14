@@ -9,6 +9,67 @@
  */
 
 import type { DeviceMessage, ServerToDeviceMessage, DeviceInfo } from "@silkpulse/shared";
+import { BridgeSocket } from "./bridge-socket.js";
+
+/**
+ * 设备连接抽象 —— 屏蔽 WebSocket 与 bridge（userscript 宿主）两种传输
+ *
+ * 事件处理器属性与 WebSocket 同形，由 WsAdapter（原生 WS）和 BridgeSocket（桥接）实现。
+ */
+export interface DeviceSocket {
+  readonly OPEN: number;
+  readyState: number;
+  onopen: (() => void) | null;
+  onmessage: ((ev: { data: string }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: (() => void) | null;
+  send(data: string): void;
+  close(): void;
+}
+
+/** 原生 WebSocket 适配：事件回调转成 DeviceSocket 形态 */
+class WsAdapter implements DeviceSocket {
+  readonly OPEN = WebSocket.OPEN;
+  readyState: number = WebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  private readonly raw: WebSocket;
+
+  constructor(url: string) {
+    this.raw = new WebSocket(url);
+    this.raw.onopen = () => {
+      this.readyState = WebSocket.OPEN;
+      this.onopen?.();
+    };
+    this.raw.onmessage = (ev) => this.onmessage?.({ data: ev.data });
+    this.raw.onclose = () => {
+      this.readyState = WebSocket.CLOSED;
+      this.onclose?.();
+    };
+    this.raw.onerror = () => this.onerror?.();
+  }
+
+  send(data: string): void {
+    this.raw.send(data);
+  }
+
+  close(): void {
+    this.raw.close();
+  }
+}
+
+/**
+ * userscript 桥接宿主标记（userscript 在注入 SDK 前写在 <html data-silkpulse-bridge>）
+ *
+ * 走 DOM data 属性而不是 window 属性：Tampermonkey grant 沙箱与页面是隔离世界，
+ * window 属性不互通，DOM 是唯一可靠的共享通道。
+ * 存在时 SDK 走 bridge 传输（GM_xmlhttpRequest 承载，穿透页面 CSP connect-src）。
+ */
+export function hasBridgeHost(): boolean {
+  return document.documentElement.dataset.silkpulseBridge === "1";
+}
 
 /** 连接选项 */
 export interface WsClientOptions {
@@ -22,8 +83,8 @@ export interface WsClientOptions {
   onIdConflict?: () => void;
 }
 
-/** 当前 WebSocket（重连时切换） */
-let ws: WebSocket | null = null;
+/** 当前连接（WS 或 bridge，重连时切换） */
+let ws: DeviceSocket | null = null;
 
 /** 重连退避计数 */
 let reconnectAttempts = 0;
@@ -108,7 +169,8 @@ function doConnect(options: WsClientOptions): void {
    * 这时不应再建新连接。入口检查守住幽灵重连。
    */
   if (manualClose) return;
-  ws = new WebSocket(options.url);
+  /** 桥接宿主存在（userscript 注入场景）→ 走 GM 传输；否则原生 WebSocket */
+  ws = hasBridgeHost() ? new BridgeSocket() : new WsAdapter(options.url);
 
   ws.onopen = () => {
     reconnectAttempts = 0;
@@ -171,7 +233,7 @@ function doConnect(options: WsClientOptions): void {
  */
 export function send(message: DeviceMessage): void {
   const raw = JSON.stringify(message);
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (ws && ws.readyState === ws.OPEN) {
     ws.send(raw);
   } else {
     /** 入队：满了丢弃最旧的（FIFO 覆盖），优先保留新数据 */

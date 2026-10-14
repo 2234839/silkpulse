@@ -505,10 +505,10 @@ async function main() {
       } else if (form === "userscript") {
         const res = await get("/inject/userscript");
         console.log(
-          "将下面内容保存为 .user.js 文件，或直接安装到 Tampermonkey（需 TM，Violentmonkey 不支持 GM_addElement）：\n",
+          "将下面内容保存为 .user.js 文件，或直接安装到 Tampermonkey（需 TM ≥ 4.10，Violentmonkey 不支持所需的 GM API）：\n",
         );
         console.log(
-          "GM_addElement 走扩展特权注入，免疫页面 CSP 的 script-src；若站点 CSP 含 connect-src，WebSocket 仍可能被拦。\n",
+          "GM_addElement 穿过 CSP script-src；内置 GM 桥接宿主用 GM_xmlhttpRequest 承载全部通信，connect-src 限制的强 CSP 站也可全功能接入。\n",
         );
         console.log(await res.text());
       } else {

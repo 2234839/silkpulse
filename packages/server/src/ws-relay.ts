@@ -11,23 +11,14 @@
  */
 
 import type { WebSocketBehavior } from "uWebSockets.js";
-import type { DeviceRegistry, Device } from "./device-registry.js";
+import type { DeviceRegistry } from "./device-registry.js";
 import type { AuthContext } from "./auth.js";
 import { SilkWs, getSilk, type WsUserData } from "./uws/ws-socket.js";
-import type {
-  DeviceMessage,
-  ServerToConsoleMessage,
-  ConsoleMessage,
-  DeviceInfo,
-} from "@silkpulse/shared";
+import { DeviceChannel } from "./device-channel.js";
+import type { ServerToConsoleMessage, ConsoleMessage } from "@silkpulse/shared";
 
 /** 广播可观测性：发送/截断计数，供 health 端点读取，压测用 */
 export const fanoutStats = { sent: 0, skippedClosed: 0, skippedProject: 0, backpressureClosed: 0 };
-
-/** 生成设备 ID（8 位十六进制） */
-function generateDeviceId(): string {
-  return Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
-}
 
 /**
  * 创建并挂载 WebSocket 服务到 HTTP server
@@ -39,9 +30,13 @@ export function setupWebSocket(
     authorizeWsConnection: (url: string, wsPath: string) => AuthContext;
     isAuthEnabled: () => boolean;
   },
-): { behavior: WebSocketBehavior<WsUserData>; notifyDeviceListChanged: () => void } {
-  /** 每个 WS 连接对应的设备 ID（设备端）或订阅集合（控制台端） */
-  const deviceSockets = new Map<SilkWs, Device>();
+): {
+  behavior: WebSocketBehavior<WsUserData>;
+  notifyDeviceListChanged: () => void;
+  broadcast: (deviceId: string, msg: ServerToConsoleMessage) => void;
+} {
+  /** 每个 WS 设备连接对应的业务通道（设备端）；控制台端为订阅集合 */
+  const deviceChannels = new Map<SilkWs, DeviceChannel>();
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
   const consoleSubscriptions = new Map<SilkWs, Set<string>>();
   const deviceWatchers = new Map<string, Set<SilkWs>>();
@@ -171,11 +166,11 @@ export function setupWebSocket(
        *  最后一条断开走宽限期（reload 窗口内重连无缝续接，不丢历史缓冲） */
       const closeUrl = new URL(getUrlFromSocket(silk), "http://localhost");
       if (closeUrl.pathname === "/ws/device") {
-        const state = deviceStates.get(silk);
-        if (state?.deviceId) {
-          registry.detachSocket(state.deviceId, silk);
+        const channel = deviceChannels.get(silk);
+        if (channel) {
+          channel.onClosed();
+          deviceChannels.delete(silk);
         }
-        deviceStates.delete(silk);
       }
       if (closeUrl.pathname === "/ws/console") {
         unsubscribeAll(silk);
@@ -190,7 +185,16 @@ export function setupWebSocket(
 
     /** ---------- 设备端连接 ---------- */
     if (pathname === "/ws/device") {
-      deviceStates.set(silk, { deviceId: "", device: undefined });
+      deviceChannels.set(
+        silk,
+        new DeviceChannel(silk, {
+          registry,
+          broadcast,
+          notifyDeviceListChanged,
+          resolveProjectId: () =>
+            silk.authCtx.role === "project" ? silk.authCtx.projectId : undefined,
+        }),
+      );
     }
 
     /** ---------- 控制台连接 ---------- */
@@ -208,299 +212,18 @@ export function setupWebSocket(
     }
   }
 
-  /** 每个设备连接的状态（device 路径专用） */
-  const deviceStates = new Map<SilkWs, { deviceId: string; device: Device | undefined }>();
-
   function handleMessage(silk: SilkWs, raw: string): void {
     const url = new URL(getUrlFromSocket(silk), "http://localhost");
     const pathname = url.pathname;
 
     /** ---------- 设备端消息 ---------- */
     if (pathname === "/ws/device") {
-      const state = deviceStates.get(silk);
-      if (!state) return;
-      let { deviceId } = state;
-      let { device } = state;
-
-      {
-        let msg: DeviceMessage;
-        try {
-          msg = JSON.parse(raw);
-        } catch {
-          return;
-        }
-
-        {
-          switch (msg.type) {
-            case "register": {
-              /** 设备首次注册：分配/复用 id，建立映射 */
-              deviceId = msg.device.id || generateDeviceId();
-              /** 从 WS 连接的鉴权上下文获取 projectId */
-              const wsAuthCtx = silk.authCtx;
-              const info: DeviceInfo = {
-                ...msg.device,
-                id: deviceId,
-                /** 鉴权模式下，projectId 由 server 从鉴权上下文注入（不由 SDK 决定） */
-                projectId: wsAuthCtx?.projectId ?? msg.device.projectId,
-                onlineAt: Date.now(),
-                /** 兼容未上报 tags 的旧 SDK */
-                tags: msg.device.tags ?? [],
-                note: msg.device.note,
-              };
-              const registered = registry.register(info, silk, msg.sessionToken ?? "");
-              if (!registered) {
-                /** deviceId 已被另一个活着的标签页占用（复制标签页，Web Locks 不可用时的
-                 *  server 端仲裁）：告知设备换新 id 重连。此连接不再接受消息。 */
-                silk.send(
-                  JSON.stringify({
-                    type: "device-id-conflict",
-                  } satisfies import("@silkpulse/shared").ServerToDeviceMessage),
-                );
-                return;
-              }
-              device = registered;
-              deviceSockets.set(silk, device);
-              /** 广播设备列表更新给所有控制台（用 register 合并后的最新 info） */
-              broadcast(deviceId, {
-                type: "device-online",
-                device: device.info,
-              });
-              notifyDeviceListChanged();
-              break;
-            }
-            case "update-info": {
-              /** SPA 路由变化：SDK 上报新 url/title/icon，server 更新元信息并通知控制台 */
-              if (!device) return;
-              registry.updateInfo(deviceId, {
-                url: msg.device.url,
-                title: msg.device.title,
-                icon: msg.device.icon,
-                viewportWidth: msg.device.viewportWidth,
-                viewportHeight: msg.device.viewportHeight,
-                deviceType: msg.device.deviceType,
-                /** 框架探测结果（DevTools 面板自动选插件用，SPA 路由变化后可能更新） */
-                frameworks: msg.device.frameworks,
-              });
-              broadcast(deviceId, {
-                type: "device-online",
-                device: device.info,
-              });
-              /** 通知所有控制台刷新设备列表（title/icon/url 变化要反映到侧边栏） */
-              notifyDeviceListChanged();
-              break;
-            }
-            case "log": {
-              if (!device) return;
-              device.logs.push(msg.log);
-              broadcast(deviceId, { type: "log", deviceId, log: msg.log });
-              break;
-            }
-            case "log-repeat": {
-              /**
-               * 连续重复日志：最后一条 repeat +1（不发新条目）。
-               * SDK 检测到与上一条 type+message 完全相同时不发 log，只发 log-repeat，
-               * 避免循环/spam 日志占满环形缓冲区挤掉有价值的诊断日志。
-               */
-              if (!device) return;
-              const last = device.logs.last();
-              if (last) {
-                last.repeat = (last.repeat ?? 1) + 1;
-                broadcast(deviceId, { type: "log-repeat", deviceId });
-              }
-              break;
-            }
-            case "network": {
-              if (!device) return;
-              device.network.push(msg.entry);
-              broadcast(deviceId, {
-                type: "network",
-                deviceId,
-                entry: msg.entry,
-              });
-              break;
-            }
-            case "network-update": {
-              /**
-               * 已有 entry 的增量更新（loading→done、流式 body 追加）
-               * 按 seq 找到 entry 合并 patch 字段，广播让 console 同步更新
-               */
-              if (!device) return;
-              const existing = device.network.findBySeq(msg.seq);
-              if (existing) {
-                Object.assign(existing, msg.patch);
-                broadcast(deviceId, {
-                  type: "network-update",
-                  deviceId,
-                  seq: msg.seq,
-                  patch: msg.patch,
-                });
-              }
-              break;
-            }
-            case "ws-frame": {
-              /**
-               * WebSocket 帧追加（send/recv/event）：按 seq 找到 WS 连接条目，
-               * 追加帧到 frames（上限 50 FIFO），广播让 console 增量更新。
-               * 与 log-repeat 同模式：seq 稳定，只发增量，不重发整个 entry。
-               */
-              if (!device) return;
-              const wsEntry = device.network.findBySeq(msg.seq);
-              if (wsEntry && wsEntry.protocol === "ws") {
-                if (!wsEntry.frames) wsEntry.frames = [];
-                wsEntry.frames.push(msg.frame);
-                broadcast(deviceId, { type: "ws-frame", deviceId, seq: msg.seq, frame: msg.frame });
-              }
-              break;
-            }
-            case "ws-state": {
-              /** WebSocket readyState 变化（CONNECTING→OPEN→CLOSING→CLOSED） */
-              if (!device) return;
-              const wsEntry = device.network.findBySeq(msg.seq);
-              if (wsEntry && wsEntry.protocol === "ws") {
-                wsEntry.wsState = msg.wsState;
-                /** status 字段同步 readyState，列表展示一致 */
-                wsEntry.status = msg.wsState;
-                broadcast(deviceId, {
-                  type: "ws-state",
-                  deviceId,
-                  seq: msg.seq,
-                  wsState: msg.wsState,
-                });
-              }
-              break;
-            }
-            case "sse-event": {
-              /**
-               * SSE 事件追加：按 seq 找到 SSE 连接条目，追加事件到 events（上限 50 FIFO），
-               * 广播让 console 增量更新。与 ws-frame 同模式。
-               *
-               * 特殊事件 `__closed__` 表示 SSE 流结束（reader done），更新 sseState。
-               */
-              if (!device) return;
-              const sseEntry = device.network.findBySeq(msg.seq);
-              if (sseEntry && sseEntry.sseState) {
-                if (msg.event.event === "__closed__") {
-                  sseEntry.sseState = "closed";
-                } else {
-                  if (!sseEntry.events) sseEntry.events = [];
-                  sseEntry.events.push(msg.event);
-                }
-                broadcast(deviceId, {
-                  type: "sse-event",
-                  deviceId,
-                  seq: msg.seq,
-                  event: msg.event,
-                });
-              }
-              break;
-            }
-            case "error": {
-              if (!device) return;
-              device.errors.push(msg.error);
-              registry.updateInfo(deviceId, {
-                errorCount: device.info.errorCount + 1,
-              });
-              broadcast(deviceId, {
-                type: "error",
-                deviceId,
-                error: msg.error,
-              });
-              /** 错误数变化会改变设备列表状态（红条/计数），推送更新 */
-              notifyDeviceListChanged();
-              break;
-            }
-            case "snapshot": {
-              /** 快照不存缓冲区（体积大、时效性强），直接转发给控制台 */
-              if (!device) return;
-              /** 快照请求通常是 exec 触发的，由 exec-bridge 处理，这里仅转发 */
-              break;
-            }
-            case "screen-frame": {
-              /** 屏幕共享帧：直接转发给订阅了该设备的控制台（不存缓冲，体积大时效性强） */
-              if (!device) return;
-              broadcast(deviceId, { type: "screen-frame", deviceId, frame: msg.frame });
-              break;
-            }
-            case "screen-share-status": {
-              /** 屏幕共享状态变化（等待授权/共享中/被拒绝等）：转发给控制台 */
-              if (!device) return;
-              broadcast(deviceId, { type: "screen-share-status", deviceId, status: msg.status });
-              break;
-            }
-            case "exec-result": {
-              if (!device) return;
-              const entry = device.pendingExecs.get(msg.execId);
-              if (entry) {
-                clearTimeout(entry.timer);
-                entry.resolve(msg.result);
-                device.pendingExecs.delete(msg.execId);
-              }
-              break;
-            }
-            case "network-body": {
-              /** 设备返回完整 body（懒加载响应），转发给订阅该设备的控制台 */
-              if (!device) return;
-              broadcast(deviceId, {
-                type: "network-body",
-                deviceId,
-                bodySeq: msg.bodySeq,
-                body: msg.body,
-              });
-              break;
-            }
-            case "storage-change": {
-              /** 远程设备 storage 变化（SDK 劫持 setItem/removeItem 触发），转发给控制台实时刷新 */
-              if (!device) return;
-              broadcast(deviceId, {
-                type: "storage-change",
-                deviceId,
-                storageType: msg.storageType,
-                key: msg.key,
-                timestamp: msg.timestamp,
-              });
-              break;
-            }
-            case "dom-change": {
-              /** 远程设备 DOM 变化（SDK MutationObserver 触发），转发给控制台 Element 面板实时刷新 */
-              if (!device) return;
-              broadcast(deviceId, {
-                type: "dom-change",
-                deviceId,
-                changes: msg.changes,
-              });
-              break;
-            }
-            case "device-mouse": {
-              /** 远端设备鼠标/触摸事件，转发给控制台渲染虚拟光标 */
-              if (!device) return;
-              broadcast(deviceId, {
-                type: "device-mouse",
-                deviceId,
-                mouse: msg.mouse,
-              });
-              break;
-            }
-            case "devtools-relay": {
-              /** devtools backend RPC 消息（vue/react）：透传给订阅该设备的控制台（不存缓冲，时效性强） */
-              if (!device) return;
-              broadcast(deviceId, {
-                type: "devtools-relay",
-                deviceId,
-                plugin: msg.plugin,
-                payload: msg.payload,
-              });
-              break;
-            }
-          }
-          /** 写回 per-socket state（deviceId/device 随 register 更新） */
-          state.deviceId = deviceId;
-          state.device = device;
-        }
-      }
+      deviceChannels.get(silk)?.handleRaw(raw);
       return;
     }
 
     /** ---------- 控制台消息 ---------- */
+
     if (pathname === "/ws/console") {
       {
         let msg: ConsoleMessage;
@@ -653,7 +376,7 @@ export function setupWebSocket(
     }
   });
 
-  return { behavior, notifyDeviceListChanged };
+  return { behavior, notifyDeviceListChanged, broadcast };
 }
 
 /**
