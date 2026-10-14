@@ -98,6 +98,11 @@ mkdirSync(OUT_DIR, { recursive: true });
 execSync(`cp -r ${frontEndSrc} ${join(OUT_DIR, "front_end")}`);
 execSync(`cp ${chobitsuSrc} ${join(OUT_DIR, "chobitsu.js")}`);
 
+/** 资产不做裁剪：devtools-frontend 是 ESM 模块图，面板按动态 import 按需加载，
+ *  实测打开 Console+Elements 面板仅拉取 ~1.2MB（90 个请求）；16M 只是 server
+ *  磁盘占用，不影响带宽。目录级删除曾误伤静态闭包依赖（main.js 静态 import
+ *  panels/timeline），静态闭包分析无法安全覆盖动态加载面，得不偿失。 */
+
 /** 生成并写入 host 页（function 声明以便增量跳过分支也能调用） */
 function writeHostPage() {
 const hostHtml = `<!DOCTYPE html>
