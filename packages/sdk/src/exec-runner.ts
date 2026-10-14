@@ -20,6 +20,7 @@
 
 import type { ServerToDeviceMessage, ExecResult } from "@silkpulse/shared";
 import { startExecCapture, endExecCapture } from "./log-collector.js";
+import { setFloatingBallBusy } from "./floating-ball.js";
 import { takeSnapshot, getElement, ensureElementIdx } from "./snapshot.js";
 import { resolveOriginalPosition, resolveStack } from "./source-map-helper.js";
 import { toSerializedValue } from "./serialize-value.js";
@@ -502,6 +503,8 @@ const SDK_EXEC_TIMEOUT = 9000;
  */
 export async function handleExec(code: string, execId: string): Promise<void> {
   startExecCapture();
+  /** 悬浮球开启时切换为「控制中」脉冲态，结束后还原 */
+  setFloatingBallBusy(true);
   let success = true;
   let result: string | undefined;
   let resultValue: import("@silkpulse/shared").SerializedValue | undefined;
@@ -560,6 +563,7 @@ export async function handleExec(code: string, execId: string): Promise<void> {
   }
 
   const logs = endExecCapture();
+  setFloatingBallBusy(false);
 
   /** exec 后自动取一次快照，让 AI 看到 操作后的页面变化 */
   let snapshotText: string | undefined;
