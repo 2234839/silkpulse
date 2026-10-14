@@ -580,19 +580,40 @@ function buildBookmarklet(origin: string, projectId?: string): string {
 }
 
 /**
- * 构建 Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入
+ * 构建 Tampermonkey userscript —— 自动匹配所有页面注入
+ *
+ * 强 CSP 站（script-src 未放行外部域）会拦截 document.createElement('script') 这类
+ * DOM 注入，油猴脚本自己也逃不掉。GM_addElement 走 Tampermonkey 扩展特权通道，
+ * 不受页面 CSP script-src 约束，专为这类场景设计。
+ *
+ * 取舍：@grant GM_addElement 仅 Tampermonkey 支持（Violentmonkey 无此 API），
+ * match 规则对所有 http/https 页面生效；document-idle 等价于 DOM 加载完成后注入，
+ * 时机足够早，SDK 自身等 DOMContentLoaded。
  */
 function buildUserscript(origin: string, projectId?: string): string {
-  const code = injectScriptCode(origin, projectId);
+  const dataAttrs = [
+    `'data-server': '${origin}'`,
+    projectId ? `'data-project-id': '${projectId}'` : "",
+  ]
+    .filter(Boolean)
+    .join(",\n    ");
   return `// ==UserScript==
 // @name         silkpulse 远程调试注入
 // @namespace    silkpulse
-// @version      0.1.0
-// @description  自动注入 silkpulse SDK，将当前页面接入远程调试
+// @version      0.2.0
+// @description  自动注入 silkpulse SDK，将当前页面接入远程调试（GM_addElement 特权注入，免疫页面 CSP）
 // @match        *://*/*
-// @grant        none
-// @run-at       document-end
+// @grant        GM_addElement
+// @run-at       document-idle
 // ==/UserScript==
-(function(){${code}})();
+(function () {
+  var k = '__silkpulse_injected__';
+  if (window[k]) return;
+  window[k] = 1;
+  GM_addElement('script', {
+    src: '${origin}/sdk.js',
+    ${dataAttrs}
+  });
+})();
 `;
 }

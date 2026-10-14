@@ -504,7 +504,12 @@ async function main() {
         console.log(await res.text());
       } else if (form === "userscript") {
         const res = await get("/inject/userscript");
-        console.log("将下面内容保存为 .user.js 文件，或直接安装到 Tampermonkey：\n");
+        console.log(
+          "将下面内容保存为 .user.js 文件，或直接安装到 Tampermonkey（需 TM，Violentmonkey 不支持 GM_addElement）：\n",
+        );
+        console.log(
+          "GM_addElement 走扩展特权注入，免疫页面 CSP 的 script-src；若站点 CSP 含 connect-src，WebSocket 仍可能被拦。\n",
+        );
         console.log(await res.text());
       } else {
         console.log("SDK 注入方式：");

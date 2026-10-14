@@ -117,19 +117,39 @@ const bookmarkletSnippet = computed(
   () => `javascript:${encodeURIComponent(injectScriptCode.value)}`,
 );
 
-/** Tampermonkey/Greasemonkey userscript —— 自动匹配所有页面注入 */
+/**
+ * Tampermonkey userscript —— 自动匹配所有页面注入
+ *
+ * 用 GM_addElement 走 TM 扩展特权注入，免疫页面 CSP 的 script-src；
+ * document.createElement('script') DOM 注入在强 CSP 站会被拦。
+ * @grant GM_addElement 仅 Tampermonkey 支持（Violentmonkey 无此 API）。
+ */
 const userscriptSnippet = computed(() => {
-  const code = injectScriptCode.value;
+  const dataAttrs = [
+    `'data-server': '${serverOrigin}'`,
+    injectProjectId.value ? `'data-project-id': '${injectProjectId.value}'` : "",
+    elementPicker.value ? `'data-element-picker': '1'` : "",
+  ]
+    .filter(Boolean)
+    .join(",\n    ");
   return `// ==UserScript==
 // @name         silkpulse 远程调试注入
 // @namespace    silkpulse
-// @version      0.1.0
-// @description  自动注入 silkpulse SDK，将当前页面接入远程调试
+// @version      0.2.0
+// @description  自动注入 silkpulse SDK，将当前页面接入远程调试（GM_addElement 特权注入，免疫页面 CSP）
 // @match        *://*/*
-// @grant        none
-// @run-at       document-end
+// @grant        GM_addElement
+// @run-at       document-idle
 // ==/UserScript==
-(function(){${code}})();
+(function () {
+  var k = '__silkpulse_injected__';
+  if (window[k]) return;
+  window[k] = 1;
+  GM_addElement('script', {
+    src: '${serverOrigin}/sdk.js',
+    ${dataAttrs}
+  });
+})();
 `;
 });
 
@@ -150,7 +170,7 @@ const scenarioText = computed(() => {
     script: "适合：能改源码的项目（自己的网站 / App）",
     iife: "适合：临时调试某个页面，F12 打开 console 粘贴即注入",
     bookmarklet: "适合：改不了源码的线上站，临时接入一次",
-    userscript: "适合：长期调试某个站，Tampermonkey 自动注入",
+    userscript: "适合：长期调试某个站 / 强 CSP 站，需 Tampermonkey",
   };
   return map[injectTab.value];
 });
@@ -162,7 +182,8 @@ const locationText = computed(() => {
       "→ 粘贴到目标页面的 HTML 里（如 index.html 的 <head> 或 <body> 顶部），重新部署/刷新即接入",
     iife: "→ F12 打开目标页面的 DevTools console，粘贴上面代码回车即注入（页面刷新后失效）",
     bookmarklet: "→ 复制后新建书签，URL 粘贴为上面的代码；在目标页面点这个书签即注入",
-    userscript: "→ 粘贴到 Tampermonkey/Greasemonkey 新建的脚本里，保存后自动在所有页面生效",
+    userscript:
+      "→ 粘贴到 Tampermonkey 新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入可穿过页面 CSP。若站点 CSP 声明了 connect-src，SDK 的 WebSocket 仍可能被拦（需配合剥 CSP 响应头的扩展）",
   };
   return map[injectTab.value];
 });

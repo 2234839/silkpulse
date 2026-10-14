@@ -81,9 +81,7 @@ function buildSelector(el: Element): string {
     let part = cur.tagName.toLowerCase();
     const parent: Element | null = cur.parentElement;
     if (parent) {
-      const same = Array.from(parent.children).filter(
-        (c) => c.tagName === cur!.tagName,
-      );
+      const same = Array.from(parent.children).filter((c) => c.tagName === cur!.tagName);
       if (same.length > 1) part += `:nth-of-type(${same.indexOf(cur) + 1})`;
     }
     parts.unshift(part);
@@ -94,11 +92,10 @@ function buildSelector(el: Element): string {
 }
 
 /** 读取本页接入配置（server / projectId），用于生成「接入调用方法」 */
-function getInjectInfo(): { server: string; projectId?: string } {
+export function getInjectInfo(): { server: string; projectId?: string } {
   const server =
-    (window as unknown as Record<string, unknown>).__SILKPULSE_SERVER__ as
-      | string
-      | undefined ?? "";
+    ((window as unknown as Record<string, unknown>).__SILKPULSE_SERVER__ as string | undefined) ??
+    "";
   /** 从本页 SDK script 标签回读 projectId（autoInit 注入的场景） */
   const script = document.querySelector("script[data-project-id]");
   const projectId = script?.getAttribute("data-project-id") ?? undefined;
@@ -106,7 +103,7 @@ function getInjectInfo(): { server: string; projectId?: string } {
 }
 
 /** 拼 script 标签字符串（避免在模板里直接写尖括号被解析） */
-function scriptTag(server: string, projectId?: string): string {
+export function scriptTag(server: string, projectId?: string): string {
   const lt = String.fromCharCode(60);
   const gt = String.fromCharCode(62);
   let s = `${lt}script src="${server}/sdk.js" data-server="${server}"`;

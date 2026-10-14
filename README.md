@@ -230,9 +230,9 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 访问 `http://localhost:8080/inject/bookmarklet`，将输出的 `javascript:` 链接拖到浏览器书签栏，在任意页面点击即接入。
 
-**方式三：userscript**（Tampermonkey/Greasemonkey）
+**方式三：userscript**（Tampermonkey）
 
-访问 `http://localhost:8080/inject/userscript`，保存为 `.user.js` 安装到油猴，自动匹配所有页面注入。
+访问 `http://localhost:8080/inject/userscript`，保存为 `.user.js` 安装到 Tampermonkey，自动匹配所有页面注入。通过 `GM_addElement` 扩展特权通道注入 SDK，不受页面 CSP `script-src` 限制——强 CSP 站也能接。注意：仅 Tampermonkey 支持（Violentmonkey 无 `GM_addElement`）；若站点 CSP 还声明了 `connect-src`，SDK 的 WebSocket 连接可能仍被拦，需配合剥 CSP 响应头的扩展使用。
 
 ### AI 接入（skill）
 
