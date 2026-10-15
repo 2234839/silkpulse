@@ -33,7 +33,9 @@ export type DeviceMessage =
   | { type: "dom-change"; changes: DomChangeData }
   | { type: "device-mouse"; mouse: MouseEventData }
   /** devtools 插件消息上行（backend → 控制台 frontend） */
-  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> };
+  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> }
+  /** 设备请求 server 代理拉取静态资产（强 CSP 页面 fetch 不了跨域资源，经已建立的通道下发） */
+  | { type: "asset-fetch"; reqId: string; path: string };
 
 /**
  * 远端设备鼠标/触摸事件数据（实时同步用户操作到控制台）
@@ -88,7 +90,9 @@ export type ServerToDeviceMessage =
   /** deviceId 已被另一个活着的标签页占用（复制标签页场景），设备需换 id 重新注册 */
   | { type: "device-id-conflict" }
   /** devtools 插件消息透传（vue: SuperJSON 信封字符串 / react: {event,payload} 对象） */
-  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> };
+  | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> }
+  /** 资产代理响应：server 把请求的静态资产文本下发（ok=false 时 error 说明原因） */
+  | { type: "asset-fetch-res"; reqId: string; ok: boolean; data?: string; error?: string };
 
 /** server → 控制台 的消息类型（转发设备的实时数据 + 上下线事件） */
 export type ServerToConsoleMessage =

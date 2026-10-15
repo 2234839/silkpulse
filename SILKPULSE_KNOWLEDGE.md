@@ -262,7 +262,7 @@ script 标签先注入时 SDK 在 `<head>` 同步执行，vite build 的 Vue/Rea
 - **HTTP body 上限**：POST >2MB 返回 413；客户端中断 readBody 正常 resolve 不泄漏 promise
 - **错误风暴去重**：循环错误首现秒到，后续聚合"重复 N 次"汇总；errorCount 反映真实总数
 - **资源加载失败**（404 图片/脚本）不计入 errorCount，降级为快照提示
-- **日志限流**：滑动窗口 50 条/秒（error 级不限流）
+- **日志采集**：全量上报不做速率限制；仅极端护栏（exec 日志头尾各 500 条、序列化限深 10 / 超长字符串截断 10 万字符、error 级重复聚合）
 - **最近下线设备历史**：`recentlyOffline`（上限 10），AI 区分"从未接入"vs"接入过但掉了"
 - **WebSocket 采集**：WS 连接作为 NetworkEntry（protocol:'ws'），帧增量更新（seq 关联，与 log-repeat 同模式）；单连接帧上限 50 FIFO，单帧 data 截断 500，Blob 消息异步读 text；排除 SDK 自身 /ws/device 连接（避免采集调试通道）
 

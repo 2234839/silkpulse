@@ -25,6 +25,8 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { devToolsDocks, getDock } from "../utils/devtools-docks";
+import { apiFetch } from "../utils/api";
+import type { LogEntry, NetworkEntry } from "@silkpulse/shared";
 
 /**
  * devtools relay 桥接函数（由父组件从 useConsoleSocket 传入，避免重复建连） */
@@ -179,7 +181,171 @@ const unsubscribeRelay = props.onRelay((msg) => {
       "*",
     );
   }
+  /** 链路首次接通（elements dock）：把 server 缓冲的日志/网络历史注入官方面板 */
+  if (wasInactive && activePlugin.value === "elements") {
+    void injectServerHistory();
+  }
 });
+
+/** CDP 日志级别映射（LogEntry.type → consoleAPICalled.type） */
+const CDP_LOG_TYPE: Record<string, string> = {
+  info: "info",
+  warn: "warning",
+  error: "error",
+  debug: "debug",
+  trace: "trace",
+  table: "table",
+  dir: "dir",
+  time: "log",
+  count: "log",
+  assert: "error",
+  group: "startGroup",
+  groupEnd: "endGroup",
+  clear: "clear",
+};
+
+/**
+ * 拉 server 缓冲的日志 + 网络历史并注入官方 Console / Network 面板
+ *
+ * 官方 Console/Network 只显示 enable 之后收到的 CDP 事件；设备端只回放
+ * 本机内存历史（页面 reload 后为空），server 端持久化的历史（含重启恢复
+ * + 页面刷新前）由控制台拉 REST API 补齐。
+ */
+async function injectServerHistory(): Promise<void> {
+  const iframe = iframeRef.value;
+  if (!iframe) return;
+  try {
+    const logs = (await (
+      await apiFetch(`/api/devices/${props.deviceId}/logs`)
+    ).json()) as LogEntry[];
+    for (const entry of logs) {
+      const event = {
+        method: "Runtime.consoleAPICalled",
+        params: {
+          type: CDP_LOG_TYPE[entry.type] ?? "log",
+          args: [{ type: "string", value: entry.message }],
+          executionContextId: 1,
+          timestamp: Date.parse(entry.timestamp) / 1000 || Date.now() / 1000,
+        },
+      };
+      iframe.contentWindow?.postMessage(JSON.stringify(event), "*");
+    }
+  } catch {
+    /** 历史拉取失败不影响实时链路，官方面板从当下开始收 */
+  }
+  try {
+    const network = (await (
+      await apiFetch(`/api/devices/${props.deviceId}/network`)
+    ).json()) as NetworkEntry[];
+    for (const entry of network) {
+      postNetworkHistoryEntry(iframe, entry);
+    }
+  } catch {
+    /** 同上 */
+  }
+}
+
+/** network 资源类型映射（与 SDK 侧 resourceType 一致，官方 waterfall 图标用） */
+function cdpResourceType(entry: NetworkEntry): string {
+  if (entry.protocol === "ws" || entry.kind === "ws") return "WebSocket";
+  if (entry.kind === "xhr") return "XHR";
+  const mime = entry.mimeType ?? entry.resBodyMime ?? "";
+  if (mime.includes("javascript")) return "Script";
+  if (mime.includes("css")) return "Stylesheet";
+  if (mime.startsWith("image")) return "Image";
+  return "Fetch";
+}
+
+/** 把一条 server 历史 network entry 合成 requestWillBeSent + response/loading 事件注入 iframe */
+function postNetworkHistoryEntry(iframe: HTMLIFrameElement, entry: NetworkEntry): void {
+  const requestId = `hist-net${entry.seq}`;
+  const wallTime = Date.parse(entry.timestamp) / 1000 || Date.now() / 1000;
+  const type = cdpResourceType(entry);
+  iframe.contentWindow?.postMessage(
+    JSON.stringify({
+      method: "Network.requestWillBeSent",
+      params: {
+        requestId,
+        loaderId: "",
+        documentURL: "",
+        request: {
+          url: entry.url,
+          method: entry.method,
+          headers: entry.reqHeaders ?? {},
+          initialPriority: "High",
+          referrerPolicy: "strict-origin-when-cross-origin",
+        },
+        timestamp: wallTime,
+        wallTime,
+        initiator: { type: "other" },
+        type,
+      },
+    }),
+    "*",
+  );
+  if (entry.error) {
+    iframe.contentWindow?.postMessage(
+      JSON.stringify({
+        method: "Network.loadingFailed",
+        params: {
+          requestId,
+          timestamp: wallTime + (entry.duration ?? 0) / 1000,
+          type,
+          errorText: entry.error,
+          canceled: false,
+        },
+      }),
+      "*",
+    );
+    return;
+  }
+  const status = entry.status || 200;
+  const headers = entry.resHeaders ?? {};
+  const contentType = (headers["content-type"] ??
+    headers["Content-Type"] ??
+    entry.resBodyMime ??
+    "") as string;
+  const endTs = wallTime + (entry.duration ?? 0) / 1000;
+  iframe.contentWindow?.postMessage(
+    JSON.stringify({
+      method: "Network.responseReceived",
+      params: {
+        requestId,
+        loaderId: "",
+        timestamp: endTs,
+        type,
+        response: {
+          url: entry.url,
+          status,
+          statusText: status === 200 ? "OK" : "",
+          headers,
+          mimeType: contentType.split(";")[0] || "text/plain",
+          connectionReused: false,
+          connectionId: 0,
+          remoteIPAddress: "",
+          remotePort: 0,
+          fromDiskCache: false,
+          encodedDataLength: entry.resBodySize ?? -1,
+          protocol: entry.protocol === "ws" || entry.kind === "ws" ? "websocket" : "http/1.1",
+          securityState: "insecure",
+        },
+      },
+    }),
+    "*",
+  );
+  iframe.contentWindow?.postMessage(
+    JSON.stringify({
+      method: "Network.loadingFinished",
+      params: {
+        requestId,
+        timestamp: endTs,
+        encodedDataLength: entry.resBodySize ?? 0,
+        shouldReportCorruptBlocking: false,
+      },
+    }),
+    "*",
+  );
+}
 
 /** 重载 devtools iframe（frontend 重新握手：react 重发 activate，vue 重建 RPC channel） */
 function reloadIframe() {
@@ -246,6 +412,8 @@ onBeforeUnmount(() => {
         </button>
       </template>
       <div class="ml-auto flex items-center gap-2">
+        <!-- 父组件可选插入的动作按钮（如 Console 视图的「返回轻量面板」），与刷新/状态同行 -->
+        <slot />
         <!-- 手动刷新：backend 原地广播最新树/状态（保留展开/选中状态，不重载 client）。
              生产构建的页面框架更新事件被编译时移除（无响应式推送），
              面板数据停留在握手时刻——点此拉新（dev 页也可用，等价于触发一次官方更新事件） -->

@@ -4,11 +4,10 @@
  * 核心能力：
  * 1. 劫持 console 全部方法（log/info/warn/error/debug/table/trace/group/groupEnd/
  *    groupCollapsed/count/countReset/time/timeEnd/timeLog/assert/dir/dirxml/clear），不破坏原行为
- * 2. 安全序列化（限深 3、限长 200 字符、WeakSet 循环引用标注、占位符 %s/%d/%o 替换），
- *    防循环引用和巨型对象卡死
+ * 2. 安全序列化（限深、WeakSet 循环引用标注、占位符 %s/%d/%o 替换），
+ *    防循环引用和巨型对象卡死；上限宽松，只作为极端情况护栏
  * 3. 特殊类型识别：Date/RegExp/Map/Set/Promise/TypedArray/ArrayBuffer/Error/DOM/Event
  * 4. 支持 exec 专属日志队列：exec 执行期间产生的日志被单独收集
- * 5. 日志限流：滑动窗口防 log 爆炸打爆 WS/server（error 级不限流）
  */
 
 import type { LogEntry } from "@silkpulse/shared";
@@ -21,21 +20,32 @@ type RepeatSink = () => void;
 /**
  * exec 期间日志队列上限
  *
- * exec 代码可能产生海量日志（如 for 循环 console.log 10 万次），不限流会
- * 撑爆 exec 结果的 WS 消息帧 + server 内存。
- *
- * 策略：保留头部前 100 条 + 尾部后 100 条，中间丢弃并标注省略数。
- * 头部是代码执行的早期输出（通常含关键诊断线索），尾部是最新的输出。
+ * exec 代码可能产生海量日志（如 for 循环 console.log 10 万次），不限会
+ * 撑爆 exec 结果的 WS 消息帧 + server 内存。极端情况护栏：
+ * 保留头部前 500 条 + 尾部后 500 条，中间丢弃并标注省略数。
  */
-const MAX_EXEC_HEAD = 100;
-const MAX_EXEC_TAIL = 100;
+const MAX_EXEC_HEAD = 500;
+const MAX_EXEC_TAIL = 500;
 
-/** exec 期间日志：头部队列（前 100 条） */
+/** exec 期间日志：头部队列（前 500 条） */
 let execHead: string[] | null = null;
-/** exec 期间日志：尾部队列（最近 100 条，环形覆盖） */
+/** exec 期间日志：尾部队列（最近 500 条，环形覆盖） */
 let execTail: string[] | null = null;
 /** exec 期间日志总数（含被丢弃的，用于计算省略数） */
 let execTotal = 0;
+
+/**
+ * 本机日志历史（供 Chrome DevTools Console 激活/重载时回放）
+ *
+ * 只保留真实上报过的条目（重复聚合后），上限 1000 条环形覆盖。
+ */
+const LOG_HISTORY_MAX = 1000;
+const logHistory: LogEntry[] = [];
+
+/** 取本机日志历史快照（时间序，最多 1000 条） */
+export function getLogHistory(): LogEntry[] {
+  return logHistory.slice();
+}
 
 /** 进入 exec 模式：此后的 console 输出同时入 exec 队列 */
 export function startExecCapture(): void {
@@ -65,96 +75,14 @@ export function isCapturingExec(): boolean {
 }
 
 /**
- * 日志限流器 —— 滑动窗口
- *
- * 被调试页面可能有 log 爆炸（死循环 console、第三方库狂刷日志），
- * 不限流会把 WS 带宽和 server 内存打爆。
- * 策略：
- * - 滑动窗口 1s 内最多 maxPerWindow 条（非 error 日志）
- * - error 级永远上报（它最关键，量也最小）
- * - 触发限流后，每秒补充上报一条汇总提示（让 AI/人知道丢了多少）
- */
-class RateLimiter {
-  /** 窗口内最大非 error 日志条数 */
-  private readonly maxPerWindow: number;
-  /** 当前 1s 窗口内已放行的非 error 日志计数 */
-  private count = 0;
-  /** 当前窗口被丢弃的条数 */
-  private dropped = 0;
-  /** 当前窗口的起始时间戳（ms） */
-  private windowStart = 0;
-
-  constructor(maxPerWindow = 50) {
-    this.maxPerWindow = maxPerWindow;
-    this.windowStart = Date.now();
-  }
-
-  /**
-   * 判断一条日志是否放行
-   *
-   * @param type 日志级别
-   * @returns 'pass' 放行 / 'drop' 丢弃（由调用方决定如何处理）
-   */
-  check(type: LogEntry["type"]): "pass" | "drop" {
-    /** error 级不限流 */
-    if (type === "error") return "pass";
-    const now = Date.now();
-    /** 滚动到新窗口 */
-    if (now - this.windowStart >= 1000) {
-      this.windowStart = now;
-      this.count = 0;
-    }
-    if (this.count < this.maxPerWindow) {
-      this.count++;
-      return "pass";
-    }
-    this.dropped++;
-    return "drop";
-  }
-
-  /** 取走并重置丢弃计数，返回需要上报的汇总条数（0 表示无需上报） */
-  takeDropped(): number {
-    const d = this.dropped;
-    this.dropped = 0;
-    return d;
-  }
-}
-
-/** 限流器单例（installLogCollector 时创建） */
-let limiter: RateLimiter | null = null;
-
-/** 限流汇总上报回调（由 installLogCollector 注入） */
-let droppedReporter: ((count: number) => void) | null = null;
-
-/** 定时器句柄（每秒检查是否有丢弃需上报） */
-let droppedTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
  * 安装 console 劫持
  * @param sink 每条日志的接收回调（由 index 传入，负责 WS 上报）
  * @param repeatSink 连续重复日志回调（最后一条日志又重复一次时触发）
  */
 export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void {
-  limiter = new RateLimiter(50);
-  /** 上一条放行上报的日志（type+message），用于检测连续重复 */
+  /** 上一条上报的日志（type+message），用于检测连续重复 */
   let lastType: LogEntry["type"] | null = null;
   let lastMessage = "";
-  /** 限流汇总上报：每秒检查一次，有丢弃则发一条提示 */
-  droppedReporter = (count: number) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      type: "warn",
-      message: `[silkpulse] 日志限流：过去 1s 内丢弃了 ${count} 条非 error 日志（error 级始终上报）`,
-    };
-    sink(entry);
-  };
-  if (droppedTimer) clearInterval(droppedTimer);
-  droppedTimer = setInterval(() => {
-    if (limiter) {
-      const d = limiter.takeDropped();
-      if (d > 0 && droppedReporter) droppedReporter(d);
-    }
-  }, 1000);
 
   /** console.count 的计数器（label → 当前计数） */
   const countMap = new Map<string, number>();
@@ -164,14 +92,14 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
   /**
    * 统一的上报入口：所有劫持方法最终走这里
    *
-   * 封装 exec 捕获、限流、重复聚合三个横切逻辑，让各方法的劫持体只关心自己的 message 生成。
+   * 封装 exec 捕获、重复聚合两个横切逻辑，让各方法的劫持体只关心自己的 message 生成。
    */
   function emit(
     type: LogEntry["type"],
     message: string,
     styledSegments?: { text: string; style?: string }[],
   ): void {
-    /** exec 捕获模式：不限流率，但限总量（防海量日志撑爆 WS 消息帧） */
+    /** exec 捕获模式：极端护栏，限总量（防海量日志撑爆 exec 结果消息帧） */
     if (execHead && execTail) {
       const line = `[${type.toUpperCase()}] ${message}`;
       execTotal++;
@@ -182,9 +110,6 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
         if (execTail.length > MAX_EXEC_TAIL) execTail.shift();
       }
     }
-
-    /** 上报前限流（error 不限流） */
-    if (limiter && limiter.check(type) === "drop") return;
 
     /**
      * 连续重复日志聚合（error 不参与，每条 error 都重要）。
@@ -211,6 +136,8 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
       /** 有 styledSegments 才挂到 entry（节省无样式日志的传输体积） */
       ...(styledSegments ? { styledSegments } : {}),
     };
+    logHistory.push(entry);
+    if (logHistory.length > LOG_HISTORY_MAX) logHistory.shift();
     sink(entry);
   }
 
@@ -240,15 +167,17 @@ export function installLogCollector(sink: LogSink, repeatSink: RepeatSink): void
     let message: string;
     if (Array.isArray(data)) {
       const rows = data
-        .slice(0, 20)
+        .slice(0, 200)
         .map((row, i) => `  [${i}]: ${stringify(row, 1, new WeakSet())}`);
-      const ellipsis = data.length > 20 ? `\n  …（省略 ${data.length - 20} 行）` : "";
+      const ellipsis = data.length > 200 ? `\n  …（省略 ${data.length - 200} 行）` : "";
       message = `Table (${data.length} rows):\n${rows.join("\n")}${ellipsis}`;
     } else if (data !== null && typeof data === "object") {
-      const entries = Object.entries(data as Record<string, unknown>).slice(0, 20);
+      const entries = Object.entries(data as Record<string, unknown>).slice(0, 200);
       const rows = entries.map(([k, v]) => `  ${k}: ${stringify(v, 1, new WeakSet())}`);
       const ellipsis =
-        Object.keys(data).length > 20 ? `\n  …（省略 ${Object.keys(data).length - 20} 个键）` : "";
+        Object.keys(data).length > 200
+          ? `\n  …（省略 ${Object.keys(data).length - 200} 个键）`
+          : "";
       message = `Table (${Object.keys(data).length} keys):\n${rows.join("\n")}${ellipsis}`;
     } else {
       message = `Table: ${stringify(data, 0, new WeakSet())}`;
@@ -545,14 +474,14 @@ function serialize(args: unknown[]): string {
 }
 
 /**
- * 单值序列化，限深 maxDepth、限长 200 字符
+ * 单值序列化，限深 maxDepth、超长字符串截断（均只作极端情况护栏）
  *
  * @param seen 当前递归路径上的祖先对象集合（WeakSet），用于检测循环引用。
  *             只检测"祖先链"循环：递归返回前 delete，兄弟节点共享同一对象不误判。
  *             例如 {a: obj, b: obj} 不会标 Circular（a 和 b 是兄弟），
  *             但 obj.self = obj 会标（self 在 obj 的祖先链上）。
  */
-function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth = 3): string {
+function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth = 10): string {
   if (depth > maxDepth) return "...";
   if (val === null) return "null";
   if (val === undefined) return "undefined";
@@ -567,7 +496,7 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
   try {
     if (val instanceof Error) {
       const e = val as Error;
-      return `${e.name}: ${truncate(e.message)}${e.stack ? "\n" + truncate(e.stack, 500) : ""}`;
+      return `${e.name}: ${truncate(e.message)}${e.stack ? "\n" + truncate(e.stack, 10000) : ""}`;
     }
     if (val instanceof Element) {
       return `<${(val as Element).tagName.toLowerCase()}>`;
@@ -591,12 +520,12 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
         seen.delete(val);
         return `Map(${val.size}) {...}`;
       }
-      const entries = [...val.entries()].slice(0, 10);
+      const entries = [...val.entries()].slice(0, 100);
       const pairs = entries.map(
         ([k, v]) =>
           `${stringify(k, depth + 1, seen, maxDepth)} => ${stringify(v, depth + 1, seen, maxDepth)}`,
       );
-      const ellipsis = val.size > 10 ? ", ..." : "";
+      const ellipsis = val.size > 100 ? ", ..." : "";
       seen.delete(val);
       return `Map(${val.size}) {${pairs.join(", ")}${ellipsis}}`;
     }
@@ -608,9 +537,9 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
         return `Set(${val.size}) {...}`;
       }
       const items = [...val.values()]
-        .slice(0, 10)
+        .slice(0, 100)
         .map((v) => stringify(v, depth + 1, seen, maxDepth));
-      const ellipsis = val.size > 10 ? ", ..." : "";
+      const ellipsis = val.size > 100 ? ", ..." : "";
       seen.delete(val);
       return `Set(${val.size}) {${items.join(", ")}${ellipsis}}`;
     }
@@ -630,8 +559,8 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
         seen.delete(val);
         return "[...]";
       }
-      const items = val.slice(0, 10).map((v) => stringify(v, depth + 1, seen, maxDepth));
-      const ellipsis = val.length > 10 ? ", ..." : "";
+      const items = val.slice(0, 100).map((v) => stringify(v, depth + 1, seen, maxDepth));
+      const ellipsis = val.length > 100 ? ", ..." : "";
       seen.delete(val);
       return `[${items.join(", ")}${ellipsis}]`;
     }
@@ -643,7 +572,7 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
         return "{...}";
       }
       const obj = val as Record<string, unknown>;
-      const keys = Object.keys(obj).slice(0, 10);
+      const keys = Object.keys(obj).slice(0, 100);
       const pairs = keys.map((k) => {
         let v: unknown;
         try {
@@ -653,7 +582,7 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
         }
         return `${k}: ${stringify(v, depth + 1, seen, maxDepth)}`;
       });
-      const ellipsis = Object.keys(obj).length > 10 ? ", ..." : "";
+      const ellipsis = Object.keys(obj).length > 100 ? ", ..." : "";
       seen.delete(val as object);
       return `{${pairs.join(", ")}${ellipsis}}`;
     }
@@ -663,8 +592,8 @@ function stringify(val: unknown, depth: number, seen: WeakSet<object>, maxDepth 
   return String(val);
 }
 
-/** 截断到 maxLen 字符，超出加省略号 */
-function truncate(s: string, maxLen = 200): string {
+/** 截断到 maxLen 字符，超出加省略号（护栏值很宽，正常日志永不触发） */
+function truncate(s: string, maxLen = 100000): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + "…";
 }

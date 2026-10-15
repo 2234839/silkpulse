@@ -111,7 +111,7 @@ let lastOptions: WsClientOptions | null = null;
  * 1. 启动期间：采集器安装到 WS 连上之间，页面的早期错误/日志/网络请求
  * 2. 断线期间：WS 断开到重连成功之间，数据暂存，重连后 flush
  *
- * 上限 200 条防膨胀（日志已有限流，error/network 量小，正常不会触顶）。
+ * 上限 200 条防膨胀（error/network 量小，正常不会触顶）。
  * 满了之后新增的丢弃旧的（FIFO 覆盖），优先保留新数据。
  */
 const MAX_QUEUE = 200;

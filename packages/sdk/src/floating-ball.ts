@@ -1,7 +1,7 @@
 /**
  * 悬浮球（Floating Ball）
  *
- * 页面右下角的可拖动悬浮球，向页面使用者展示「当前页面处于 SilkPulse 远程控制状态」：
+ * 页面右下角的可拖动悬浮球，向页面使用者展示「当前页面处于 SilkPulse 远程调试状态」：
  * - 静止态：绿色圆点 + 「已接入 SilkPulse」
  * - 控制中：server 下发 exec 执行期间切换为蓝色脉冲动画（setFloatingBallBusy 驱动）
  * - 单击（未拖动）：复制「接入 agent 的提示词」——含 script 接入标签 + AI 操控命令，
@@ -11,6 +11,7 @@
  */
 
 import { getInjectInfo, scriptTag } from "./element-picker.js";
+import { clearPickHighlight, inspectElement, showPickHighlight } from "./chobitsu-bridge.js";
 
 /** 是否已激活 */
 let active = false;
@@ -168,6 +169,49 @@ let startY = 0;
 let originX = 0;
 let originY = 0;
 
+/** 选元素模式状态：拖出球体后进入，pointer 在哪个元素上高亮哪个，松开选中 */
+let picking = false;
+/** 当前悬停候选元素 */
+let pickTarget: Element | null = null;
+/** 高亮样式与提示标签由 chobitsu-bridge 的共用高亮入口管理，本模块不再自建 DOM */
+
+/** 生成选中元素提示文案（tag#id.class 截断） */
+function describeEl(el: Element): string {
+  let s = el.tagName.toLowerCase();
+  if (el.id) s += `#${el.id}`;
+  const cls = (el.className && typeof el.className === "string" ? el.className : "")
+    .trim()
+    .split(/\s+/)[0];
+  if (cls) s += `.${cls}`;
+  return s.slice(0, 60);
+}
+
+/** 高亮指定元素 + 显示提示标签（与 Alt 点选共用 chobitsu-bridge 的唯一高亮入口：
+ *  Elements 桥激活时是 Chrome DevTools 原生 Overlay 高亮，未激活时回落 outline） */
+function highlightPick(el: Element | null): void {
+  pickTarget = el;
+  if (!el) {
+    clearPickHighlight();
+    return;
+  }
+  showPickHighlight(el, describeEl(el));
+}
+
+/** event target 向上找到有效元素（文本节点/球体自身排除） */
+function elementFromPoint(x: number, y: number): Element | null {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  if (el === ball || ball?.contains(el)) return null;
+  return el;
+}
+
+/** 清理选元素模式状态（保留已选结果） */
+function endPickMode(): void {
+  picking = false;
+  highlightPick(null);
+  if (ball) ball.style.opacity = "";
+}
+
 function onPointerDown(e: PointerEvent): void {
   if (!ball || e.button !== 0) return;
   dragging = true;
@@ -186,6 +230,27 @@ function onPointerMove(e: PointerEvent): void {
   const dy = e.clientY - startY;
   if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) moved = true;
   if (!moved) return;
+
+  /** 拖出球体原位一定距离 → 切入选元素模式（球体半透明，指针变选择指针） */
+  if (!picking) {
+    const rect = ball.getBoundingClientRect();
+    const outside =
+      e.clientX < rect.left - 8 ||
+      e.clientX > rect.right + 8 ||
+      e.clientY < rect.top - 8 ||
+      e.clientY > rect.bottom + 8;
+    if (outside) {
+      picking = true;
+      ball.style.opacity = "0.3";
+      document.body.style.cursor = "crosshair";
+    }
+  }
+  if (picking) {
+    /** 拖动作为指针：实时高亮扫过的元素（移动端 touchmove 同样走这里） */
+    highlightPick(elementFromPoint(e.clientX, e.clientY));
+    return;
+  }
+
   const { x, y } = clamp(originX + dx, originY + dy);
   /** 拖动后脱离 right/bottom 锚点，改用 left/top 定位 */
   ball.style.right = "auto";
@@ -197,6 +262,20 @@ function onPointerMove(e: PointerEvent): void {
 function onPointerUp(): void {
   if (!dragging) return;
   dragging = false;
+  if (picking) {
+    /** 选元素模式松开：选中当前高亮元素，联动控制台 Element 面板展开定位。
+     *  原生高亮保留片刻后清除——瞬间消失看不出选中过哪个 */
+    document.body.style.cursor = "";
+    const target = pickTarget;
+    setTimeout(() => clearPickHighlight(), 600);
+    endPickMode();
+    if (target) {
+      inspectElement(target);
+      void writeClipboard(`已选中元素: ${describeEl(target)}（控制台 Element 面板已展开定位）`);
+      showToast(`✓ 已选中 ${describeEl(target)}`);
+    }
+    return;
+  }
   if (moved) {
     /** 拖动结束：持久化当前位置，刷新后原地恢复 */
     if (ball?.style.left) {
@@ -222,7 +301,8 @@ export function startFloatingBall(): void {
   ensureStyle();
   ball = document.createElement("div");
   ball.id = BALL_ID;
-  ball.title = "本页面处于 SilkPulse 远程控制状态\n拖动调整位置，单击复制接入 agent 的提示词";
+  ball.title =
+    "本页面处于 SilkPulse 远程调试状态\n拖动调整位置 · 拖出球体进入选元素模式（松开选中，控制台 Element 面板同步定位） · 单击复制接入 agent 的提示词";
   const dot = document.createElement("span");
   dot.className = "sp-dot";
   const label = document.createTextNode("已接入 SilkPulse");

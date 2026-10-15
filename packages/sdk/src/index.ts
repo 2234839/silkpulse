@@ -28,9 +28,15 @@ import { installDomWatcher, disconnectDomWatcher, setDomWatcherActive } from "./
 import { startScreenShare, stopScreenShare } from "./screen-capture.js";
 import { startMouseTracker } from "./mouse-tracker.js";
 import { startElementPicker } from "./element-picker.js";
+import { startFloatingBall } from "./floating-ball.js";
 import { initVueDevToolsBridge } from "./devtools-bridge.js";
 import { initReactDevToolsBridge } from "./react-devtools-bridge.js";
-import { initElementsBridge, feedNetworkEntry, feedNetworkUpdate, feedLogEntry } from "./chobitsu-bridge.js";
+import {
+  initElementsBridge,
+  feedNetworkEntry,
+  feedNetworkUpdate,
+  feedLogEntry,
+} from "./chobitsu-bridge.js";
 import { dispatchServerMessage } from "./message-router.js";
 
 /**
@@ -446,6 +452,9 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
 
   /** 5.0.1 Alt 点选元素（可选开启，默认关闭；开启后 Alt+点击任意元素弹出定位信息面板） */
   if (options.elementPicker) startElementPicker();
+
+  /** 5.0.2 悬浮球（默认开启）：展示远程调试状态 + 拖出选元素联动控制台 Element 面板 */
+  startFloatingBall();
 
   /** 5.1 异步采集 base64 icon（避免跨域 ORB/CORS 拦截，控制台直接渲染 data URL） */
   collectPageIconDataUrl().then((iconDataUrl) => {

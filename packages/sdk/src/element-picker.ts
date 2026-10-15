@@ -10,33 +10,26 @@
  * 这个页面以及要改哪个元素。密钥不包含（设备端本就不持有密钥）。
  */
 
+import { clearPickHighlight, showPickHighlight } from "./chobitsu-bridge.js";
 import { ensureElementIdx } from "./snapshot.js";
 
 /** 是否已激活 */
 let active = false;
 
-/** 高亮描边层 */
-let outline: HTMLDivElement | null = null;
-/** 悬停提示标签（tag#id.class） */
-let tip: HTMLDivElement | null = null;
 /** 点击后的信息面板 */
 let panel: HTMLDivElement | null = null;
 
-/** 注入面板所需的一次性样式（key 前缀避免冲突） */
+/** 注入面板所需的一次性样式（key 前缀避免冲突）
+ *  悬停高亮描边/提示标签由 chobitsu-bridge 的共用高亮入口管理（原生 Overlay
+ *  高亮 + 未激活回落 outline），与悬浮球拖选同一条链路 */
 const STYLE_ID = "__silkpulse_picker_style";
 
 /** 注入样式 */
-function ensureStyle(): void {
+function injectPanelStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-#__silkpulse_picker_outline{position:fixed;pointer-events:none;z-index:2147483646;
-  outline:2px solid #3b82f6;outline-offset:0;background:rgba(59,130,246,.12);
-  transition:all .05s ease}
-#__silkpulse_picker_tip{position:fixed;pointer-events:none;z-index:2147483647;
-  background:#1e293b;color:#f1f5f9;font:11px/1.4 ui-monospace,monospace;
-  padding:2px 6px;border-radius:4px;white-space:nowrap}
 #__silkpulse_picker_panel{position:fixed;right:16px;bottom:16px;z-index:2147483647;
   width:420px;max-width:calc(100vw - 32px);max-height:70vh;overflow:auto;
   background:#ffffff;color:#1f2937;border:1px solid #e5e7eb;border-radius:10px;
@@ -204,6 +197,7 @@ function closePanel(): void {
 /** 弹出信息面板 */
 function showPanel(el: Element): void {
   closePanel();
+  injectPanelStyle();
   const panelText = buildCopyText(el);
 
   const p = document.createElement("div");
@@ -268,40 +262,19 @@ function showPanel(el: Element): void {
   panel = p;
 }
 
-/** 悬停高亮更新 */
+/** 悬停高亮更新（共用高亮入口：Elements 桥激活时为 Chrome DevTools 原生
+ *  Overlay 四层盒模型套框，未激活时回落 outline；提示标签文案含滚轮切层级提示） */
 function highlight(el: Element): void {
-  ensureStyle();
-  if (!outline) {
-    outline = document.createElement("div");
-    outline.id = "__silkpulse_picker_outline";
-    document.body.appendChild(outline);
-    tip = document.createElement("div");
-    tip.id = "__silkpulse_picker_tip";
-    document.body.appendChild(tip);
-  }
-  const r = el.getBoundingClientRect();
-  outline.style.display = "block";
-  outline.style.left = `${r.x}px`;
-  outline.style.top = `${r.y}px`;
-  outline.style.width = `${r.width}px`;
-  outline.style.height = `${r.height}px`;
-  if (tip) {
-    tip.style.display = "block";
-    tip.textContent =
-      hoverDepth > 0
-        ? `${describeEl(el)}  ↑${hoverDepth}  (Alt+滚轮↑父级 ↓子级，Alt+点击选中)`
-        : `${describeEl(el)}  (Alt+滚轮↑父级 ↓子级，Alt+点击选中)`;
-    tip.style.left = `${r.x}px`;
-    tip.style.top = `${Math.max(r.y - 20, 2)}px`;
-  }
+  const text =
+    hoverDepth > 0
+      ? `${describeEl(el)}  ↑${hoverDepth}  (Alt+滚轮↑父级 ↓子级，Alt+点击选中)`
+      : `${describeEl(el)}  (Alt+滚轮↑父级 ↓子级，Alt+点击选中)`;
+  showPickHighlight(el, text);
 }
 
 /** 清除高亮 */
 function clearHighlight(): void {
-  outline?.remove();
-  tip?.remove();
-  outline = null;
-  tip = null;
+  clearPickHighlight();
 }
 
 /** 当前悬停的元素（Alt+滚轮父子切换的基准） */

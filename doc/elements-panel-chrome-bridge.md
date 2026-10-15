@@ -62,26 +62,26 @@ public/plugins/ 已 gitignore，随 deploy rsync 上线（与 vue/react 产物�
 - [x] SDK chobitsu-bridge（懒加载，仅打开面板时下载 448KB bundle）
 - [x] console elements dock（注册表首位 = 无框架页默认 dock）
 - [x] **Element 页签直接替换为官方面板**（2026-10-14，gs 拍板）：DevToolsPanel 加
-  `lockedPlugin` 属性（锁定单 dock、隐藏切换条、不受框架探测影响），ConsoleApp
-  Element 页签渲染 `<DevToolsPanel locked-plugin="elements">`；旧 ElementPanel.vue
-  不再被引用（文件保留未删，布局预览/实时画面/Alt 点选等能力如需回迁可恢复）
+      `lockedPlugin` 属性（锁定单 dock、隐藏切换条、不受框架探测影响），ConsoleApp
+      Element 页签渲染 `<DevToolsPanel locked-plugin="elements">`；旧 ElementPanel.vue
+      不再被引用（文件保留未删，布局预览/实时画面/Alt 点选等能力如需回迁可恢复）
 - [x] 本地 E2E（2026-10-14）：DOM 树/样式/盒模型/Computed 页签全部工作，官方 Elements 面板完整渲染
 - [x] **Console 页签也替换为官方面板**（2026-10-14，gs 拍板方案 1）：Console 页签渲染
-  `<DevToolsPanel locked-plugin="elements" focus-panel="console">`（与 Element 页签共用同一
-  frontend 实例，锁定 dock 不切换）；DevToolsPanel 新增 `focusPanel` 属性——链路首次接通时
-  向 iframe 宿主发 `__silkpulse_switch_panel__`，宿主脚本在 shadow DOM 里用完整鼠标事件序列
-  （mousedown/mouseup/click，带中点坐标）点击对应面板页签，实现连上即自动聚焦控制台
+      `<DevToolsPanel locked-plugin="elements" focus-panel="console">`（与 Element 页签共用同一
+      frontend 实例，锁定 dock 不切换）；DevToolsPanel 新增 `focusPanel` 属性——链路首次接通时
+      向 iframe 宿主发 `__silkpulse_switch_panel__`，宿主脚本在 shadow DOM 里用完整鼠标事件序列
+      （mousedown/mouseup/click，带中点坐标）点击对应面板页签，实现连上即自动聚焦控制台
 - [x] **网络数据适配接入官方 Network 面板**（2026-10-14，gs 拍板：两套网络面板并存）：
-  chobitsu-bridge 的 network adapter 把 log-collector 的 network 条目合成为 CDP 事件
-  （`Network.requestWillBeSent` / `responseReceived` / `loadingFinished` / `loadingFailed`，
-  requestId = `net${seq}`），仅 activated 时合成（面板未开零开销）；SilkPulse 自有
-  NetworkPanel 保留并存，两边同时可见
+      chobitsu-bridge 的 network adapter 把 log-collector 的 network 条目合成为 CDP 事件
+      （`Network.requestWillBeSent` / `responseReceived` / `loadingFinished` / `loadingFailed`，
+      requestId = `net${seq}`），仅 activated 时合成（面板未开零开销）；SilkPulse 自有
+      NetworkPanel 保留并存，两边同时可见
 - [x] **日志接入官方 Console 面板**（2026-10-14）：log-collector 的 LogEntry 由
-  `feedLogEntry` 合成为 `Runtime.consoleAPICalled`（type 映射 info/warn→warning/error/…，
-  executionContextId=1）作为唯一数据源；chobitsu 自带 console hook 的事件在 setOnMessage
-  出口丢弃（双路同发会导致每条日志重复两条）
+      `feedLogEntry` 合成为 `Runtime.consoleAPICalled`（type 映射 info/warn→warning/error/…，
+      executionContextId=1）作为唯一数据源；chobitsu 自带 console hook 的事件在 setOnMessage
+      出口丢弃（双路同发会导致每条日志重复两条）
 - [x] Console 日志 E2E（2026-10-14）：console.log/warn/error 全部到达官方 Console 面板，
-  级别徽标正确、无重复；JavaScript 上下文显示 top
+      级别徽标正确、无重复；JavaScript 上下文显示 top
 
 ### 验证方法
 
@@ -90,6 +90,14 @@ public/plugins/ 已 gitignore，随 deploy rsync 上线（与 vue/react 产物�
 
 ### 坑
 
+- **强 CSP 页面 chobitsu 拉取被 connect-src 拦截**（docs.qq.com 实例）：SDK 本体
+  经 userscript GM_xmlhttpRequest 免疫 CSP 正常连接（Console/Network 有数据），
+  但 chobitsu 懒加载的页面 `fetch` 被 CSP connect-src 拦，设备日志报
+  `Elements 桥激活失败: Failed to fetch`，Element 永远「连接中」。注意
+  docs.qq.com 的 script-src 含 unsafe-eval，`new Function` 编译没问题，拦的是
+  fetch 本身。解法：server 加 `asset-fetch` 资产代理（DeviceChannel 读静态目录
+  回发），SDK 检测到 `data-silkpulse-bridge` 宿主标记时经既有设备通道拉取，
+  旧版 userscript 宿主无需升级（commit 69dbec6）
 - enable 序列响应用 `tmp` 前缀 id，chobitsu onMessage 里必须过滤（frontend 没见过这些 id，
   透传会刷 `Protocol Error: the message with wrong id`）
 - host 页设 `#?embedded=` hash 要用 `history.replaceState`（`location.replace` 在文档加载中

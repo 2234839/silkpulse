@@ -105,7 +105,7 @@ execSync(`cp ${chobitsuSrc} ${join(OUT_DIR, "chobitsu.js")}`);
 
 /** 生成并写入 host 页（function 声明以便增量跳过分支也能调用） */
 function writeHostPage() {
-const hostHtml = `<!DOCTYPE html>
+  const hostHtml = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -190,7 +190,7 @@ const hostHtml = `<!DOCTYPE html>
 </body>
 </html>
 `;
-writeFileSync(join(OUT_DIR, "index.html"), hostHtml);
+  writeFileSync(join(OUT_DIR, "index.html"), hostHtml);
 }
 writeHostPage();
 

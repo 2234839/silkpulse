@@ -406,7 +406,8 @@ onUnmounted(() => {
     <h2>核心能力一览</h2>
     <ul>
       <li>
-        <strong>console 采集</strong> —— 全级别劫持，安全序列化（限深限长），滑动窗口限流防 log 风暴
+        <strong>console 采集</strong> ——
+        全级别劫持，安全序列化（循环引用防护），全量上报不做速率限制
       </li>
       <li>
         <strong>network 采集</strong> —— HAR 风格，关键请求头/响应头、请求体双路采集、FormData

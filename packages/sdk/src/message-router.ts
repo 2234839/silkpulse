@@ -15,9 +15,16 @@ const handlers: Array<(msg: ServerToDeviceMessage) => void> = [];
  * 注册扩展监听器（devtools-bridge 等模块用）
  *
  * ws-client.onMessage 的主 handler 会在分发前调用这些监听器。
+ * 返回退订函数（一次性请求/响应用完即退，避免监听器堆积）。
  */
-export function registerServerMessageHandler(handler: (msg: ServerToDeviceMessage) => void): void {
+export function registerServerMessageHandler(
+  handler: (msg: ServerToDeviceMessage) => void,
+): () => void {
   handlers.push(handler);
+  return () => {
+    const i = handlers.indexOf(handler);
+    if (i !== -1) handlers.splice(i, 1);
+  };
 }
 
 /**

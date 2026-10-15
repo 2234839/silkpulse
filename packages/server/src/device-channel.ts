@@ -28,6 +28,11 @@ export interface DeviceChannelDeps {
    * WS 路径取连接鉴权上下文，桥接路径取请求 query 的鉴权结果
    */
   resolveProjectId?: () => string | undefined;
+  /**
+   * 静态资产代理：按 pathname 读 server 静态目录文件文本，读不到抛错。
+   * 强 CSP 页面 fetch 不了跨域资产，经已建立的设备通道中转下发。
+   */
+  readAsset?: (pathname: string) => string;
 }
 
 /** 生成设备 ID（8 位十六进制） */
@@ -122,7 +127,7 @@ export class DeviceChannel {
       }
       case "log": {
         if (!device) return;
-        device.logs.push(msg.log);
+        registry.appendLog(deviceId, msg.log);
         broadcast(deviceId, { type: "log", deviceId, log: msg.log });
         return;
       }
@@ -255,6 +260,37 @@ export class DeviceChannel {
         /** 屏幕共享状态变化（等待授权/共享中/被拒绝等）：转发给控制台 */
         if (!device) return;
         broadcast(deviceId, { type: "screen-share-status", deviceId, status: msg.status });
+        return;
+      }
+      case "asset-fetch": {
+        /** 资产代理：读静态文件后经原通道下发（新旧 userscript 宿主都能透传） */
+        if (!device) return;
+        if (!this.deps.readAsset) {
+          this.conn.send(
+            JSON.stringify({
+              type: "asset-fetch-res",
+              reqId: msg.reqId,
+              ok: false,
+              error: "server 未启用资产代理",
+            }),
+          );
+          return;
+        }
+        try {
+          const data = this.deps.readAsset(msg.path);
+          this.conn.send(
+            JSON.stringify({ type: "asset-fetch-res", reqId: msg.reqId, ok: true, data }),
+          );
+        } catch (err) {
+          this.conn.send(
+            JSON.stringify({
+              type: "asset-fetch-res",
+              reqId: msg.reqId,
+              ok: false,
+              error: String(err),
+            }),
+          );
+        }
         return;
       }
       case "exec-result": {

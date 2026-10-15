@@ -7,6 +7,8 @@
  * - exec 等待映射：execId → resolve 回调，设备回传 exec-result 时 resolve
  */
 
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { DeviceConn } from "./device-conn.js";
 import type {
   DeviceInfo,
@@ -21,6 +23,12 @@ import type {
 const MAX_LOGS = 500;
 const MAX_NETWORK = 300;
 const MAX_ERRORS = 100;
+
+/**
+ * 日志落盘防抖间隔（ms）：日志风暴下每条都同步写盘会拖垮吞吐，
+ * 合并短窗口内的写入，最坏丢窗口内的最后几条（服务被 kill -9 时）。
+ */
+const LOG_FLUSH_DEBOUNCE_MS = 2000;
 
 /**
  * 环形缓冲区：固定容量，写满后覆盖最旧条目
@@ -166,6 +174,84 @@ export class DeviceRegistry {
   private listeners: Array<(event: DeviceListEvent) => void> = [];
   /** 设备被强制踢除（项目销毁）时的监听器，返回取消函数 */
   private evictListeners: Array<() => void> = [];
+
+  /** 日志落盘文件路径（空 = 不持久化，测试/内存模式） */
+  private logStorePath: string | null = null;
+  /** 防抖定时器：合并短窗口内多次写入 */
+  private logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * 开启日志落盘（server 启动时调用，传 SILKPULSE_DATA_DIR 下的路径）
+   *
+   * 日志是诊断的真相源，服务重启（部署 docker restart / 崩溃）不应清空历史；
+   * 启动时恢复上次落盘的各设备日志缓冲，断点续看。
+   */
+  enableLogPersistence(filePath: string): void {
+    this.logStorePath = filePath;
+    this.loadPersistedLogs();
+  }
+
+  /** 启动时从磁盘恢复各设备日志缓冲 */
+  private loadPersistedLogs(): void {
+    if (!this.logStorePath || !existsSync(this.logStorePath)) return;
+    try {
+      const raw = JSON.parse(readFileSync(this.logStorePath, "utf-8")) as Record<
+        string,
+        LogEntry[]
+      >;
+      for (const [deviceId, entries] of Object.entries(raw)) {
+        if (!Array.isArray(entries) || entries.length === 0) continue;
+        const device = this.devices.get(deviceId);
+        if (!device) continue;
+        /** 恢复的条目超过容量时只留尾部（与环形缓冲语义一致） */
+        for (const entry of entries.slice(-MAX_LOGS)) device.logs.push(entry);
+      }
+    } catch {
+      /** 文件损坏时从空开始，不阻听启动 */
+    }
+  }
+
+  /**
+   * 追加一条日志到设备缓冲（含落盘钩子）
+   *
+   * device-channel 收到 SDK log 帧时调用；log-repeat 只改 repeat 不走这里
+   * （repeat 修改同一条目，不新增数据，落盘由下一次 appendLog 顺带带走）。
+   */
+  appendLog(deviceId: string, log: LogEntry): void {
+    const device = this.devices.get(deviceId);
+    if (!device) return;
+    device.logs.push(log);
+    this.scheduleLogFlush();
+  }
+
+  /** 防抖落盘：合并窗口内的多次写入，一次同步写 */
+  private scheduleLogFlush(): void {
+    if (!this.logStorePath) return;
+    if (this.logFlushTimer) return;
+    this.logFlushTimer = setTimeout(() => {
+      this.logFlushTimer = null;
+      this.flushLogsNow();
+    }, LOG_FLUSH_DEBOUNCE_MS);
+    /** 进程退出前把窗口内的日志刷出去（否则 kill 时丢最后 2s） */
+    this.logFlushTimer.unref?.();
+  }
+
+  /** 立即把全部设备的日志缓冲写到磁盘 */
+  private flushLogsNow(): void {
+    if (!this.logStorePath) return;
+    try {
+      const dir = dirname(this.logStorePath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const snapshot: Record<string, LogEntry[]> = {};
+      for (const [id, device] of this.devices) {
+        const logs = device.logs.all();
+        if (logs.length > 0) snapshot[id] = logs;
+      }
+      writeFileSync(this.logStorePath, JSON.stringify(snapshot), "utf-8");
+    } catch {
+      /** 磁盘写失败不影响内存缓冲：日志功能降级为重启丢失 */
+    }
+  }
 
   /** 注册 evict 监听（项目销毁踢设备后，控制台需要刷新列表） */
   onEvict(listener: () => void): () => void {
@@ -407,6 +493,8 @@ export class DeviceRegistry {
     device.pendingExecs.clear();
     this.offlineHistory = this.offlineHistory.filter((o) => o.id !== deviceId);
     this.devices.delete(deviceId);
+    /** 硬删后立即刷盘：落盘快照里不再包含该设备的日志（项目销毁语义 = 数据一并移除） */
+    this.flushLogsNow();
     this.emit({ type: "offline", deviceId });
   }
 

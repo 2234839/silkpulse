@@ -776,17 +776,15 @@ async function main() {
           .join(" | ")}`,
       );
 
-    /** 6.5 日志限流 —— 防止远程页面 log 爆炸打爆 WS/server */
+    /** 6.5 日志全量到达 —— 不做速率限制，狂刷也应全部上报（重复聚合除外） */
     {
-      /** 先等 1.2s 让上一测试（exec 500 条日志）的限流窗口滚动干净，汇总提示上报完 */
       await new Promise((r) => setTimeout(r, 1200));
       const beforeTs = Date.now();
-      /** 1 秒内狂刷 200 条 info + 5 条 error（error 不应被限流） */
+      /** 1 秒内狂刷 200 条不重复 info + 5 条 error，应全部到达 server */
       await testPage.evaluate(() => {
         for (let i = 0; i < 200; i++) console.log(`限流测试-${i}`);
         for (let i = 0; i < 5; i++) console.error(`限流error-${i}`);
       });
-      /** 等 2.5s：让限流窗口滚动 + 汇总上报（每秒检查一次） */
       await new Promise((r) => setTimeout(r, 2500));
       const allLogs = await (await apiFetch(`/api/devices/${device.id}/logs`)).json();
       /** 只看本次触发产生的日志（按时间戳过滤） */
@@ -797,23 +795,11 @@ async function main() {
       const errorCount = recent.filter(
         (l) => l.type === "error" && l.message.includes("限流error-"),
       ).length;
-      const hasThrottleNotice = recent.some(
-        (l) => l.type === "warn" && l.message.includes("日志限流"),
-      );
 
-      /** info 应远少于 200（限流窗口 50 条/秒），error 应 5 条全在，应有限流提示 */
-      if (infoCount < 200 && infoCount > 0) {
-        if (errorCount === 5) {
-          if (hasThrottleNotice) {
-            ok(`日志限流生效（info 200→${infoCount}，error 5 条全保留，有限流提示）`);
-          } else {
-            fail(`日志限流提示缺失：info=${infoCount} error=${errorCount} 但无限流 warn`);
-          }
-        } else {
-          fail(`error 不应被限流：期望 5 条，实际 ${errorCount} 条`);
-        }
+      if (infoCount === 200 && errorCount === 5) {
+        ok(`日志全量到达（info 200/200，error 5/5，无限流丢弃）`);
       } else {
-        fail(`日志限流异常：info=${infoCount}（应 <200 且 >0）`);
+        fail(`日志丢失：info=${infoCount}/200 error=${errorCount}/5`);
       }
     }
 

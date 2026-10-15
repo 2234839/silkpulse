@@ -30,6 +30,8 @@ export function setupWebSocket(
     authorizeWsConnection: (url: string, wsPath: string) => AuthContext;
     isAuthEnabled: () => boolean;
   },
+  /** 静态资产代理（强 CSP 设备经通道拉取 server 资产用），不传则设备请求返回错误 */
+  readAsset?: (pathname: string) => string,
 ): {
   behavior: WebSocketBehavior<WsUserData>;
   notifyDeviceListChanged: () => void;
@@ -193,6 +195,7 @@ export function setupWebSocket(
           notifyDeviceListChanged,
           resolveProjectId: () =>
             silk.authCtx.role === "project" ? silk.authCtx.projectId : undefined,
+          readAsset,
         }),
       );
     }

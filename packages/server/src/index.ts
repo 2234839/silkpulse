@@ -64,6 +64,8 @@ export async function createServer(
   const projectDataPath = options.projectDataPath ?? path.join(defaultDataDir, "projects.json");
   const projectStore = new ProjectStore(projectDataPath);
   const registry = new DeviceRegistry();
+  /** 日志缓冲落盘：服务重启（部署/崩溃）后恢复各设备历史日志，诊断记录不丢 */
+  registry.enableLogPersistence(path.join(defaultDataDir, "device-logs.json"));
 
   /** 静态资源目录：优先用 options.staticRoot，否则用 ../public（console-ui 构建产物 + sdk） */
   const staticRoot = options.staticRoot ?? path.resolve(__dirname, "../public");
@@ -79,7 +81,22 @@ export async function createServer(
   });
 
   /** 游客项目过期销毁后的设备踢除 → 通知控制台刷新列表 */
-  const { behavior, notifyDeviceListChanged, broadcast } = setupWebSocket(registry, auth);
+  const { behavior, notifyDeviceListChanged, broadcast } = setupWebSocket(
+    registry,
+    auth,
+    (pathname) => {
+      /** 资产代理：只允许读静态目录内的文件（resolve + 前缀校验防目录穿越） */
+      const filePath = path.resolve(staticRoot, pathname.slice(1));
+      if (
+        !filePath.startsWith(staticRoot) ||
+        !fs.existsSync(filePath) ||
+        !fs.statSync(filePath).isFile()
+      ) {
+        throw new Error(`asset not found: ${pathname}`);
+      }
+      return fs.readFileSync(filePath, "utf8");
+    },
+  );
   registry.onEvict(() => notifyDeviceListChanged());
 
   /** HTTP 桥接通道：userscript 用 GM_xmlhttpRequest 承载设备连接（穿透页面 CSP connect-src） */

@@ -29,6 +29,7 @@ import NetworkPanel from "./components/NetworkPanel.vue";
 import ExecPanel from "./components/ExecPanel.vue";
 import StoragePanel from "./components/StoragePanel.vue";
 import DevToolsPanel from "./components/DevToolsPanel.vue";
+import ConsolePanel from "./components/ConsolePanel.vue";
 import { useResizable } from "./composables/useResizable";
 
 const { theme, toggleTheme } = useTheme();
@@ -518,7 +519,7 @@ onMounted(async () => {
                         : tab === "exec"
                           ? "Exec"
                           : tab === "element"
-                            ? "Element"
+                            ? "Chrome DevTools"
                             : tab === "feature"
                               ? "Feature"
                               : tab === "devtools"
@@ -546,19 +547,29 @@ onMounted(async () => {
             </button>
           </nav>
 
-          <!-- Console 页签 = 官方 DevTools Console（与 Element 页签共享同一 chobitsu 连接；
-               官方 Network 面板同屏保留，数据由 SDK 侧网络采集适配 CDP 事件喂入） -->
+          <!-- Console 页签 = 自有轻量日志面板（快速过滤/搜索）；
+               需要完整 Console 能力（对象展开/堆栈/交互执行）去 Chrome DevTools
+               页签，其本身含 Console 面板 -->
+          <template v-if="activeTab === 'console'">
+            <ConsolePanel
+              :logs="logs"
+              :device-id="selectedDeviceId"
+              :dropped-count="droppedCount"
+            />
+          </template>
+          <!-- Chrome DevTools 页签 = 官方 Elements 面板（chobitsu 桥接，锁定 elements dock）。
+               常驻挂载 + v-show 保活：iframe/连接/展开状态在切 tab 时不销毁不重载 -->
           <DevToolsPanel
-            v-if="activeTab === 'console'"
+            v-show="activeTab === 'element'"
             :device-id="selectedDeviceId"
             locked-plugin="elements"
-            focus-panel="console"
             :on-relay="onDevtoolsRelay"
             :on-reconnect="onDeviceReconnect"
             :send="sendDevtoolsRelay"
+            class="flex-1"
           />
           <NetworkPanel
-            v-else-if="activeTab === 'network'"
+            v-if="activeTab === 'network'"
             :network="network"
             :device-id="selectedDeviceId"
             :request-body="requestNetworkBody"
@@ -566,15 +577,6 @@ onMounted(async () => {
           <ErrorsPanel v-else-if="activeTab === 'errors'" :errors="errors" />
           <FeaturePanel v-else-if="activeTab === 'feature'" :device-id="selectedDeviceId" />
           <SnapshotPanel v-else-if="activeTab === 'snapshot'" :device-id="selectedDeviceId" />
-          <!-- Element 页签 = Chrome DevTools 官方 Elements 面板（chobitsu 桥接，锁定 elements dock） -->
-          <DevToolsPanel
-            v-else-if="activeTab === 'element'"
-            :device-id="selectedDeviceId"
-            locked-plugin="elements"
-            :on-relay="onDevtoolsRelay"
-            :on-reconnect="onDeviceReconnect"
-            :send="sendDevtoolsRelay"
-          />
           <StoragePanel
             v-else-if="activeTab === 'storage'"
             :device-id="selectedDeviceId"

@@ -37,8 +37,8 @@ const BODY_STORE_MAX = 200;
 const BODY_INLINE_MAX = 512 * 1024;
 /** 懒加载摘要长度（大 body 推送时只带这么多字符预览） */
 const BODY_SUMMARY_LEN = 500;
-/** 单个 header 值最大截断长度 */
-const MAX_HEADER_LEN = 200;
+/** 单个 header 值截断长度（极端护栏，正常 header 远小于此） */
+const MAX_HEADER_LEN = 4096;
 
 /**
  * 处理 body：决定是完整推送还是懒加载摘要
