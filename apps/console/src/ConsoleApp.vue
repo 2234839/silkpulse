@@ -26,7 +26,6 @@ import SnapshotPanel from "./components/SnapshotPanel.vue";
 import FeaturePanel from "./components/FeaturePanel.vue";
 import ErrorsPanel from "./components/ErrorsPanel.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
-import ExecPanel from "./components/ExecPanel.vue";
 import StoragePanel from "./components/StoragePanel.vue";
 import DevToolsPanel from "./components/DevToolsPanel.vue";
 import ConsolePanel from "./components/ConsolePanel.vue";
@@ -142,7 +141,6 @@ const validTabs = [
   "errors",
   "feature",
   "snapshot",
-  "exec",
   "devtools",
 ] as const;
 
@@ -495,7 +493,6 @@ onMounted(async () => {
                 'errors',
                 'feature',
                 'snapshot',
-                'exec',
                 'devtools',
               ] as const"
               :key="tab"
@@ -516,15 +513,13 @@ onMounted(async () => {
                       ? "Errors"
                       : tab === "snapshot"
                         ? "Snapshot"
-                        : tab === "exec"
-                          ? "Exec"
-                          : tab === "element"
-                            ? "Chrome DevTools"
-                            : tab === "feature"
-                              ? "Feature"
-                              : tab === "devtools"
-                                ? "DevTools"
-                                : "Storage"
+                        : tab === "element"
+                          ? "Chrome DevTools"
+                          : tab === "feature"
+                            ? "Feature"
+                            : tab === "devtools"
+                              ? "DevTools"
+                              : "Storage"
               }}
               <span
                 v-if="tab === 'console' && logs.length > 0"
@@ -584,7 +579,6 @@ onMounted(async () => {
             :storage-update-time="storageUpdateTime"
             :storage-key-times="storageKeyTimes"
           />
-          <ExecPanel v-else-if="activeTab === 'exec'" :device-id="selectedDeviceId" />
           <DevToolsPanel
             v-else-if="activeTab === 'devtools'"
             :device-id="selectedDeviceId"

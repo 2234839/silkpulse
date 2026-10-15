@@ -145,25 +145,6 @@ async function main() {
     await assertFullWidth(consolePage, "snapshot");
     await consolePage.screenshot({ path: `${OUT}/snapshot-panel.png` });
 
-    // Exec 面板：执行代码展示返回值
-    await clickTab(consolePage, "Exec");
-    await sleep(1200);
-    await consolePage.evaluate(() => {
-      const ta = document.querySelector("main textarea");
-      if (ta) {
-        ta.value =
-          "return { title: document.title, url: location.href, viewport: innerWidth + 'x' + innerHeight }";
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
-    // 用页面内真实键盘事件触发执行（比合成事件可靠）
-    await consolePage.keyboard.down("Control");
-    await consolePage.keyboard.press("Enter");
-    await consolePage.keyboard.up("Control");
-    await sleep(2500);
-    await assertFullWidth(consolePage, "exec");
-    await consolePage.screenshot({ path: `${OUT}/exec-panel.png` });
-
     console.log("\n全部截图完成 →", OUT);
   } finally {
     await browser.close();
