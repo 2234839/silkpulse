@@ -163,6 +163,30 @@ export async function handleApiRoute(
     return true;
   }
   const [, deviceId, action] = match;
+
+  /** DELETE /api/devices/:id —— 硬删设备（含离线设备，清除其全部缓冲数据） */
+  if (ctx.method === "DELETE" && action === undefined) {
+    if (authCtx.role === "anonymous") {
+      sendJson(ctx, { error: "未授权" }, 401);
+      return true;
+    }
+    /** 目标可能在注册表（在线/离线保留），也可能只存在于 offlineHistory */
+    const target = registry.get(deviceId);
+    const projectId = target?.info.projectId ?? registry.getOffline(deviceId)?.projectId;
+    if (!projectId && !target) {
+      sendJson(ctx, { error: `设备 ${deviceId} 不存在` }, 404);
+      return true;
+    }
+    if (!_auth?.canAccessDevice(authCtx, projectId)) {
+      sendJson(ctx, { error: "无权删除此设备" }, 403);
+      return true;
+    }
+    registry.deleteDevice(deviceId);
+    onDeviceListChanged?.();
+    sendJson(ctx, { ok: true });
+    return true;
+  }
+
   const device = registry.get(deviceId);
   if (!device) {
     sendJson(ctx, { error: `设备 ${deviceId} 不在线` }, 404);

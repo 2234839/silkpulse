@@ -533,6 +533,11 @@ export class DeviceRegistry {
     return [...this.offlineHistory];
   }
 
+  /** 按 ID 查离线摘要（注册表里已查不到时兜底用，硬删鉴权场景） */
+  getOffline(deviceId: string): OfflineDeviceSummary | undefined {
+    return this.offlineHistory.find((o) => o.id === deviceId);
+  }
+
   /** 更新设备元信息（页面导航、错误数变化时） */
   updateInfo(deviceId: string, patch: Partial<DeviceInfo>) {
     const device = this.devices.get(deviceId);

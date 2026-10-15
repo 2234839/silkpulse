@@ -32,14 +32,28 @@ function isOnline(d: DeviceInfo): boolean {
 /** 在线设备数（离线设备保留展示但不计入在线数） */
 const onlineCount = computed(() => props.devices.filter(isOnline).length);
 
+/**
+ * 列表排序：在线设备在前，组内按 onlineAt 降序（新连接的设备排前面）；
+ * 离线设备沉底，按离线时间降序。
+ */
+const sortedDevices = computed(() => {
+  return [...props.devices].sort((a, b) => {
+    const aOnline = isOnline(a);
+    const bOnline = isOnline(b);
+    if (aOnline !== bOnline) return aOnline ? -1 : 1;
+    if (aOnline) return b.onlineAt - a.onlineAt;
+    return (b.offlineAt ?? 0) - (a.offlineAt ?? 0);
+  });
+});
+
 /** 搜索关键字 */
 const deviceSearch = ref("");
 
 /** 过滤后的设备列表 */
 const filteredDevices = computed(() => {
   const q = deviceSearch.value.trim().toLowerCase();
-  if (!q) return props.devices;
-  return props.devices.filter(
+  if (!q) return sortedDevices.value;
+  return sortedDevices.value.filter(
     (d) =>
       d.title.toLowerCase().includes(q) ||
       d.url.toLowerCase().includes(q) ||
@@ -106,6 +120,22 @@ async function saveTags() {
 
 function cancelEditTags() {
   editingTagDeviceId.value = null;
+}
+
+/** 删除中的设备 ID（防重复点击） */
+const deletingDeviceId = ref<string | null>(null);
+
+/** 硬删设备（含历史缓冲数据），仅离线设备展示删除入口 */
+async function removeDevice(device: DeviceInfo) {
+  if (!confirm(`确定删除设备「${device.title}」？其日志/网络记录将一并清除。`)) return;
+  deletingDeviceId.value = device.id;
+  try {
+    await apiFetch(`/api/devices/${device.id}`, { method: "DELETE" });
+    /** server 删除后会广播 device-list 刷新，这里无需手动更新 */
+  } catch {
+    /** 删除失败：列表不变，用户可重试 */
+  }
+  deletingDeviceId.value = null;
 }
 
 /** favicon 加载失败时隐藏 img，露出后备 emoji */
@@ -230,6 +260,16 @@ function relativeTime(ts: number): string {
               >
                 🏷️
               </button>
+              <!-- 删除按钮：仅离线设备展示（在线设备误点会丢数据） -->
+              <button
+                v-if="!isOnline(d)"
+                @click.stop="removeDevice(d)"
+                :disabled="deletingDeviceId === d.id"
+                class="ml-1 text-faint hover:text-red-500 text-xs align-middle disabled:opacity-40"
+                title="删除设备及其历史数据"
+              >
+                🗑️
+              </button>
             </div>
             <div class="text-xs text-muted truncate">{{ d.url }}</div>
             <!-- tags 徽章 + 备注 -->
@@ -347,6 +387,16 @@ function relativeTime(ts: number): string {
               title="编辑标签/备注"
             >
               🏷️
+            </button>
+            <!-- 删除按钮：仅离线设备展示（在线设备误点会丢数据） -->
+            <button
+              v-if="!isOnline(d)"
+              @click.stop="removeDevice(d)"
+              :disabled="deletingDeviceId === d.id"
+              class="ml-1 text-faint hover:text-red-500 text-xs align-middle disabled:opacity-40"
+              title="删除设备及其历史数据"
+            >
+              🗑️
             </button>
           </div>
           <div class="text-xs text-muted truncate">{{ d.url }}</div>
