@@ -24,14 +24,37 @@ let seq = 0;
 /**
  * 完整 body 内存缓存（懒加载核心）
  *
- * key = network entry seq，value = 完整文本 body。
+ * key = network entry seq，value = 完整文本 body + 编码标记（base64=二进制）。
  * 超过 BODY_INLINE_MAX 的 body 才存这里，推送只带摘要；
- * 小于阈值的直接完整推送，无需懒加载。
+ * 小于阈值的直接完整推送，无需懒加载（但仍记入小 body 表，供官方 DevTools
+ * Response 页签的 getResponseBody 回查）。
  *
- * 上限 200 条，超出 FIFO 淘汰最旧的（避免内存泄漏）。
- */
-const bodyStore = new Map<number, string>();
+ * 大 body 上限 200 条，超出 FIFO 淘汰最旧的（避免内存泄漏）。 */
+interface StoredBody {
+  /** 完整 body 文本（二进制时为 base64） */
+  body: string;
+  /** 是否 base64（二进制响应） */
+  base64: boolean;
+}
+const bodyStore = new Map<number, StoredBody>();
+/** 小 body（直接完整推送的）也记一份，官方 Response 页签回查用 */
+const smallBodies = new Map<number, StoredBody>();
+/** 请求体完整缓存（getRequestPostData 回查用），上限同 bodyStore */
+const reqBodyStore = new Map<number, string>();
 const BODY_STORE_MAX = 200;
+
+/**
+ * 处理请求体：完整存入 reqBodyStore，推送只返回摘要
+ */
+function processReqBody(seqNum: number, fullBody: string): { body: string; truncated: boolean } {
+  reqBodyStore.set(seqNum, fullBody);
+  if (reqBodyStore.size > BODY_STORE_MAX) {
+    const oldest = reqBodyStore.keys().next().value;
+    if (oldest !== undefined) reqBodyStore.delete(oldest);
+  }
+  if (fullBody.length <= BODY_INLINE_MAX) return { body: fullBody, truncated: false };
+  return { body: fullBody.slice(0, BODY_SUMMARY_LEN) + "…", truncated: true };
+}
 
 /** 内联推送阈值：小于此值直接完整推送，大于此值走懒加载 */
 const BODY_INLINE_MAX = 512 * 1024;
@@ -44,15 +67,20 @@ const MAX_HEADER_LEN = 4096;
  * 处理 body：决定是完整推送还是懒加载摘要
  *
  * 返回推送用的 body 文本 + truncated 标记。
- * - body.length <= BODY_INLINE_MAX：直接返回完整 body，truncated=false
+ * - body.length <= BODY_INLINE_MAX：直接返回完整 body，truncated=false（并记入 smallBodies）
  * - body.length > BODY_INLINE_MAX：存入 bodyStore，返回摘要，truncated=true
  */
-function processBody(seqNum: number, fullBody: string): { body: string; truncated: boolean } {
+function processBody(
+  seqNum: number,
+  fullBody: string,
+  base64 = false,
+): { body: string; truncated: boolean } {
   if (fullBody.length <= BODY_INLINE_MAX) {
+    smallBodies.set(seqNum, { body: fullBody, base64 });
     return { body: fullBody, truncated: false };
   }
   /** 大 body：存完整，推摘要 */
-  bodyStore.set(seqNum, fullBody);
+  bodyStore.set(seqNum, { body: fullBody, base64 });
   if (bodyStore.size > BODY_STORE_MAX) {
     const oldest = bodyStore.keys().next().value;
     if (oldest !== undefined) bodyStore.delete(oldest);
@@ -65,7 +93,21 @@ function processBody(seqNum: number, fullBody: string): { body: string; truncate
 
 /** 读取缓存的完整 body（供 get-network-body 消息调用） */
 export function getStoredBody(seqNum: number): string | null {
-  return bodyStore.get(seqNum) ?? null;
+  return bodyStore.get(seqNum)?.body ?? null;
+}
+
+/**
+ * 回查完整响应体（官方 DevTools Response 页签的 getResponseBody 用）
+ * 先查大 body 懒加载缓存，再查小 body 直推缓存；都无返回 null。
+ */
+export function getFullResponseBody(seqNum: number): { body: string; base64Encoded: boolean } | null {
+  const stored = bodyStore.get(seqNum) ?? smallBodies.get(seqNum);
+  return stored ? { body: stored.body, base64Encoded: stored.base64 } : null;
+}
+
+/** 回查完整请求体（官方 Payload 页签的 getRequestPostData 用） */
+export function getFullReqBody(seqNum: number): string | null {
+  return reqBodyStore.get(seqNum) ?? null;
 }
 
 /**
@@ -276,7 +318,7 @@ function installFetchHook(
     if (init?.body) {
       const full = stringifyBody(init.body);
       if (full !== undefined) {
-        const { body, truncated } = processBody(loadingSeq, full);
+        const { body, truncated } = processReqBody(loadingSeq, full);
         reqBody = body;
         reqBodyTruncated = truncated;
       }
@@ -290,7 +332,7 @@ function installFetchHook(
       try {
         const full = await readRequestBodyClone(input);
         if (full !== undefined) {
-          const { body, truncated } = processBody(loadingSeq, full);
+          const { body, truncated } = processReqBody(loadingSeq, full);
           reqBody = body;
           reqBodyTruncated = truncated;
         }
@@ -415,7 +457,7 @@ function installFetchHook(
         let summary: string | undefined = fullBody;
         let truncated = false;
         if (fullBody !== undefined) {
-          const processed = processBody(loadingSeq, fullBody);
+          const processed = processBody(loadingSeq, fullBody, encoding === "base64");
           summary = processed.body;
           truncated = processed.truncated;
         }
@@ -519,7 +561,7 @@ function installXhrHook(sink: NetworkSink, updateSink?: NetworkUpdateSink): void
     if (body != null) {
       const full = stringifyBody(body);
       if (full !== undefined) {
-        const { body: processedBody, truncated } = processBody(ctx.loadingSeq, full);
+        const { body: processedBody, truncated } = processReqBody(ctx.loadingSeq, full);
         reqBodySummary = processedBody;
         reqBodyTruncated = truncated;
       }

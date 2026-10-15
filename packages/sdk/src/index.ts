@@ -36,6 +36,8 @@ import {
   feedNetworkEntry,
   feedNetworkUpdate,
   feedLogEntry,
+  feedWsFrame,
+  feedSseEvent,
 } from "./chobitsu-bridge.js";
 import { dispatchServerMessage } from "./message-router.js";
 
@@ -356,9 +358,17 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
       /** 同步喂官方 Network 面板（elements 桥未激活时内部静默丢弃，零开销） */
       feedNetworkEntry(entry);
     },
-    (seq, frame) => send({ type: "ws-frame", seq, frame }),
+    (seq, frame) => {
+      send({ type: "ws-frame", seq, frame });
+      /** 同步喂官方 Messages 页签（未激活内部静默丢弃） */
+      feedWsFrame(seq, frame);
+    },
     (seq, wsState) => send({ type: "ws-state", seq, wsState }),
-    (seq, event) => send({ type: "sse-event", seq, event }),
+    (seq, event) => {
+      send({ type: "sse-event", seq, event });
+      /** 同步喂官方 EventStream 页签（未激活内部静默丢弃） */
+      feedSseEvent(seq, event);
+    },
     (seq, patch) => {
       send({ type: "network-update", seq, patch });
       /** 同步喂官方 Network 面板（elements 桥未激活时内部静默丢弃，零开销） */

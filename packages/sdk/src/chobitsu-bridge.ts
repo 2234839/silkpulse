@@ -22,7 +22,8 @@
 import { send } from "./ws-client.js";
 import { registerServerMessageHandler } from "./message-router.js";
 import { getLogHistory } from "./log-collector.js";
-import type { NetworkEntry, LogEntry } from "@silkpulse/shared";
+import type { NetworkEntry, LogEntry, WsFrame, SseEvent } from "@silkpulse/shared";
+import { getFullResponseBody, getFullReqBody } from "./network-collector.js";
 
 /** chobitsu UMD bundle 的下载路径（server 静态服务） */
 const CHOBITSU_URL = "/plugins/chrome-devtools/chobitsu.js";
@@ -247,6 +248,8 @@ export function initElementsBridge(): void {
       if (msg.payload.includes('"Runtime.enable"')) {
         setTimeout(replayLogHistory, 0);
       }
+      /** Network.getResponseBody 等命令 chobitsu 不实现，拦截后用采集器存的 body 直接应答 */
+      if (handleNetworkCdpCommand(msg.payload)) return;
       if (activated && loadPromise) {
         void loadPromise.then((chobitsu) => chobitsu.sendRawMessage(msg.payload as string));
       } else {
@@ -572,6 +575,8 @@ export function feedNetworkEntry(entry: NetworkEntry): void {
       url: entry.url,
       method: entry.method,
       headers: meta.headers,
+      /** 请求体摘要（Payload 页签直接展示；截断到 500 字符的采集口径） */
+      postData: entry.reqBody,
       initialPriority: "High",
       referrerPolicy: "strict-origin-when-cross-origin",
     },
@@ -582,6 +587,84 @@ export function feedNetworkEntry(entry: NetworkEntry): void {
   });
   /** 一次性完整条目（resource/已完成 ws 等）立即合成响应 */
   if (entry.status > 0) emitNetworkResponse(entry, meta, entry.duration);
+  /** WS 连接条目：把已缓存的帧一次性喂进官方 Messages 页签 */
+  for (const frame of entry.frames ?? []) feedWsFrame(entry.seq, frame);
+  /** SSE 流条目：把已缓存的事件一次性喂进官方 EventStream 页签 */
+  for (const event of entry.events ?? []) feedSseEvent(entry.seq, event);
+}
+
+/**
+ * WS 帧 sink：把采集器上报的 WebSocket 帧合成为 Network.webSocketFrameSent /
+ * webSocketFrameReceived 事件（官方 Messages 页签消费）
+ */
+export function feedWsFrame(seq: number, frame: WsFrame): void {
+  if (!activated || frame.dir === "event") return;
+  emitNetworkEvent(frame.dir === "send" ? "Network.webSocketFrameSent" : "Network.webSocketFrameReceived", {
+    requestId: `net${seq}`,
+    timestamp: Date.parse(frame.timestamp) / 1000 || performance.now() / 1000,
+    response: { opcode: 1, mask: frame.dir === "send", payloadData: frame.data },
+  });
+}
+
+/**
+ * SSE 事件 sink：合成为 Network.eventSourceMessageReceived（官方 EventStream 页签消费）
+ */
+export function feedSseEvent(seq: number, event: SseEvent): void {
+  if (!activated) return;
+  emitNetworkEvent("Network.eventSourceMessageReceived", {
+    requestId: `net${seq}`,
+    timestamp: Date.parse(event.timestamp) / 1000 || performance.now() / 1000,
+    eventName: event.event,
+    eventId: event.id ?? "",
+    data: event.data,
+  });
+}
+
+/**
+ * 拦截 frontend 的 Network body 类 CDP 命令并直接应答
+ *
+ * chobitsu 不实现 Network 域，透传只会收到「method not found」，官方 Response
+ * 页签永远空白。这里按 requestId 反查采集器环形缓冲里的完整 body 应答：
+ * - Network.getResponseBody → { body, base64Encoded }（resBodyEncoding=base64 时原样返回）
+ * - Network.getRequestPostData → { postData }（请求体摘要，无则报错）
+ * 返回 true 表示已拦截应答（含查不到 body 的错误应答，同样不透传 chobitsu）。
+ */
+function handleNetworkCdpCommand(payload: string): boolean {
+  if (!payload.includes('"Network.get')) return false;
+  let parsed: { id?: number | string; method?: string; params?: { requestId?: string } };
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return false;
+  }
+  const method = parsed.method ?? "";
+  if (method !== "Network.getResponseBody" && method !== "Network.getRequestPostData") return false;
+  const id = parsed.id;
+  if (id === undefined) return false;
+  const relayError = (message: string): void => {
+    send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, error: { code: -32000, message } }) });
+  };
+  const seqNum = Number(String(parsed.params?.requestId ?? "").replace(/^hist-net/, "").replace(/^net/, ""));
+  if (!Number.isFinite(seqNum)) {
+    relayError("Unknown requestId");
+    return true;
+  }
+  if (method === "Network.getResponseBody") {
+    const stored = getFullResponseBody(seqNum);
+    if (stored === null) {
+      relayError("Body not captured");
+    } else {
+      send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, result: stored }) });
+    }
+    return true;
+  }
+  const reqBody = getFullReqBody(seqNum);
+  if (reqBody === null) {
+    relayError("Post data not captured");
+  } else {
+    send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, result: { postData: reqBody } }) });
+  }
+  return true;
 }
 
 /**
