@@ -100,7 +100,9 @@ export function getStoredBody(seqNum: number): string | null {
  * 回查完整响应体（官方 DevTools Response 页签的 getResponseBody 用）
  * 先查大 body 懒加载缓存，再查小 body 直推缓存；都无返回 null。
  */
-export function getFullResponseBody(seqNum: number): { body: string; base64Encoded: boolean } | null {
+export function getFullResponseBody(
+  seqNum: number,
+): { body: string; base64Encoded: boolean } | null {
   const stored = bodyStore.get(seqNum) ?? smallBodies.get(seqNum);
   return stored ? { body: stored.body, base64Encoded: stored.base64 } : null;
 }

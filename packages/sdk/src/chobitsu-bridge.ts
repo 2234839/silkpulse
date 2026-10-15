@@ -599,11 +599,14 @@ export function feedNetworkEntry(entry: NetworkEntry): void {
  */
 export function feedWsFrame(seq: number, frame: WsFrame): void {
   if (!activated || frame.dir === "event") return;
-  emitNetworkEvent(frame.dir === "send" ? "Network.webSocketFrameSent" : "Network.webSocketFrameReceived", {
-    requestId: `net${seq}`,
-    timestamp: Date.parse(frame.timestamp) / 1000 || performance.now() / 1000,
-    response: { opcode: 1, mask: frame.dir === "send", payloadData: frame.data },
-  });
+  emitNetworkEvent(
+    frame.dir === "send" ? "Network.webSocketFrameSent" : "Network.webSocketFrameReceived",
+    {
+      requestId: `net${seq}`,
+      timestamp: Date.parse(frame.timestamp) / 1000 || performance.now() / 1000,
+      response: { opcode: 1, mask: frame.dir === "send", payloadData: frame.data },
+    },
+  );
 }
 
 /**
@@ -621,16 +624,21 @@ export function feedSseEvent(seq: number, event: SseEvent): void {
 }
 
 /**
- * 拦截 frontend 的 Network body 类 CDP 命令并直接应答
+ * 拦截 frontend 的全部 Network 域 CDP 命令并直接应答，不透传 chobitsu
  *
- * chobitsu 不实现 Network 域，透传只会收到「method not found」，官方 Response
- * 页签永远空白。这里按 requestId 反查采集器环形缓冲里的完整 body 应答：
- * - Network.getResponseBody → { body, base64Encoded }（resBodyEncoding=base64 时原样返回）
- * - Network.getRequestPostData → { postData }（请求体摘要，无则报错）
+ * chobitsu 不实现 Network 域，透传会收到「method not found」错误：
+ * - frontend 打开 Network 面板时发 Network.enable，收到 error 后不启用采集，
+ *   我们合成的 requestWillBeSent/responseReceived 全部被丢弃 → 面板永远空
+ * - Network.getResponseBody / getRequestPostData 收到 error → Response/Payload
+ *   页签空白
+ * 这里统一拦截：控制类命令（enable/disable/setCacheDisabled 等）回空成功；
+ * body 类命令按 requestId 反查采集器缓存的完整 body 应答：
+ * - Network.getResponseBody → { body, base64Encoded }
+ * - Network.getRequestPostData → { postData }
  * 返回 true 表示已拦截应答（含查不到 body 的错误应答，同样不透传 chobitsu）。
  */
 function handleNetworkCdpCommand(payload: string): boolean {
-  if (!payload.includes('"Network.get')) return false;
+  if (!payload.includes('"Network.')) return false;
   let parsed: { id?: number | string; method?: string; params?: { requestId?: string } };
   try {
     parsed = JSON.parse(payload);
@@ -638,32 +646,53 @@ function handleNetworkCdpCommand(payload: string): boolean {
     return false;
   }
   const method = parsed.method ?? "";
-  if (method !== "Network.getResponseBody" && method !== "Network.getRequestPostData") return false;
+  if (!method.startsWith("Network.")) return false;
   const id = parsed.id;
   if (id === undefined) return false;
   const relayError = (message: string): void => {
-    send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, error: { code: -32000, message } }) });
+    send({
+      type: "devtools-relay",
+      plugin: "elements",
+      payload: JSON.stringify({ id, error: { code: -32000, message } }),
+    });
   };
-  const seqNum = Number(String(parsed.params?.requestId ?? "").replace(/^hist-net/, "").replace(/^net/, ""));
-  if (!Number.isFinite(seqNum)) {
-    relayError("Unknown requestId");
-    return true;
-  }
-  if (method === "Network.getResponseBody") {
-    const stored = getFullResponseBody(seqNum);
-    if (stored === null) {
-      relayError("Body not captured");
+  if (method === "Network.getResponseBody" || method === "Network.getRequestPostData") {
+    const seqNum = Number(
+      String(parsed.params?.requestId ?? "")
+        .replace(/^hist-net/, "")
+        .replace(/^net/, ""),
+    );
+    if (!Number.isFinite(seqNum)) {
+      relayError("Unknown requestId");
+      return true;
+    }
+    if (method === "Network.getResponseBody") {
+      const stored = getFullResponseBody(seqNum);
+      if (stored === null) {
+        relayError("Body not captured");
+      } else {
+        send({
+          type: "devtools-relay",
+          plugin: "elements",
+          payload: JSON.stringify({ id, result: stored }),
+        });
+      }
+      return true;
+    }
+    const reqBody = getFullReqBody(seqNum);
+    if (reqBody === null) {
+      relayError("Post data not captured");
     } else {
-      send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, result: stored }) });
+      send({
+        type: "devtools-relay",
+        plugin: "elements",
+        payload: JSON.stringify({ id, result: { postData: reqBody } }),
+      });
     }
     return true;
   }
-  const reqBody = getFullReqBody(seqNum);
-  if (reqBody === null) {
-    relayError("Post data not captured");
-  } else {
-    send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, result: { postData: reqBody } }) });
-  }
+  /** 其余 Network 控制命令一律回空成功（chobitsu 不实现该域） */
+  send({ type: "devtools-relay", plugin: "elements", payload: JSON.stringify({ id, result: {} }) });
   return true;
 }
 
