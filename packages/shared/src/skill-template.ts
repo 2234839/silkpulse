@@ -94,9 +94,29 @@ exec 的 code 作为 **async 函数体**执行，写 \`return\` 返回结果。
   - 例：\`set(idx, 'hooks', [], 42, 0)\` 把第 0 个 hook（如 useState 的计数）设为 42
 
 典型用法：\`inspect\` 拿到 hooks 列表 → 找到目标 hook 序号 → \`set\` 修改 → \`snapshot\` 验证 UI 变化。
-React 读写走页面内 DevTools backend 本地直调（等效 setState）；Vue 直接读写组件实例的响应式对象（setupState/data/props）。
+React 读写走页面内 React DevTools backend 本地直调（等效 setState）；Vue 读写走 Vue DevTools 内核直调组件实例的响应式对象（setupState/data/props）。
 首次调用会自动激活页面内的 DevTools backend（约 100ms），无需控制台打开。
 Vue 注意：根组件若是 template 定义无 name 会显示 Anonymous（id 仍有效）；树节点带 idx 可直接传给 inspect/set。
+
+### 查指定组件（如 View）的信息
+
+1. \`await __silkpulse_devtools_tree()\` → 组件树里按 name 找到目标组件，拿 \`idx\`
+2. \`await __silkpulse_devtools_inspect(idx)\` → 读它的 props/state/hooks 全量数据
+3. 需要改时 \`await __silkpulse_devtools_set(idx, type, path, value, hookID?)\`
+
+## 与 Chrome DevTools 面板的对应关系
+
+HTTP API 覆盖了 Chrome DevTools 核心面板的信息，按面板选接口：
+
+| DevTools 面板 | 对应接口 |
+|------|------|
+| Console（日志/报错） | \`GET /<id>/logs\`、\`GET /<id>/errors\`（errors 已做 source map 解析，可直接定位源码行） |
+| Network | \`GET /<id>/network\`（失败请求标 FAIL；优先看 inspect 聚合结果中的失败请求） |
+| Elements | \`GET /<id>/element/tree\` + \`__silkpulse_click/setValue/type(idx)\`（snapshot 里的 #数字 即元素 idx） |
+| Sources（压缩代码定位） | \`__silkpulse_sourcemap(line, col, url?)\` |
+| Application/存储 | \`POST /<id>/exec\` 读 \`localStorage\`/\`sessionStorage\`/cookie |
+
+调试框架应用（React/Vue）时优先用上面的 DevTools 辅助函数看组件数据——比 DOM 操作更接近问题本质；DOM/网络层问题再用面板对应接口。
 
 ## snapshot 阅读指南
 

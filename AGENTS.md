@@ -1,16 +1,14 @@
-<!--VITE PLUS START-->
+<!-- pact:start -->
+## pact 需求契约系统
 
-# Using Vite+, the Unified Toolchain for the Web
+这个项目用 pact 管理需求：`notes/*.md` 是所有需求的唯一真相，每个需求段落是一个「块」（`## 标题 [[锚点]]`）。你和用户改了笔记，pact 就能通过内容 hash 检测出来；你改了代码，pact 也能反查这段代码当初是为了实现哪个需求写的。它的价值：需求不会口头丢失、改了什么有据可查、你和用户对「什么做完了」有一致认知。
 
-This project is using Vite+, a unified toolchain built on top of Vite, Rolldown, Vitest, tsdown, Oxlint, Oxfmt, and Vite Task. Vite+ wraps runtime management, package management, and frontend tooling in a single global CLI called `vp`. Vite+ is distinct from Vite, and it invokes Vite through `vp dev` and `vp build`. Run `vp help` to print a list of commands and `vp <command> --help` for information about a specific command.
+工作方式：pact 用状态文件（notes/.pact.todo.jsonl）记录每个块的完成态。你实现完一个需求，运行 `pact todo --done <块ID>` 记账；用户之后改了某块正文，那一块会自动变回待办，不需要谁手工登记。
 
-Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.dev/guide/.
-
-## Review Checklist
-
-- [ ] Run `vp install` after pulling remote changes and before getting started.
-- [ ] Run `vp check` and `vp test` to format, lint, type check and test changes.
-- [ ] Check if there are `vite.config.ts` tasks or `package.json` scripts necessary for validation, run via `vp run <script>`.
-- [ ] If setup, runtime, or package-manager behavior looks wrong, run `vp env doctor` and include its output when asking for help.
-
-<!--VITE PLUS END-->
+你需要做的事：
+1. **开工前**：跑 `pact todo` 生成/刷新 TODO.md 并阅读它（notes/TODO.md），每一项都带完整需求正文，照着逐项实现即可。你改代码前如果想知道某文件/符号对应什么需求，跑 `pact refs <文件路径或符号>` 反查。
+2. **实现中**：改代码落地需求；每实现完一块，先在对应需求块的正文里补一行实现链接（如 `实现见 [todo.ts](src/todo.ts)`），再执行 `pact todo --done <块ID>` 标记该块完成。注意：只标你确实做完的块，绝不全量清零。
+3. **遇到「已移除」**：TODO.md 末尾会列出「笔记里已删掉但 pact 还有记录」的块。逐条判断：如果那是真需求被删但实现代码还在 → 代码成了孤儿实现，这不合理，提醒用户决定代码怎么处理，别动状态记录；如果只是无关紧要的内容（随手记、过时描述）删了就删了 → 执行 `pact todo --clean <块ID>` 清掉记录即可，不用打扰用户。
+4. **遇到空块**：只有标题没有正文的块是占位标题。如果它下面的微观需求都已完成，直接对它 `--done` 即可；如果下面还没有完成的子需求，留着等用户补正文。
+5. **注意区分**：你自己回填实现链接也会改变块内容，下轮检测时这类「非需求变更」直接 `--done` 标掉即可；但用户改的正文是真需求变更，需要按新内容重新实现。
+<!-- pact:end -->
