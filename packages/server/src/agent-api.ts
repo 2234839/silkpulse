@@ -27,6 +27,46 @@ import { sendSnapshot } from "./snapshot-text.js";
 import { maybeGzipResponse } from "./gzip.js";
 
 /**
+ * 解析 /api/agent/devices/:id 中的设备 id
+ *
+ * 支持前缀模糊匹配：完整 id 精确命中优先；否则在当前鉴权可见的设备范围内
+ * 取唯一前缀匹配（多个匹配时报错并列出候选，避免 agent 误操作到别的设备）。
+ * 返回 null 表示已写回错误响应，调用方直接 return true。
+ */
+function resolveAgentDevice(
+  ctx: Ctx,
+  registry: DeviceRegistry,
+  authCtx: AuthContext,
+  idOrPrefix: string,
+) {
+  /** 完整 id 直接返回 */
+  const exact = registry.get(idOrPrefix);
+  if (exact) return exact;
+  /** 前缀匹配（限定在鉴权可见范围内，防止项目密钥跨项目命中） */
+  const projectId = authCtx.role === "project" ? authCtx.projectId : undefined;
+  const matched = registry
+    .listByProject(projectId)
+    .filter((d) => d.id.startsWith(idOrPrefix));
+  if (matched.length === 1) return registry.get(matched[0].id)!;
+  if (matched.length > 1) {
+    sendText(
+      ctx,
+      `[错误] 设备 id 前缀 "${idOrPrefix}" 匹配到多个: ${matched
+        .map((d) => d.id)
+        .join(", ")}。请使用完整 id。`,
+      400,
+    );
+    return null;
+  }
+  sendText(
+    ctx,
+    `[错误] 设备 ${idOrPrefix} 不在线。先 GET /api/agent/devices 查看在线设备列表。`,
+    404,
+  );
+  return null;
+}
+
+/**
  * 处理 /api/agent/* 路由
  * 返回 true 表示已处理，false 表示非 agent 路径
  */
@@ -65,15 +105,8 @@ export async function handleAgentApiRoute(
     return true;
   }
   const [, deviceId, action] = match;
-  const device = registry.get(deviceId);
-  if (!device) {
-    sendText(
-      ctx,
-      `[错误] 设备 ${deviceId} 不在线。先 GET /api/agent/devices 查看在线设备列表。`,
-      404,
-    );
-    return true;
-  }
+  const device = resolveAgentDevice(ctx, registry, authCtx, deviceId);
+  if (!device) return true;
 
   /** limit 参数解析（默认按各类型给合理值） */
   const limitParam = (fallback: number) => {
