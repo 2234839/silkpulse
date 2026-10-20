@@ -1,14 +1,12 @@
 services:
-  clarosight:
-    build: .
-    image: gs/clarosight:latest
-    container_name: clarosight-app
+  silkpulse:
+    image: llej0/silkpulse:latest
+    container_name: silkpulse
     ports:
-      - "8088:8080"
+      - "8080:8080"
     volumes:
-      - ./data:/data
+      - ./data:/app/data
     environment:
-      - CLAROSIGHT_ADMIN_KEY=${CLAROSIGHT_ADMIN_KEY:-}
-      - SILKPULSE_ADMIN_KEY=${CLAROSIGHT_ADMIN_KEY:-}
+      - SILKPULSE_ADMIN_KEY=${SILKPULSE_ADMIN_KEY:-}
     restart: unless-stopped
     mem_limit: 512m

@@ -14,7 +14,7 @@
  * - 定时密钥比较（timingSafeEqual 防时序攻击）
  */
 
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual, createHmac } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { maybeGzipResponse } from "./gzip.js";
@@ -112,8 +112,6 @@ const GUEST_RATE_MAX = 5;
 export class ProjectStore {
   private projects: Map<string, Project> = new Map();
   private filePath: string;
-  /** apiKey 前缀 → projectId 的反查索引（加速密钥验证） */
-  private keyPrefixIndex: Map<string, string> = new Map();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -128,9 +126,6 @@ export class ProjectStore {
       const arr: Project[] = JSON.parse(raw);
       for (const p of arr) {
         this.projects.set(p.id, p);
-        // 用 apiKey 前 16 字符做索引加速验证（不用完整 key，安全）
-        // 注意：存储中没有明文 key，索引基于 hash 前缀
-        this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), p.id);
       }
     } catch {
       /** 文件损坏时从空开始 */
@@ -174,7 +169,6 @@ export class ProjectStore {
         : undefined,
     };
     this.projects.set(id, project);
-    this.keyPrefixIndex.set(hash.slice(0, 16), id);
     this.save();
     const { apiKeyHash, apiKeySalt, ...publicInfo } = project;
     return { project: publicInfo, apiKey };
@@ -191,7 +185,6 @@ export class ProjectStore {
     for (const [id, p] of this.projects) {
       if (!this.isExpired(p)) continue;
       expired.push(id);
-      this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
       this.projects.delete(id);
     }
     if (expired.length > 0) this.save();
@@ -222,7 +215,6 @@ export class ProjectStore {
   /** 直接写入项目原始数据（供 Playground 项目初始化使用） */
   setRaw(projectId: string, project: Project): void {
     this.projects.set(projectId, project);
-    this.keyPrefixIndex.set(project.apiKeyHash.slice(0, 16), projectId);
     this.save();
   }
 
@@ -230,11 +222,9 @@ export class ProjectStore {
   updateRaw(projectId: string, patch: { apiKeyHash: string; apiKeySalt: string }): void {
     const p = this.projects.get(projectId);
     if (!p) return;
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
     p.apiKeyHash = patch.apiKeyHash;
     p.apiKeySalt = patch.apiKeySalt;
     p.updatedAt = new Date().toISOString();
-    this.keyPrefixIndex.set(p.apiKeyHash.slice(0, 16), projectId);
     this.save();
   }
 
@@ -242,7 +232,6 @@ export class ProjectStore {
   delete(projectId: string): boolean {
     const p = this.projects.get(projectId);
     if (!p) return false;
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
     this.projects.delete(projectId);
     this.save();
     return true;
@@ -271,22 +260,21 @@ export class ProjectStore {
   rotateKey(projectId: string): string | undefined {
     const p = this.projects.get(projectId);
     if (!p) return undefined;
-    this.keyPrefixIndex.delete(p.apiKeyHash.slice(0, 16));
     const newKey = generateApiKey();
     const { hash, salt } = hashApiKey(newKey);
     p.apiKeyHash = hash;
     p.apiKeySalt = salt;
     p.updatedAt = new Date().toISOString();
-    this.keyPrefixIndex.set(hash.slice(0, 16), projectId);
     this.save();
     return newKey;
   }
 
-  /**
-   * 验证 API Key，返回对应的项目
+  /** 验证 API Key，返回对应的项目
    * @returns 项目 ID（验证成功）或 undefined（失败）
    */
   verifyKey(plainKey: string): string | undefined {
+    /** 长度预检：合法 key 最长是 cs_live_ + 48 hex（超长的直接拒，避免无谓跑同步 scrypt） */
+    if (plainKey.length > 128) return undefined;
     // 遍历所有项目尝试验证（因为密钥是哈希的，不能直接反查）
     // 对于少量项目（通常 <100）性能可接受
     for (const [id, p] of this.projects) {
@@ -339,6 +327,11 @@ export class AuthManager {
 
   /** 游客自建项目限流：IP → 滑动窗口内的时间戳 */
   private guestCreateWindow = new Map<string, number[]>();
+  /** 密钥验证限流：IP → 滑动窗口内的时间戳（verifyKey 走同步 scrypt，防止匿名刷接口把事件循环打满） */
+  private verifyWindow = new Map<string, number[]>();
+  /** verify 限流：每 IP 每分钟最多 30 次 */
+  private static readonly VERIFY_RATE_MAX = 30;
+  private static readonly VERIFY_RATE_WINDOW_MS = 60 * 1000;
 
   constructor(
     projectStore: ProjectStore,
@@ -366,26 +359,43 @@ export class AuthManager {
     if (expired.length > 0) this.onProjectsExpired(expired);
   }
 
-  /** 游客创建限流：每 IP 每小时最多 5 次，返回是否放行（路由层调用） */
-  checkGuestRateLimit(ip: string): boolean {
+  /** 滑动窗口限流通用实现：窗口内达到上限返回 false */
+  private checkRate(windowMap: Map<string, number[]>, ip: string, windowMs: number, max: number): boolean {
     const now = Date.now();
-    const window = (this.guestCreateWindow.get(ip) ?? []).filter(
-      (t) => now - t < GUEST_RATE_WINDOW_MS,
-    );
-    if (window.length >= GUEST_RATE_MAX) {
-      this.guestCreateWindow.set(ip, window);
+    const window = (windowMap.get(ip) ?? []).filter((t) => now - t < windowMs);
+    if (window.length >= max) {
+      windowMap.set(ip, window);
       return false;
     }
     window.push(now);
-    this.guestCreateWindow.set(ip, window);
+    windowMap.set(ip, window);
     /** 窗口条目数帽住，防 map 无限膨胀 */
-    if (this.guestCreateWindow.size > 10000) {
-      for (const [key, entries] of this.guestCreateWindow) {
-        if (entries.every((t) => now - t >= GUEST_RATE_WINDOW_MS))
-          this.guestCreateWindow.delete(key);
+    if (windowMap.size > 10000) {
+      for (const [key, entries] of windowMap) {
+        if (entries.every((t) => now - t >= windowMs)) windowMap.delete(key);
       }
     }
     return true;
+  }
+
+  /** 游客创建限流：每 IP 每小时最多 5 次，返回是否放行（路由层调用） */
+  checkGuestRateLimit(ip: string): boolean {
+    return this.checkRate(
+      this.guestCreateWindow,
+      ip,
+      GUEST_RATE_WINDOW_MS,
+      GUEST_RATE_MAX,
+    );
+  }
+
+  /** 密钥验证限流：每 IP 每分钟最多 30 次（路由层调用） */
+  checkVerifyRateLimit(ip: string): boolean {
+    return this.checkRate(
+      this.verifyWindow,
+      ip,
+      AuthManager.VERIFY_RATE_WINDOW_MS,
+      AuthManager.VERIFY_RATE_MAX,
+    );
   }
 
   /** 是否启用了鉴权（配置了超管密钥或至少一个项目） */
@@ -447,6 +457,28 @@ export class AuthManager {
   }
 
   /**
+   * 设备接入令牌：HMAC(salt, apiKeyHash) 派生，仅持项目密钥者可经 /api/device-token 获取。
+   * 设备 WS 带 projectId 时须携带时验证，防止只知 projectId（公开标识）的攻击者
+   * 伪造设备混入他人项目。验证失败降级为未分组设备（仅超管可见），不断连。
+   */
+  deviceToken(projectId: string): string | undefined {
+    const p = this.projects.getRaw(projectId);
+    if (!p) return undefined;
+    return createHmac("sha256", p.apiKeySalt).update(p.apiKeyHash).digest("hex").slice(0, 32);
+  }
+
+  /**
+   * 验证设备接入令牌是否匹配项目。Playground 公共项目豁免（本来就对全游客公开）。
+   */
+  verifyDeviceToken(projectId: string, token: string | undefined): boolean {
+    if (projectId === AuthManager.PLAYGROUND_PROJECT_ID) return true;
+    const expected = this.deviceToken(projectId);
+    if (!expected) return false;
+    if (!token || token.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+  }
+
+  /**
    * 验证 HTTP 请求的鉴权
    * @returns 鉴权上下文（role='anonymous' 表示未鉴权）
    */
@@ -500,12 +532,21 @@ export class AuthManager {
     // 设备 WebSocket：不需要鉴权（设备是被调试的受控端，密钥暴露在前端无意义）
     // 连接数天然受 server 容量约束（WS 每连接有内存开销，超载时背压机制兜底）
     if (wsPath === "/ws/device") {
-      /** 设备只需携带 projectId 标记归属，不需要 apiKey（密钥不暴露到设备端） */
+      /**
+       * 归属项目需要 projectId + 设备令牌双验证：projectId 是公开标识（嵌在接入代码里），
+       * 令牌从项目密钥派生、仅项目成员可获取，防止伪造设备混入他人项目。
+       * 验证失败不断连，降级为未分组设备（role=device，仅超管可见）。
+       */
       if (projectId) {
         /** 验证 projectId 是否存在、启用且未过期（游客项目到期后设备同样拒接） */
         const proj = this.projects.getRaw(projectId);
         if (proj?.enabled && !this.projects.isExpired(proj)) {
-          return { role: "project", projectId };
+          const token = extractQueryParam(url, "t");
+          if (this.verifyDeviceToken(projectId, token)) {
+            return { role: "project", projectId };
+          }
+          /** 令牌不匹配：降级为未分组，不归入目标项目 */
+          return { role: "device" };
         }
       }
       /** 无 projectId 的设备也允许接入（role=device，可被所有管理员看到） */
@@ -613,8 +654,35 @@ export function handleProjectApiRoute(ctx: Ctx, auth: AuthManager): boolean {
     return true;
   }
 
+  /**
+   * 设备接入令牌查询：项目密钥返回自己项目的；超管需显式指定 ?projectId。
+   * 控制台拿它拼进接入代码（data-device-token），设备 WS 凭它归入项目。
+   */
+  if (url === "/api/device-token" && method === "GET") {
+    const reqCtx = auth.authorizeHttpRequest(ctx);
+    let pid: string | undefined;
+    if (reqCtx.role === "project") pid = reqCtx.projectId;
+    else if (reqCtx.role === "admin") pid = extractQueryParam(ctx.url, "projectId");
+    if (!pid) {
+      jsonResponse(ctx, 401, { error: "未授权" });
+      return true;
+    }
+    const token = auth.deviceToken(pid);
+    if (!token) {
+      jsonResponse(ctx, 404, { error: `项目 ${pid} 不存在` });
+      return true;
+    }
+    jsonResponse(ctx, 200, { projectId: pid, token });
+    return true;
+  }
+
   /** 验证密钥并返回角色信息（前端登录后调用，拿 role + projectId） */
   if (url === "/api/auth/verify" && method === "GET") {
+    /** 限流（verifyKey 走同步 scrypt，防匿名刷接口 CPU 打满） */
+    if (!auth.checkVerifyRateLimit(remoteIp(ctx))) {
+      jsonResponse(ctx, 429, { error: "验证太频繁，请 1 分钟后再试" });
+      return true;
+    }
     const verifyCtx = auth.authorizeHttpRequest(ctx);
     if (verifyCtx.role === "anonymous") {
       jsonResponse(ctx, 401, { error: "密钥无效或已过期" });
@@ -666,8 +734,9 @@ export function handleProjectApiRoute(ctx: Ctx, auth: AuthManager): boolean {
     } catch {
       body = {};
     }
+    /** 名称限长（游客可任意提交，防撑爆存储） */
     const name =
-      (body.name ?? "").trim() || `游客项目-${randomBytes(2).toString("hex").toUpperCase()}`;
+      ((body.name ?? "").trim().slice(0, 50)) || `游客项目-${randomBytes(2).toString("hex").toUpperCase()}`;
     const result = auth.projects.create(name, "游客自建（5 天后自动销毁）", { guest: true });
     jsonResponse(ctx, 201, {
       ...result,

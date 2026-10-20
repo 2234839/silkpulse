@@ -206,6 +206,13 @@ function restoreKeyFromUrl(): void {
         setTimeout(() => clearUrlKey(new URL(window.location.href), true), 0);
         return;
       }
+      /** fragment 形式：#guest=1 —— 游客直达链接，免登录页直接进 Playground */
+      if (hashParams.get("guest")) {
+        clearUrlGuest(u);
+        setTimeout(() => clearUrlGuest(new URL(window.location.href)), 0);
+        guestLogin();
+        return;
+      }
     }
     /** query 形式：?key=xxx（旧链接兼容） */
     const key = u.searchParams.get("key");
@@ -216,6 +223,17 @@ function restoreKeyFromUrl(): void {
   } catch {
     /** URL 解析异常忽略（如非浏览器环境） */
   }
+}
+
+/** 从地址栏移除 #guest=1（游客直达链接用后即清，避免刷新重复触发） */
+function clearUrlGuest(u: URL): void {
+  if (!u.hash) return;
+  const hashParams = new URLSearchParams(u.hash.startsWith("#") ? u.hash.slice(1) : "");
+  if (!hashParams.get("guest")) return;
+  hashParams.delete("guest");
+  const rest = hashParams.toString();
+  u.hash = rest ? `#${rest}` : "";
+  window.history.replaceState(null, "", u.toString());
 }
 
 /**

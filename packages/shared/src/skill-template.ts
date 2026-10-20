@@ -44,6 +44,8 @@ export const SKILL_PROMPT_TEMPLATE = `# SilkPulse —— 远程设备调试工�
 | GET | \`/<id>/errors?limit=10\` | 最近 N 条错误（text/plain，含 source map 解析） |
 | GET | \`/<id>/network?limit=10\` | 最近 N 条网络请求（text/plain，失败请求标记 FAIL） |
 | GET | \`/<id>/element/tree?idx=N\` | DOM 元素子树（JSON，不传 idx 从根开始） |
+| GET | \`/<id>/component/tree\` | **组件树**（JSON，React/Vue 自动探测，返回 \`{ framework, tree }\`） |
+| GET | \`/<id>/component/inspect?idx=N\` | **单组件全量数据**（props/state/hooks，idx 用组件树或 snapshot 里的） |
 | GET | \`/<id>/screenshot?idx=N\` | **截图**（返回图片，不传 idx 截全页，传 idx 截指定元素） |
 | POST | \`/<id>/exec\` | 在远程页面执行 JS（body: \`{ "code": "..." }\`） |
 
@@ -100,9 +102,9 @@ Vue 注意：根组件若是 template 定义无 name 会显示 Anonymous（id �
 
 ### 查指定组件（如 View）的信息
 
-1. \`await __silkpulse_devtools_tree()\` → 组件树里按 name 找到目标组件，拿 \`idx\`
-2. \`await __silkpulse_devtools_inspect(idx)\` → 读它的 props/state/hooks 全量数据
-3. 需要改时 \`await __silkpulse_devtools_set(idx, type, path, value, hookID?)\`
+1. \`GET /<id>/component/tree\` → 组件树里按 name 找到目标组件，拿 \`idx\`
+2. \`GET /<id>/component/inspect?idx=N\` → 读它的 props/state/hooks 全量数据
+3. 需要改时 \`await __silkpulse_devtools_set(idx, type, path, value, hookID?)\`（也可用 exec 调）
 
 ## 与 Chrome DevTools 面板的对应关系
 

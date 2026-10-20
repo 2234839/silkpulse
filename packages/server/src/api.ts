@@ -156,6 +156,30 @@ export async function handleApiRoute(
     return true;
   }
 
+  /**
+   * DELETE /api/devices —— 一键清理离线设备（硬删含历史数据，在线设备不受影响）
+   *
+   * query：projectId（超管限定清理某项目；projectId=none 表示未分组设备；不传=全部）。
+   * 项目用户强制只能清理自己项目的设备。
+   */
+  if (pathname === "/api/devices" && ctx.method === "DELETE") {
+    if (authCtx.role === "anonymous") {
+      sendJson(ctx, { error: "未授权" }, 401);
+      return true;
+    }
+    let projectId: string | undefined;
+    if (authCtx.role === "project") {
+      projectId = authCtx.projectId;
+    } else {
+      const q = url.searchParams.get("projectId");
+      projectId = q === "none" ? "" : (q ?? undefined);
+    }
+    const removed = registry.clearOfflineDevices(projectId);
+    if (removed > 0) onDeviceListChanged?.();
+    sendJson(ctx, { ok: true, removed });
+    return true;
+  }
+
   /** 解析 /api/devices/:id/xxx */
   const match = pathname.match(/^\/api\/devices\/([^/]+)(?:\/(.+))?$/);
   if (!match) {

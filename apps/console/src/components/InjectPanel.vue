@@ -61,8 +61,7 @@ watch(
   { immediate: true },
 );
 
-/**
- * 注入代码归属的项目 ID：
+/** 注入代码归属的项目 ID：
  * - 项目密钥登录：自己项目的（verify 返回）
  * - 超管：下拉选择，默认 ""（未分组，设备全局可见，不借用任何项目）
  * - 未启用鉴权：无需 projectId
@@ -74,8 +73,32 @@ const injectProjectId = computed(() => {
   return undefined;
 });
 
+/** 设备接入令牌（防伪造设备混入项目）：归属项目时拉取，拼进接入代码 */
+const deviceToken = ref<string>("");
+
+async function loadDeviceToken(): Promise<void> {
+  if (!injectProjectId.value) {
+    deviceToken.value = "";
+    return;
+  }
+  try {
+    const q = userRole.value === "admin" ? `?projectId=${injectProjectId.value}` : "";
+    const res = await apiFetch(`/api/device-token${q}`);
+    if (!res.ok) return;
+    const data = (await res.json()) as { token?: string };
+    deviceToken.value = data.token ?? "";
+  } catch {
+    /** 拉不到令牌时仍生成只带 projectId 的代码（设备会降级为未分组） */
+  }
+}
+
+watch(injectProjectId, () => void loadDeviceToken(), { immediate: true });
+
 /** 是否开启 Alt 点选元素（Element Picker）：开启后页面上 Alt+点击任意元素可弹出定位信息并复制发给 AI */
 const elementPicker = ref(false);
+
+/** 是否开启悬浮球（默认开启）：展示调试状态 + 拖出选元素联动控制台 Element 面板 */
+const floatingBall = ref(true);
 
 /**
  * script 标签方式（前端自己拼，最简单）
@@ -86,10 +109,14 @@ const scriptSnippet = computed(() => {
   const lt = String.fromCharCode(60);
   const gt = String.fromCharCode(62);
   const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`;
-  /** 归属项目时带 projectId（公开标识，可外发）；未分组/未启用鉴权不带也能接入 */
-  let s = injectProjectId.value ? `${base} data-project-id="${injectProjectId.value}"` : base;
+  /** 归属项目时带 projectId + 设备令牌；未分组/未启用鉴权不带也能接入 */
+  let s = injectProjectId.value
+    ? `${base} data-project-id="${injectProjectId.value}" data-device-token="${deviceToken.value}"`
+    : base;
   /** Alt 点选元素（Element Picker）开关 */
   if (elementPicker.value) s += " data-element-picker=1";
+  /** 悬浮球开关：仅关闭时输出 data-floating-ball=0，保持默认片段简洁 */
+  if (!floatingBall.value) s += ' data-floating-ball="0"';
   return `${s}${gt}${lt}/script${gt}`;
 });
 
@@ -102,7 +129,11 @@ const injectScriptCode = computed(() => {
   const dataAttrs = [
     `s.dataset.server='${serverOrigin}'`,
     injectProjectId.value ? `s.dataset.projectId='${injectProjectId.value}'` : "",
+    injectProjectId.value && deviceToken.value
+      ? `s.dataset.deviceToken='${deviceToken.value}'`
+      : "",
     elementPicker.value ? "s.dataset.elementPicker='1'" : "",
+    floatingBall.value ? "" : "s.dataset.floatingBall='0'",
   ]
     .filter(Boolean)
     .join(";");
@@ -132,6 +163,7 @@ const userscriptSnippet = computed(() => {
     `'data-server': '${serverOrigin}'`,
     injectProjectId.value ? `'data-project-id': '${injectProjectId.value}'` : "",
     elementPicker.value ? `'data-element-picker': '1'` : "",
+    floatingBall.value ? "" : `'data-floating-ball': '0'`,
   ]
     .filter(Boolean)
     .join(",\n    ");
@@ -393,6 +425,15 @@ async function copyInject() {
       >
         <input v-model="elementPicker" type="checkbox" class="accent-blue-600" />
         开启「Alt 点选元素」—— 选中页面元素后一键复制定位信息，发给 AI 直接指哪改哪
+      </label>
+
+      <!-- 悬浮球开关：默认开启 -->
+      <label
+        class="flex items-center gap-2 mb-3 text-xs text-secondary cursor-pointer select-none"
+        title="开启后，接入页面右下角出现悬浮球：实时展示调试状态，拖住可联动控制台 Element 面板选元素"
+      >
+        <input v-model="floatingBall" type="checkbox" class="accent-blue-600" />
+        开启「悬浮球」—— 页面右下角实时展示调试状态，拖出可联动选元素
       </label>
 
       <!-- 超管：选择设备归属（默认未分组，全局可见；需要归组管理时再选项目） -->

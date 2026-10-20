@@ -367,6 +367,53 @@ export async function handleAgentApiRoute(
       return true;
     }
 
+    /**
+     * GET /api/agent/devices/:id/component/tree —— 组件树（JSON）
+     *
+     * 内部调 __silkpulse_devtools_tree()，返回 { framework, tree } 或 { error }。
+     * agent 按组件名（React displayName / Vue name）在树中定位，拿 idx 后调
+     * component/inspect 读全量数据，不需要自己拼 exec JS。
+     */
+    case "component/tree": {
+      const result = await execOnDevice(
+        registry,
+        deviceId,
+        "return await __silkpulse_devtools_tree()",
+      );
+      if (!result.success) {
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
+      }
+      sendJson(ctx, JSON.parse(result.result ?? "{}"));
+      return true;
+    }
+
+    /**
+     * GET /api/agent/devices/:id/component/inspect?idx=N —— 单组件全量数据（JSON）
+     *
+     * 内部调 __silkpulse_devtools_inspect(idx)，返回 { framework, name, id,
+     * props, state, hooks? } 或 { error }。idx 为 snapshot 元素 idx（组件本身
+     * 或其内部任何 DOM 均可，SDK 侧自动取最近组件）。
+     */
+    case "component/inspect": {
+      const idx = Number(url.searchParams.get("idx"));
+      if (!Number.isInteger(idx) || idx < 0) {
+        sendJson(ctx, { error: "缺少或非法 idx 参数（snapshot 元素 idx）" }, 400);
+        return true;
+      }
+      const result = await execOnDevice(
+        registry,
+        deviceId,
+        `return await __silkpulse_devtools_inspect(${idx})`,
+      );
+      if (!result.success) {
+        sendJson(ctx, { error: result.error }, 500);
+        return true;
+      }
+      sendJson(ctx, JSON.parse(result.result ?? "{}"));
+      return true;
+    }
+
     default:
       sendText(ctx, `[错误] 未知的 agent 操作: ${action}`, 404);
       return true;

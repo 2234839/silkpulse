@@ -173,11 +173,12 @@ export async function createServer(
       "X-Frame-Options": "SAMEORIGIN",
     };
 
-    /** 缓存请求体（项目管理 + 鉴权 + 游客自建项目 API 需要） */
+    /** 缓存请求体（项目管理 + 鉴权 + 游客自建项目 + 设备令牌 API 需要） */
     if (
       ctx.url.startsWith("/api/projects") ||
       ctx.url.startsWith("/api/auth") ||
-      ctx.url.startsWith("/api/guest")
+      ctx.url.startsWith("/api/guest") ||
+      ctx.url.startsWith("/api/device-token")
     ) {
       await readBody(ctx);
       if (ctx.aborted) return;
@@ -270,8 +271,12 @@ export async function createServer(
         let html = fs
           .readFileSync(demoPagePath, "utf8")
           .replace(/https?:\/\/localhost:8080/g, demoOrigin);
-        /** 鉴权启用时，demo 页面自动注入超管密钥（本地测试页，非对外暴露） */
-        if (auth.isAuthEnabled()) {
+        /**
+         * 仅显式开启时才注入密钥（本地/无头测试场景）：
+         * /demo 是公开路由，注入超管密钥等于把密钥泄露给任何访问者，
+         * 必须由 SILKPULSE_DEMO_INJECT_KEY=1 显式 opt-in，默认绝不注入。
+         */
+        if (auth.isAuthEnabled() && process.env.SILKPULSE_DEMO_INJECT_KEY === "1") {
           /** 从 URL query 获取可选的 apiKey/projectId（支持测试不同项目） */
           const qApiKey = url.searchParams.get("apiKey");
           const qProjectId = url.searchParams.get("projectId");

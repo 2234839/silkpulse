@@ -166,8 +166,12 @@ export interface InitOptions {
   note?: string;
   /** 项目 ID（标记设备归属哪个项目，设备端无需密钥） */
   projectId?: string;
+  /** 设备接入令牌（data-device-token）：projectId 对应项目约设备验证用，防伪造设备混入 */
+  deviceToken?: string;
   /** 是否开启 Alt 点选元素（Element Picker），默认关闭 */
   elementPicker?: boolean;
+  /** 是否开启悬浮球，默认开启 */
+  floatingBall?: boolean;
 }
 
 /** 采集页面图标 URL（优先 meta link，兜底 /favicon.ico） */
@@ -340,6 +344,7 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   const wsBase = options.server.replace(/^http/, "ws").replace(/\/$/, "");
   const wsParams = new URLSearchParams();
   if (options.projectId) wsParams.set("projectId", options.projectId);
+  if (options.deviceToken) wsParams.set("t", options.deviceToken);
   const queryStr = wsParams.toString();
   const wsUrl = `${wsBase}/ws/device${queryStr ? "?" + queryStr : ""}`;
 
@@ -464,7 +469,7 @@ async function initWithDeviceId(options: InitOptions): Promise<void> {
   if (options.elementPicker) startElementPicker();
 
   /** 5.0.2 悬浮球（默认开启）：展示远程调试状态 + 拖出选元素联动控制台 Element 面板 */
-  startFloatingBall();
+  if (options.floatingBall !== false) startFloatingBall();
 
   /** 5.1 异步采集 base64 icon（避免跨域 ORB/CORS 拦截，控制台直接渲染 data URL） */
   collectPageIconDataUrl().then((iconDataUrl) => {
@@ -606,12 +611,15 @@ function autoInit(): void {
     .map((t) => t.trim())
     .filter(Boolean);
   const note = script?.dataset.note || undefined;
-  /** 项目归属：data-project-id */
+  /** 项目归属：data-project-id；设备令牌：data-device-token（server 从项目密钥派发） */
   const projectId = script?.dataset.projectId || undefined;
+  const deviceToken = script?.dataset.deviceToken || undefined;
   /** Alt 点选元素开关：data-element-picker（任意非空值开启） */
   const elementPicker = script?.dataset.elementPicker != null;
+  /** 悬浮球开关：data-floating-ball="0" 关闭，缺省开启 */
+  const floatingBall = script?.dataset.floatingBall !== "0";
 
-  const start = () => init({ server, tags, note, projectId, elementPicker });
+  const start = () => init({ server, tags, note, projectId, deviceToken, elementPicker, floatingBall });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
   } else {

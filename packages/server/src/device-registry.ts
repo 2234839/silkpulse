@@ -533,6 +533,28 @@ export class DeviceRegistry {
     return [...this.offlineHistory];
   }
 
+  /**
+   * 一键清理离线设备（硬删，含历史缓冲数据），在线设备不受影响
+   *
+   * @param projectId 项目 ID（undefined=全部项目；""=仅未分组设备）
+   * @returns 删除的设备数
+   */
+  clearOfflineDevices(projectId?: string): number {
+    const targets: Device[] = [];
+    for (const d of this.devices.values()) {
+      if (d.info.offlineAt === undefined) continue;
+      if (projectId === undefined) {
+        targets.push(d);
+      } else if (projectId === "") {
+        if (d.info.projectId === undefined) targets.push(d);
+      } else if (d.info.projectId === projectId) {
+        targets.push(d);
+      }
+    }
+    for (const d of targets) this.deleteDevice(d.info.id);
+    return targets.length;
+  }
+
   /** 按 ID 查离线摘要（注册表里已查不到时兜底用，硬删鉴权场景） */
   getOffline(deviceId: string): OfflineDeviceSummary | undefined {
     return this.offlineHistory.find((o) => o.id === deviceId);

@@ -138,6 +138,38 @@ async function removeDevice(device: DeviceInfo) {
   deletingDeviceId.value = null;
 }
 
+/** 一键清理中的分组 key（防重复点击） */
+const clearingGroupKey = ref<string | null>(null);
+
+/** 一键清理某分组（超管传 group.key；非超管传 undefined = 当前项目全部）的离线设备 */
+async function clearOfflineDevices(groupKey?: string) {
+  const scoped =
+    groupKey === undefined
+      ? props.devices
+      : (groupedDevices.value.find((g) => g.key === groupKey)?.devices ?? []);
+  const offline = scoped.filter((d) => !isOnline(d));
+  if (offline.length === 0) return;
+  const scopeLabel = groupKey === undefined ? "当前范围" : groupLabel(groupKey);
+  if (
+    !confirm(
+      `确定清理「${scopeLabel}」的 ${offline.length} 台离线设备？其日志/网络记录将一并清除。`,
+    )
+  )
+    return;
+  clearingGroupKey.value = groupKey ?? "__all__";
+  try {
+    /** projectId=none 表示未分组设备；不传 = 全部（项目用户由 server 侧强制限定为自己项目） */
+    let q = "";
+    if (groupKey === NO_PROJECT) q = "?projectId=none";
+    else if (groupKey && groupKey !== "__all__") q = `?projectId=${encodeURIComponent(groupKey)}`;
+    await apiFetch(`/api/devices${q}`, { method: "DELETE" });
+    /** server 删除后会广播 device-list 更新，这里无需手动更新 */
+  } catch {
+    /** 清理失败：列表不变，用户可重试 */
+  }
+  clearingGroupKey.value = null;
+}
+
 /** favicon 加载失败时隐藏 img，露出后备 emoji */
 function onFaviconError(e: Event) {
   const img = e.target as HTMLImageElement;
@@ -208,6 +240,15 @@ function relativeTime(ts: number): string {
         </span>
         在线设备
         <span class="text-faint font-normal">({{ onlineCount }}/{{ devices.length }})</span>
+        <button
+          v-if="!isAdmin && onlineCount < devices.length"
+          @click="clearOfflineDevices()"
+          :disabled="clearingGroupKey === '__all__'"
+          class="ml-auto text-[10px] text-faint hover:text-red-500 disabled:opacity-40"
+          title="删除全部离线设备及其历史数据"
+        >
+          清理离线
+        </button>
       </h2>
       <input
         v-model="deviceSearch"
@@ -219,9 +260,20 @@ function relativeTime(ts: number): string {
       <!-- 超管模式：按项目分组 -->
       <template v-if="isAdmin">
         <template v-for="group in groupedDevices" :key="group.key">
-          <div class="px-4 py-1.5 bg-base/50 border-b border-light sticky top-0 z-10">
+          <div
+            class="px-4 py-1.5 bg-base/50 border-b border-light sticky top-0 z-10 flex items-center gap-1"
+          >
             <span class="text-xs font-semibold text-secondary">{{ group.label }}</span>
             <span class="text-faint font-normal ml-1">({{ group.devices.length }})</span>
+            <button
+              v-if="group.devices.some((d) => !isOnline(d))"
+              @click="clearOfflineDevices(group.key)"
+              :disabled="clearingGroupKey === group.key"
+              class="ml-auto text-[10px] text-faint hover:text-red-500 disabled:opacity-40"
+              title="删除该分组全部离线设备及其历史数据"
+            >
+              清理离线
+            </button>
           </div>
           <li
             v-for="d in group.devices"

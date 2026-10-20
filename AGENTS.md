@@ -12,3 +12,11 @@
 4. **遇到空块**：只有标题没有正文的块是占位标题。如果它下面的微观需求都已完成，直接对它 `--done` 即可；如果下面还没有完成的子需求，留着等用户补正文。
 5. **注意区分**：你自己回填实现链接也会改变块内容，下轮检测时这类「非需求变更」直接 `--done` 标掉即可；但用户改的正文是真需求变更，需要按新内容重新实现。
 <!-- pact:end -->
+
+## Docker 镜像发布流程
+
+镜像发布在本地做，不走 CI：`bash scripts/docker-build.sh [版本号]`（会先 pnpm build → docker build → push llej0/silkpulse 的 latest + 版本 tag）。
+
+- 镜像基底 node:24-slim：uws native 按构建机 Node ABI 编译，宿主升级 Node 大版本后要同步改 Dockerfile 基底
+- 发版顺序：改代码 → 本地验证（pnpm build + pnpm test）→ `docker-build.sh <版本>` → git tag vX.Y.Z 提交推送
+- 首次使用需 docker login（账号 llej0）
