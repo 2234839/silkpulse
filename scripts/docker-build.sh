@@ -12,16 +12,20 @@ pnpm build > /dev/null
 echo "  构建完成"
 
 echo "▶ [2/3] docker build"
-TAGS=(-t "$IMAGE:latest")
+TAGS=("$IMAGE:latest")
 if [[ $# -ge 1 ]]; then
-  TAGS+=(-t "$IMAGE:$1")
+  TAGS+=("$IMAGE:$1")
 fi
-docker build "${TAGS[@]}" .
+BUILD_ARGS=()
+for tag in "${TAGS[@]}"; do
+  BUILD_ARGS+=(-t "$tag")
+done
+docker build "${BUILD_ARGS[@]}" .
 echo "  镜像构建完成: ${TAGS[*]}"
 
 echo "▶ [3/3] docker push"
 for tag in "${TAGS[@]}"; do
-  docker push "${tag#-t }"
+  docker push "$tag"
 done
 
 echo "✓ 完成: ${TAGS[*]}"
