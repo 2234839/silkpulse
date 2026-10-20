@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/** dark: 变体改为认 <html>.dark class（与 useTheme 的手动切换联动），
+ * Tailwind v4 默认走 prefers-color-scheme 媒体查询，会导致手动切暗色时 dark: 类全部失效 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /**
  * clarosight 控制台主题 —— 语义化 CSS 变量驱动的双主题（亮/暗）
  *

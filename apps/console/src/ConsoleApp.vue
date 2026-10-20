@@ -219,6 +219,12 @@ async function handleGuestCreateProject(name?: string) {
   return guestCreateProject(name);
 }
 
+/** 游客在接入面板点「创建我的项目 Key」：清登录态回登录页（AuthPage 有创建入口） */
+function handleGoCreateProject() {
+  showInjectModal.value = false;
+  logout();
+}
+
 /** GitHub 开源地址（求 star） */
 const GITHUB_URL = "https://github.com/2234839/silkpulse";
 
@@ -500,7 +506,7 @@ onMounted(async () => {
               class="px-4 py-2 text-sm font-medium border-b-2 flex items-center gap-1.5"
               :class="
                 activeTab === tab
-                  ? 'border-blue-500 text-blue-600'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                   : 'border-transparent text-muted hover:text-primary'
               "
             >
@@ -535,7 +541,9 @@ onMounted(async () => {
                 v-else-if="tab === 'errors' && errors.length > 0"
                 class="text-xs px-1.5 py-0.5 rounded font-medium"
                 :class="
-                  activeTab === 'errors' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-600'
+                  activeTab === 'errors'
+                    ? 'bg-red-600 text-white'
+                    : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
                 "
                 >{{ errors.length }}</span
               >
@@ -594,7 +602,7 @@ onMounted(async () => {
             <p class="text-sm mb-6">从左侧选择一个设备查看详情</p>
             <div class="bg-surface border border-base rounded-lg p-4 text-left">
               <h3 class="text-sm font-semibold text-primary mb-3">接入新设备</h3>
-              <InjectPanel />
+              <InjectPanel @go-create-project="handleGoCreateProject" />
             </div>
           </div>
         </div>
@@ -609,7 +617,11 @@ onMounted(async () => {
       <div
         class="bg-surface rounded-lg shadow-xl w-full max-w-[560px] mx-4 max-h-[80vh] flex flex-col"
       >
-        <InjectPanel closable @close="showInjectModal = false" />
+        <InjectPanel
+          closable
+          @close="showInjectModal = false"
+          @go-create-project="handleGoCreateProject"
+        />
       </div>
     </div>
 

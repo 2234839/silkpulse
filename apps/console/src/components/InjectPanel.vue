@@ -18,9 +18,9 @@ const props = defineProps<{
   closable?: boolean;
 }>();
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; goCreateProject: [] }>();
 
-const { authStatus, userRole, projectId } = useAuth();
+const { authStatus, userRole, projectId, isPlayground } = useAuth();
 
 const serverOrigin = location.origin;
 
@@ -391,6 +391,23 @@ async function copyInject() {
     </div>
 
     <div :class="closable ? 'flex-1 overflow-y-auto p-5' : ''">
+      <!-- 游客模式警示：Playground 数据全员可见，防信息泄露 -->
+      <div
+        v-if="isPlayground"
+        class="mb-3 px-3 py-2 rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950 text-xs text-amber-800 dark:text-amber-200"
+      >
+        <p class="font-semibold">⚠️ 游客模式：该设备对所有人可见</p>
+        <p class="mt-1">
+          Playground
+          是公共项目，你接入设备的页面快照、console、网络请求（含响应体）等数据<b>所有访客都能看到</b>。
+          <b>切勿接入有登录态或敏感信息的页面</b>。长期使用请<a
+            href="#"
+            class="underline font-medium"
+            @click.prevent="emit('goCreateProject')"
+            >创建我的项目 Key</a
+          >，获得仅自己可见的私有项目（免费免注册，5 天有效）。
+        </p>
+      </div>
       <!-- Tab 切换 -->
       <div class="flex gap-1 mb-3 border-b border-light">
         <button
@@ -400,7 +417,7 @@ async function copyInject() {
           class="px-3 py-1.5 text-xs font-medium border-b-2 -mb-px"
           :class="
             injectTab === tab
-              ? 'border-blue-500 text-blue-600'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
               : 'border-transparent text-muted hover:text-primary'
           "
         >

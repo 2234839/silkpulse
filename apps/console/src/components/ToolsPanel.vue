@@ -10,6 +10,8 @@
  * 各工具的实现已拆分到 tools/ 目录下的独立子组件。
  */
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { useTheme } from "../composables/useTheme";
+const { theme, toggleTheme } = useTheme();
 import { useRoute, useRouter } from "vue-router";
 import { type JsonParseMode } from "../utils/json-tools";
 import JsonTool from "./tools/JsonTool.vue";
@@ -232,6 +234,13 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
       >
       <div class="ml-auto flex items-center gap-3">
         <button
+          @click="toggleTheme()"
+          class="text-xs text-gray-400 hover:text-white"
+          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+        >
+          {{ theme === "dark" ? "☀️" : "🌙" }}
+        </button>
+        <button
           @click="showToolsSettings = true"
           class="text-xs text-gray-400 hover:text-white"
           title="自定义工具页签：排序与显示/隐藏"
@@ -251,7 +260,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
         class="px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-1.5"
         :class="
           activeTool === t.id
-            ? 'border-blue-500 text-blue-600'
+            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
             : 'border-transparent text-muted hover:text-primary'
         "
       >

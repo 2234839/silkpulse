@@ -133,15 +133,15 @@ const processedEvents = computed(() => {
 
 /* ════════ ANSI 转义序列渲染 ════════ */
 
-/** ANSI SGR 颜色码 → CSS 类 */
+/** ANSI SGR 颜色码 → CSS 类（-600 系在暗底对比不足，dark: 下用 -400 提亮） */
 const ANSI_COLORS: Record<string, string> = {
-  "30": "text-gray-600",
-  "31": "text-red-500",
-  "32": "text-green-600",
-  "33": "text-yellow-600",
-  "34": "text-blue-500",
-  "35": "text-purple-500",
-  "36": "text-cyan-600",
+  "30": "text-gray-600 dark:text-gray-400",
+  "31": "text-red-500 dark:text-red-400",
+  "32": "text-green-600 dark:text-green-400",
+  "33": "text-yellow-600 dark:text-yellow-400",
+  "34": "text-blue-500 dark:text-blue-400",
+  "35": "text-purple-500 dark:text-purple-400",
+  "36": "text-cyan-600 dark:text-cyan-400",
   "37": "text-gray-300",
   "90": "text-gray-400",
   "91": "text-red-400",
