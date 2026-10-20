@@ -13,10 +13,12 @@
     "@silkpulse/renderer": "workspace:*",
     "@silkpulse/shared": "workspace:*",
     "@vueuse/core": "catalog:",
+    "qrcode": "catalog:",
     "vue-router": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
+    "@types/qrcode": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",

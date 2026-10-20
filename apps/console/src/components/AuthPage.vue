@@ -245,15 +245,6 @@ function fmtExpires(iso?: string): string {
             >📝 Blog</router-link
           >
           <span class="text-gray-700">·</span>
-          <a
-            href="https://mp.weixin.qq.com/s/ipLbaflx6i92cgUURgkkLQ"
-            target="_blank"
-            rel="noopener"
-            class="text-orange-400/80 hover:text-orange-400 transition-colors flex items-center gap-1"
-            title="公众号「崮生」的 silkpulse 介绍文章"
-            >📄 介绍文章</a
-          >
-          <span class="text-gray-700">·</span>
           <span>Script 标签</span>
           <span class="text-gray-700">·</span>
           <span>Bookmarklet</span>

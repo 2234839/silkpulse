@@ -16,6 +16,8 @@ import { defineAsyncComponent, type Component } from "vue";
 export interface BlogPostMeta {
   /** URL slug（/blog/:slug） */
   slug: string;
+  /** 外链文章地址（设置后卡片点击直接跳转外部，不走 /blog/:slug） */
+  externalUrl?: string;
   /** 标题 */
   title: string;
   /** 一句话摘要（列表页展示） */
@@ -34,12 +36,13 @@ export interface BlogPostMeta {
 export const POSTS: BlogPostMeta[] = [
   {
     slug: "hello-silkpulse",
-    title: "hello silkpulse —— 让 AI 直接调试你的远程页面",
+    title: "silkpulse：让 AI 接管前端线上排障",
     summary:
-      '测试同学说"测试机上白屏了"，而那台设备不在你手边——可能隔着城市，甚至时区。silkpulse 是一个 AI 原生的远程设备调试器：AI 看页面、读日志、执行诊断代码、点按钮、验证结果——一个 agent 完成远程诊断的完整闭环。',
-    date: "2026-08-15",
+      '测试同学报「测试机上白屏」「手机上打不开」时，开发者无法用本地 DevTools 调试远在别处的设备。silkpulse 在页面里插一个 script 标签，console、网络请求、报错实时上报到网页控制台——你人工看，或直接让 AI 排查。本文同步发在公众号「崮生」，欢迎阅读关注。',
+    date: "2026-10-15",
     tags: ["silkpulse", "ai-native", "remote-debugging"],
-    readingMinutes: 8,
+    readingMinutes: 5,
+    externalUrl: "https://mp.weixin.qq.com/s/ipLbaflx6i92cgUURgkkLQ",
     component: defineAsyncComponent(() => import("./posts/hello-silkpulse.vue")),
   },
 ];

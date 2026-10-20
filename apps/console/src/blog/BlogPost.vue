@@ -15,6 +15,11 @@ const route = useRoute();
 /** 当前 slug 对应的帖子 meta（不存在为 null） */
 const post = computed(() => POSTS.find((p) => p.slug === route.params.slug) ?? null);
 
+/** 外链帖子：详情路由不留站内正文，直接跳外部原文 */
+if (post.value?.externalUrl) {
+  window.location.replace(post.value.externalUrl);
+}
+
 /** 路由切换时滚动回顶部（同组件复用时 watch 生效） */
 watch(
   () => route.fullPath,
