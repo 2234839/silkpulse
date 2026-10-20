@@ -65,6 +65,9 @@ const groupedResults = computed(() => {
 /** 是否只显示不支持的特性（value === false） */
 const onlyUnsupported = ref(false);
 
+/** 搜索关键字（名称 / true / false） */
+const searchQuery = ref("");
+
 /** 搜索 + 只看不支持 叠加筛选 */
 const filteredGroups = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
