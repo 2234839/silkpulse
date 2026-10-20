@@ -106,9 +106,9 @@ node tools/skill/scripts/silkpulse.mjs exec <id> "return location.href"  # 在�
 
 ## 社区
 
-感谢 [LINUX DO](https://linux.do) 社区佬友们的支持与反馈 🙏
+感谢 [LINUX DO](https://linux.do/t/topic/2765326) 社区佬友们的支持与反馈 🙏
 
-[![LINUX DO](https://img.shields.io/badge/LINUX%20DO-%E4%BD%AC%E5%8F%8B%E4%BB%AC%E7%9A%84%E6%94%AF%E6%8C%81-009df5?logo=linuxdo&logoColor=white)](https://linux.do)
+[![LINUX DO](https://img.shields.io/badge/LINUX%20DO-%E4%BD%AC%E5%8F%8B%E4%BB%AC%E7%9A%84%E6%94%AF%E6%8C%81-009df5?logo=linuxdo&logoColor=white)](https://linux.do/t/topic/2765326)
 
 ## License
 
