@@ -50,20 +50,33 @@ async function postJson(path, body) {
   return res.json();
 }
 
-/** 设备 id 支持前缀模糊匹配（取第一个匹配的设备） */
+/** 设备是否在线（下线后设备会带 offlineAt 标记继续留在列表里，缓存数据仍可查看） */
+function isOnline(d) {
+  return d.offlineAt === undefined;
+}
+
+/** 设备 id 支持前缀模糊匹配（取第一个匹配的设备，只匹配在线设备） */
 async function resolveDeviceId(idOrPrefix) {
   if (!idOrPrefix) {
     console.error("缺少设备 id 参数");
     process.exit(1);
   }
-  /** 完整 id 直接返回 */
   const { devices } = await getJson("/api/devices");
-  if (devices.some((d) => d.id === idOrPrefix)) return idOrPrefix;
-  /** 前缀匹配 */
-  const matched = devices.filter((d) => d.id.startsWith(idOrPrefix));
+  /** 完整 id 直接返回 */
+  if (devices.some((d) => d.id === idOrPrefix && isOnline(d))) return idOrPrefix;
+  /** 前缀匹配（仅在线设备可操作） */
+  const matched = devices.filter((d) => isOnline(d) && d.id.startsWith(idOrPrefix));
   if (matched.length === 0) {
+    /** 前缀只匹配到离线设备时，明确告知已离线，避免 AI 误以为 id 写错 */
+    const offlineMatched = devices.filter((d) => !isOnline(d) && d.id.startsWith(idOrPrefix));
+    if (offlineMatched.length > 0) {
+      console.error(
+        `设备 ${offlineMatched.map((d) => d.id).join(", ")} 已离线，无法操作。可用 silkpulse devices 查看在线设备`,
+      );
+      process.exit(1);
+    }
     console.error(
-      `未找到设备: ${idOrPrefix}（在线设备: ${devices.map((d) => d.id).join(", ") || "无"}）`,
+      `未找到设备: ${idOrPrefix}（在线设备: ${devices.filter(isOnline).map((d) => d.id).join(", ") || "无"}）`,
     );
     process.exit(1);
   }
@@ -131,7 +144,10 @@ async function main() {
   switch (cmd) {
     case "devices": {
       const { devices, recentlyOffline } = await getJson("/api/devices");
-      if (devices.length === 0) {
+      /** 注册表里离线设备也保留（缓存数据可查），先按在线/离线分组 */
+      const onlineDevices = devices.filter(isOnline);
+      const offlineDevices = devices.filter((d) => !isOnline(d));
+      if (onlineDevices.length === 0) {
         console.log(
           '（暂无在线设备。接入方式：在目标页面注入 <script src="' +
             SERVER +
@@ -148,13 +164,13 @@ async function main() {
         }
         return;
       }
-      /** 按错误数降序排序：有错误的设备优先展示，AI 能快速定位问题设备 */
-      const sorted = [...devices].sort((a, b) => (b.errorCount ?? 0) - (a.errorCount ?? 0));
+      /** 在线设备置顶，组内按错误数降序：有错误的优先展示，AI 能快速定位问题设备 */
+      const sorted = [...onlineDevices].sort((a, b) => (b.errorCount ?? 0) - (a.errorCount ?? 0));
       const errorDevices = sorted.filter((d) => d.errorCount > 0);
       if (errorDevices.length > 0) {
-        console.log(`⚠ ${errorDevices.length} 个设备有错误（已置顶）：\n`);
+        console.log(`在线设备 ${onlineDevices.length} 个，其中 ${errorDevices.length} 个有错误（已置顶）：\n`);
       } else {
-        console.log(`在线设备 ${devices.length} 个：\n`);
+        console.log(`在线设备 ${onlineDevices.length} 个：\n`);
       }
       for (const d of sorted) {
         const mark = d.errorCount > 0 ? "⚠" : " ";
@@ -171,6 +187,17 @@ async function main() {
         if (d.note) console.log(`       备注: ${d.note}`);
         if (d.errorCount > 0) console.log(`       错误数: ${d.errorCount}`);
         console.log("");
+      }
+      /** 离线设备排在最后，明确标注状态与下线时间，避免误当成在线设备操作 */
+      if (offlineDevices.length > 0) {
+        console.log(`离线设备 ${offlineDevices.length} 个（缓存数据可查，不可远程操作）：\n`);
+        for (const d of offlineDevices) {
+          const offlineDur = d.offlineAt ? fmtDuration(Date.now() - d.offlineAt) : "未知时间";
+          const offlineText =
+            offlineDur === "刚刚" ? "刚刚下线" : `${offlineDur}前下线`;
+          console.log(`  · [${d.id}] ${d.title}（${offlineText}）`);
+          console.log(`        URL: ${d.url}`);
+        }
       }
       break;
     }
