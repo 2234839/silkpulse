@@ -52,5 +52,4 @@ packages/server/public/plugins/
 
 # dev 编排器的本地构建产物（dev-watch 自动生成）
 packages/server/dist-bin/
-AGENTS.md
 .tmp-shots/

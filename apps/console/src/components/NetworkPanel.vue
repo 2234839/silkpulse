@@ -1151,7 +1151,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   n.status >= 400
                     ? 'text-red-500'
                     : n.status >= 200
-                      ? 'text-green-600'
+                      ? 'text-green-600 dark:text-green-400'
                       : 'text-faint'
                 "
               >
@@ -1270,7 +1270,11 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               <span
                 v-else
                 class="font-mono"
-                :class="selectedNetwork.status >= 400 ? 'text-red-500' : 'text-green-600'"
+                :class="
+                  selectedNetwork.status >= 400
+                    ? 'text-red-500 dark:text-red-400'
+                    : 'text-green-600 dark:text-green-400'
+                "
                 >{{ selectedNetwork.status || "—" }}</span
               >
             </div>
@@ -1468,7 +1472,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                     f.dir === 'send'
                       ? 'text-blue-key'
                       : f.dir === 'recv'
-                        ? 'text-green-600'
+                        ? 'text-green-600 dark:text-green-400'
                         : 'text-red-500'
                   "
                   >{{
@@ -1503,7 +1507,11 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               <span class="text-xs text-faint">SSE 事件流</span>
               <span
                 class="text-xs"
-                :class="selectedNetwork.sseState === 'open' ? 'text-green-600' : 'text-faint'"
+                :class="
+                  selectedNetwork.sseState === 'open'
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-faint'
+                "
               >
                 {{ selectedNetwork.sseState === "open" ? "● 连接中" : "○ 已关闭" }}
               </span>

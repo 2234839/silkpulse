@@ -168,7 +168,23 @@ async function guestCreateProject(
       body: JSON.stringify(name?.trim() ? { name: name.trim() } : {}),
     });
     if (!res.ok) return null;
-    return await res.json();
+    const data = (await res.json()) as {
+      project?: { id: string; name: string; expiresAt?: string };
+      apiKey: string;
+      projectId?: string;
+      projectName?: string;
+      expiresAt?: string;
+    };
+    /** 服务端返回 { project: {...}, apiKey }，映射成前端使用的平铺结构 */
+    if (data.project) {
+      return {
+        apiKey: data.apiKey,
+        projectId: data.project.id,
+        projectName: data.project.name,
+        expiresAt: data.project.expiresAt,
+      };
+    }
+    return data as { apiKey: string; projectId: string; projectName: string; expiresAt?: string };
   } catch {
     return null;
   }

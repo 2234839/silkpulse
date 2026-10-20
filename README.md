@@ -9,6 +9,7 @@ console · 网络 · 报错实时上报，把千里之外的 debug 现场搬进�
 [![CI](https://github.com/2234839/silkpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/2234839/silkpulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![在线体验](https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-silkpulse-6366f1.svg)](https://silkpulse.heartstack.space)
+[![介绍文章](https://img.shields.io/badge/%F0%9F%93%84-%E4%BB%8B%E7%BB%8D%E6%96%87%E7%AB%A0-09b83e.svg)](https://mp.weixin.qq.com/s/ipLbaflx6i92cgUURgkkLQ)
 
 </div>
 

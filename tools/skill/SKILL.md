@@ -41,7 +41,7 @@ echo 'return { url: location.href, btn: document.querySelector("#btn")?.textCont
 
 # 5. 生成接入片段（给新设备装 SDK）
 node tools/skill/scripts/silkpulse.mjs inject bookmarklet   # 书签
-node tools/skill/scripts/silkpulse.mjs inject userscript    # Tampermonkey
+node tools/skill/scripts/silkpulse.mjs inject userscript    # Tampermonkey / 脚本猫（ScriptCat）
 ```
 
 设备 id 支持前缀模糊匹配，输入前几个字符即可。exec 的 code 也支持通过 stdin 传入（适合复杂多行代码）。

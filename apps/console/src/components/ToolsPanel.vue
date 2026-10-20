@@ -11,9 +11,9 @@
  */
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useTheme } from "../composables/useTheme";
-const { theme, toggleTheme } = useTheme();
 import { useRoute, useRouter } from "vue-router";
 import { type JsonParseMode } from "../utils/json-tools";
+const { theme, toggleTheme } = useTheme();
 import JsonTool from "./tools/JsonTool.vue";
 import LogTool from "./tools/LogTool.vue";
 import CodecTool from "./tools/CodecTool.vue";

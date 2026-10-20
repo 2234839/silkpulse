@@ -30,11 +30,11 @@ SDK (页面 realm)  ──window.postMessage──  userscript 宿主 (TM 沙箱
 - **register 必须是桥接会话首条上行**（server 端 channel 依赖 register 建设备上下文）：宿主先 POST register（空 messages）建会话 → 通知页面 open → SDK 才发 register 走 uplink。页面 send 先于会话就绪的消息由 ws-client 既有 sendQueue 缓冲，天然有序。
 - **会话重建不能向新 BridgeSocket 发 close**：SDK 重连 → 新 init → 宿主 `createSession()` 若静默销毁旧会话时误发 close，新连接立刻自杀形成死循环 → `dropSession(notify)` 参数区分。
 - **SSE 中断探测不能只靠 onAborted**（http-helpers 的 onAborted 首个注册生效）：心跳写 `res.write` 抛错时兜底摘除 SSE，会话靠 30s 空闲超时销毁；销毁走 registry 既有 5s 宽限期，重连无缝续接。
-- **SSE 流式下行依赖 TM ≥ 4.10**（onprogress 增量 responseText）；`GM_addElement`/`GM_xmlhttpRequest` 均仅 Tampermonkey 支持。
+- **SSE 流式下行依赖 TM ≥ 4.10**（onprogress 增量 responseText）；`GM_addElement`/`GM_xmlhttpRequest` 由 Tampermonkey 与脚本猫（ScriptCat）支持。
 - 根 `copy:assets` 脚本还在拷已不存在的 `apps/console/dist/*`（console outDir 已直写 server/public）→ 已修正脚本对齐现状。
 
 ## 验证方法
 
 1. `pnpm tsc --noEmit`（server/sdk/console 三包）+ `vp check` 全绿。
 2. `vp run -r build` 成功，`packages/server/public/sdk.js` 含 `data-silkpulse-bridge` 标记检测代码。
-3. 功能验证：访问 `http://localhost:8080/inject/userscript` 安装到 Tampermonkey（≥4.10）→ 打开任意强 CSP 页面（如 docs.qq.com）→ 控制台应看到设备上线、console/network/exec 全功能可用。
+3. 功能验证：访问 `http://localhost:8080/inject/userscript` 安装到 Tampermonkey（≥4.10）或脚本猫（ScriptCat）→ 打开任意强 CSP 页面（如 docs.qq.com）→ 控制台应看到设备上线、console/network/exec 全功能可用。

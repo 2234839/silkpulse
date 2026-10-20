@@ -118,6 +118,23 @@ const showProjectModal = ref(false);
 const showAiModal = ref(false);
 const showAgentModal = ref(false);
 
+/** ─── 首进控制台一次性密钥弹窗 ─── */
+/** 游客创建 Key 后自动进入控制台，密钥只展示一次，这里再弹一次防漏存 */
+const firstEntryKey = ref<string | null>(null);
+const firstKeyCopied = ref(false);
+
+/** 首进弹窗：复制密钥 */
+async function copyFirstKey() {
+  if (!firstEntryKey.value) return;
+  const { copyText } = await import("./utils/clipboard");
+  if (await copyText(firstEntryKey.value)) firstKeyCopied.value = true;
+}
+
+/** 首进弹窗：关闭（本会话不再弹） */
+function dismissFirstKey() {
+  firstEntryKey.value = null;
+}
+
 /** 移动端 sidebar drawer 开关（窄屏下设备列表以抽屉式展开） */
 const sidebarOpen = ref(false);
 
@@ -202,6 +219,16 @@ async function verifyAuthKey(key: string): Promise<boolean> {
   if (userRole.value === "admin" && projectModalRef.value) {
     await projectModalRef.value.loadProjects();
   }
+  /** 游客创建后首次进入：读取一次性密钥标记，弹窗重展（读后即焚） */
+  try {
+    const k = sessionStorage.getItem("silkpulse-new-key");
+    if (k) {
+      firstEntryKey.value = k;
+      sessionStorage.removeItem("silkpulse-new-key");
+    }
+  } catch {
+    /* 无 sessionStorage 时跳过 */
+  }
   connect();
   return true;
 }
@@ -254,6 +281,7 @@ onMounted(async () => {
   }
   if (!needAuth.value) connect();
 });
+
 </script>
 
 <template>
@@ -554,11 +582,7 @@ onMounted(async () => {
                需要完整 Console 能力（对象展开/堆栈/交互执行）去 Chrome DevTools
                页签，其本身含 Console 面板 -->
           <template v-if="activeTab === 'console'">
-            <ConsolePanel
-              :logs="logs"
-              :device-id="selectedDeviceId"
-              :dropped-count="droppedCount"
-            />
+            <ConsolePanel :logs="logs" :device-id="selectedDeviceId" />
           </template>
           <!-- Chrome DevTools 页签 = 官方 Elements 面板（chobitsu 桥接，锁定 elements dock）。
                常驻挂载 + v-show 保活：iframe/连接/展开状态在切 tab 时不销毁不重载 -->
@@ -626,6 +650,46 @@ onMounted(async () => {
     </div>
 
     <ProjectModal ref="projectModalRef" v-model="showProjectModal" />
+
+    <!-- 首进控制台：一次性密钥提醒弹窗（游客创建 Key 后自动进入时展示） -->
+    <div
+      v-if="firstEntryKey"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
+      @click.self="dismissFirstKey"
+    >
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-[480px] mx-4 p-5">
+        <h3 class="text-sm font-semibold text-primary mb-2">🔑 你的项目密钥</h3>
+        <p class="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">
+          仅展示这一次，请立即复制保存！
+        </p>
+        <p class="text-[11px] text-faint mb-3">
+          关闭后无法再查看（服务器只存哈希），丢了只能重新创建项目。
+        </p>
+        <code
+          class="block px-3 py-2 text-xs bg-base border border-base rounded font-mono break-all text-primary select-all mb-3"
+          >{{ firstEntryKey }}</code
+        >
+        <div class="flex gap-2 justify-end">
+          <button
+            @click="copyFirstKey"
+            :class="
+              firstKeyCopied
+                ? 'bg-green-600 text-white'
+                : 'bg-elevated text-secondary bg-elevated-hover'
+            "
+            class="px-3 py-1.5 rounded text-xs font-medium transition"
+          >
+            {{ firstKeyCopied ? "✓ 已复制" : "📋 复制密钥" }}
+          </button>
+          <button
+            @click="dismissFirstKey"
+            class="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition"
+          >
+            我已保存，进入控制台
+          </button>
+        </div>
+      </div>
+    </div>
 
     <AiContextModal
       v-if="selectedDevice"

@@ -37,14 +37,14 @@ const props = defineProps<{
 
 /** 日志级别 → tailwind 颜色 */
 const logColor = (type: string): string => {
-  if (type === "error" || type === "assert") return "text-red-600";
-  if (type === "warn") return "text-amber-600";
+  if (type === "error" || type === "assert") return "text-red-600 dark:text-red-400";
+  if (type === "warn") return "text-amber-600 dark:text-amber-400";
   if (type === "debug") return "text-faint";
-  if (type === "table") return "text-purple-600";
-  if (type === "trace") return "text-gray-500";
-  if (type === "group" || type === "groupEnd") return "text-blue-500 font-semibold";
-  if (type === "count") return "text-cyan-600";
-  if (type === "time") return "text-green-600";
+  if (type === "table") return "text-purple-600 dark:text-purple-400";
+  if (type === "trace") return "text-gray-500 dark:text-gray-400";
+  if (type === "group" || type === "groupEnd") return "text-blue-500 dark:text-blue-400 font-semibold";
+  if (type === "count") return "text-cyan-600 dark:text-cyan-400";
+  if (type === "time") return "text-green-600 dark:text-green-400";
   if (type === "dir") return "text-indigo-600";
   if (type === "clear") return "text-faint italic";
   return "text-primary";
@@ -654,16 +654,22 @@ function clearExecResults() {
             <span class="text-faint text-xs shrink-0 opacity-0">{{
               new Date(r.time).toLocaleTimeString()
             }}</span>
-            <span :class="r.ok ? 'text-green-600' : 'text-red-500'" class="shrink-0">{{
-              r.ok ? "←" : "✗"
-            }}</span>
+            <span
+              :class="
+                r.ok ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
+              "
+              class="shrink-0"
+              >{{ r.ok ? "←" : "✗" }}</span
+            >
             <!-- 有结构化值时用对象树，否则降级纯文本 -->
             <div v-if="r.ok && r.resultValue" class="flex-1 min-w-0">
               <ObjectInspector :value="r.resultValue" />
             </div>
             <span
               v-else
-              :class="r.ok ? 'text-green-600' : 'text-red-500'"
+              :class="
+                r.ok ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
+              "
               class="break-all whitespace-pre-wrap"
               >{{ r.output }}</span
             >

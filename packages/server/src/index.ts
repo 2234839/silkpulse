@@ -622,8 +622,8 @@ function buildBookmarklet(origin: string, projectId?: string): string {
  * 宿主标记写在 <html> 的 data 属性上 —— DOM 在油猴沙箱与页面间共享
  * （window 属性在隔离世界不互通，DOM 是唯一可靠的共享通道）。
  *
- * 取舍：@grant GM_addElement / GM_xmlhttpRequest 仅 Tampermonkey 支持
- * （Violentmonkey 缺这两个 API），match 规则对所有 http/https 页面生效；
+ * 取舍：@grant GM_addElement / GM_xmlhttpRequest 由 Tampermonkey 与脚本猫（ScriptCat）
+ * 支持（Violentmonkey 缺这两个 API），match 规则对所有 http/https 页面生效；
  * document-idle 等价于 DOM 加载完成后注入，时机足够早，SDK 自身等 DOMContentLoaded。
  * SSE 流式下行依赖 GM_xmlhttpRequest 的 onprogress 增量 responseText（TM ≥ 4.10）。
  */

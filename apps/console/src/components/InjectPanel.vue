@@ -156,7 +156,8 @@ const bookmarkletSnippet = computed(
  * GM_xmlhttpRequest（register/uplink POST + stream SSE）承载，
  * connect-src 限制的强 CSP 站也能全功能接入。
  * 宿主标记写在 <html data-silkpulse-bridge>（DOM 跨沙箱与页面共享，
- * window 属性在隔离世界不互通）。需 Tampermonkey（Violentmonkey 缺这两个 GM API）。
+ * window 属性在隔离世界不互通）。需 Tampermonkey 或 ScriptCat（脚本猫），
+ * Violentmonkey 缺这两个 GM API。
  */
 const userscriptSnippet = computed(() => {
   const dataAttrs = [
@@ -346,7 +347,7 @@ const scenarioText = computed(() => {
     script: "适合：能改源码的项目（自己的网站 / App）",
     iife: "适合：临时调试某个页面，F12 打开 console 粘贴即注入",
     bookmarklet: "适合：改不了源码的线上站，临时接入一次",
-    userscript: "适合：长期调试某个站 / 强 CSP 站（含 connect-src 限制），需 Tampermonkey",
+    userscript: "适合：长期调试某个站 / 强 CSP 站（含 connect-src 限制），需 Tampermonkey 或脚本猫（ScriptCat）",
   };
   return map[injectTab.value];
 });
@@ -359,7 +360,7 @@ const locationText = computed(() => {
     iife: "→ F12 打开目标页面的 DevTools console，粘贴上面代码回车即注入（页面刷新后失效）",
     bookmarklet: "→ 复制后新建书签，URL 粘贴为上面的代码；在目标页面点这个书签即注入",
     userscript:
-      "→ 粘贴到 Tampermonkey 新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入穿过 CSP script-src，内置 GM 桥接宿主用 GM_xmlhttpRequest 承载全部通信，connect-src 限制也不影响（需 Tampermonkey ≥ 4.10）",
+      "→ 粘贴到 Tampermonkey / 脚本猫（ScriptCat）新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入穿过 CSP script-src，内置 GM 桥接宿主用 GM_xmlhttpRequest 承载全部通信，connect-src 限制也不影响（需 Tampermonkey ≥ 4.10 或 ScriptCat）",
   };
   return map[injectTab.value];
 });

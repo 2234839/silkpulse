@@ -80,8 +80,27 @@ async function handleGuestLogin() {
 }
 
 /** ── 游客自建项目 Key ── */
-/** 自定义项目名（可选） */
-const guestNameInput = ref("");
+/** 随机项目名：形容词 + 名词 + 4 位尾缀，好记不撞车 */
+function randomProjectName(): string {
+  const adjectives = [
+    "快乐",
+    "安静",
+    "闪也",
+    "波涛",
+    "云朵",
+    "流星",
+    "柠檬",
+    "松果",
+    "海豚",
+    "晚霞",
+  ];
+  const nouns = ["小狗", "灯塔", "橘子", "冰川", "萤火", "信笺", "风铃", "拾贝", "晨雾", "远山"];
+  const tail = Math.random().toString(36).slice(2, 6);
+  const pick = <T>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+  return `${pick(adjectives)}${pick(nouns)}-${tail}`;
+}
+/** 自定义项目名（可选，默认预填随机名，可一键换） */
+const guestNameInput = ref(randomProjectName());
 /** 创建结果（一次性展示） */
 const guestResult = ref<{
   apiKey: string;
@@ -94,7 +113,13 @@ const guestCopied = ref(false);
 
 /** 已复制并进入控制台：把 Key 存起来登录（复用 onVerify） */
 async function guestEnterConsole() {
-  if (!guestResult.value || !guestCopied.value) return;
+  if (!guestResult.value) return;
+  /** 先写一次性标记再触发登录：登录内部会翻转鉴权状态，控制台在 onVerify 成功后读取该标记弹窗重展密钥 */
+  try {
+    sessionStorage.setItem("silkpulse-new-key", guestResult.value.apiKey);
+  } catch {
+    /* 无 sessionStorage 时跳过弹窗重展 */
+  }
   const ok = await props.onVerify(guestResult.value.apiKey);
   if (ok) {
     guestResult.value = null;
@@ -115,7 +140,11 @@ async function handleGuestCreate() {
       return;
     }
     guestResult.value = result;
-    guestCopied.value = false;
+    /** 自动把密钥复制到剪贴板，避免用户漏存；失败才需要手动点复制 */
+    const autoCopied = await copyText(result.apiKey);
+    guestCopied.value = autoCopied;
+    /** 创建即进控制台：密钥已在剪贴板，控制台内还会弹窗再展一次 */
+    await guestEnterConsole();
   } catch {
     authError.value = "网络错误，请检查服务器连接";
   } finally {
@@ -216,6 +245,15 @@ function fmtExpires(iso?: string): string {
             >📝 Blog</router-link
           >
           <span class="text-gray-700">·</span>
+          <a
+            href="https://mp.weixin.qq.com/s/ipLbaflx6i92cgUURgkkLQ"
+            target="_blank"
+            rel="noopener"
+            class="text-orange-400/80 hover:text-orange-400 transition-colors flex items-center gap-1"
+            title="公众号「崮生」的 silkpulse 介绍文章"
+            >📄 介绍文章</a
+          >
+          <span class="text-gray-700">·</span>
           <span>Script 标签</span>
           <span class="text-gray-700">·</span>
           <span>Bookmarklet</span>
@@ -296,6 +334,13 @@ function fmtExpires(iso?: string): string {
                   :disabled="authLoading"
                 />
                 <button
+                  @click="guestNameInput = randomProjectName()"
+                  title="换一个随机项目名"
+                  class="px-2.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-lg border border-gray-700 text-sm transition"
+                >
+                  🎲
+                </button>
+                <button
                   @click="handleGuestCreate"
                   :disabled="authLoading"
                   class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition whitespace-nowrap"
@@ -320,23 +365,26 @@ function fmtExpires(iso?: string): string {
                 >
                 <div class="flex gap-2">
                   <button
+                    @click="guestEnterConsole"
+                    :title="
+                      guestCopied
+                        ? '密钥已复制，直接进入控制台'
+                        : '尚未复制成功，进入后请自行保存密钥'
+                    "
+                    class="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-medium text-xs transition"
+                  >
+                    🚀 直接进控制台
+                  </button>
+                  <button
                     @click="handleGuestCopy"
                     :class="
                       guestCopied
                         ? 'bg-green-700 hover:bg-green-700 text-white'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-gray-700 hover:bg-gray-600 text-white'
                     "
-                    class="flex-1 px-3 py-1.5 rounded font-medium text-xs transition"
+                    class="px-3 py-2 rounded font-medium text-xs transition"
                   >
-                    {{ guestCopied ? "✓ 已复制" : "📋 复制密钥" }}
-                  </button>
-                  <button
-                    @click="guestEnterConsole"
-                    :disabled="!guestCopied"
-                    :title="guestCopied ? '用这个 Key 进入控制台' : '请先复制密钥'"
-                    class="flex-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded font-medium text-xs transition"
-                  >
-                    🚀 进入控制台
+                    {{ guestCopied ? "✓ 已复制" : "📋 复制" }}
                   </button>
                 </div>
               </div>

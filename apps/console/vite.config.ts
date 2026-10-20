@@ -13,14 +13,14 @@ export default defineConfig({
   server: {
     /** dev 模式代理 API 和 WS 到 server */
     proxy: {
-      "/api": "http://localhost:8080",
+      "/api": "http://localhost:8090",
       "/ws": {
-        target: "ws://localhost:8080",
+        target: "ws://localhost:8090",
         ws: true,
       },
-      "/sdk.js": "http://localhost:8080",
+      "/sdk.js": "http://localhost:8090",
       /** devtools client 静态资源（vue/react devtools iframe）也在 server 的 public 下，dev 模式必须代理，否则 SPA fallback 会返回 console 首页导致面板握手永远卡在「连接中」 */
-      "/plugins": "http://localhost:8080",
+      "/plugins": "http://localhost:8090",
     },
   },
   fmt: {},

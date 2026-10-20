@@ -258,8 +258,8 @@ async function copyResults() {
                 item.value === false
                   ? 'text-red-400'
                   : typeof item.value === 'string' && item.value !== 'true'
-                    ? 'text-amber-500'
-                    : 'text-green-600'
+                    ? 'text-amber-500 dark:text-amber-400'
+                    : 'text-green-600 dark:text-green-400'
               "
               >{{ item.value === true ? "✓" : item.value === false ? "✗" : item.value }}</span
             >

@@ -1012,7 +1012,7 @@ onMounted(() => {
             <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold text-primary font-mono">
                 {{ elementInspect.tag
-                }}<span v-if="elementInspect.id" class="text-blue-600"
+                }}<span v-if="elementInspect.id" class="text-blue-600 dark:text-blue-400"
                   >#{{ elementInspect.id }}</span
                 >
               </div>
@@ -1070,7 +1070,9 @@ onMounted(() => {
                 <span class="text-faint">在视口内:</span
                 ><span
                   :class="
-                    elementInspect.visibility.inViewport ? 'text-green-600' : 'text-amber-600'
+                    elementInspect.visibility.inViewport
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-amber-600 dark:text-amber-400'
                   "
                   >{{ elementInspect.visibility.inViewport ? "✓ 是" : "✗ 否" }}</span
                 >
@@ -1159,7 +1161,9 @@ onMounted(() => {
             <template v-else-if="elementStyles && !elementStyles.error">
               <!-- 内联样式（优先级最高） -->
               <div v-if="Object.keys(elementStyles.inlineStyle).length > 0" class="mb-2">
-                <div class="text-[10px] text-amber-600 font-semibold mb-1 flex items-center gap-1">
+                <div
+                  class="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mb-1 flex items-center gap-1"
+                >
                   <span>Inline Style</span>
                   <span class="text-faint font-normal">(element.style)</span>
                 </div>
@@ -1169,7 +1173,7 @@ onMounted(() => {
                     :key="prop"
                     class="flex justify-between gap-2"
                   >
-                    <span class="text-blue-600 shrink-0">{{ prop }}:</span>
+                    <span class="text-blue-600 dark:text-blue-400 shrink-0">{{ prop }}:</span>
                     <span class="text-primary text-right break-all"
                       >{{ info.value
                       }}<span v-if="info.important" class="text-red-500"> !important</span></span
@@ -1186,10 +1190,14 @@ onMounted(() => {
                   class="w-full text-left flex items-center gap-1 text-[10px] mb-0.5 group"
                 >
                   <span class="text-faint w-3">{{ expandedRules.has(ri) ? "▾" : "▸" }}</span>
-                  <span class="text-purple-600 font-semibold">{{ rule.selector }}</span>
+                  <span class="text-purple-600 dark:text-purple-400 font-semibold">{{
+                    rule.selector
+                  }}</span>
                   <span class="text-faint">← {{ rule.source }}</span>
                   <span v-if="rule.media" class="text-blue-500">@media {{ rule.media }}</span>
-                  <span v-if="rule.crossOrigin" class="text-amber-600">⚠ 跨域不可读</span>
+                  <span v-if="rule.crossOrigin" class="text-amber-600 dark:text-amber-400"
+                    >⚠ 跨域不可读</span
+                  >
                 </button>
                 <!-- 规则属性（展开时显示） -->
                 <div
@@ -1201,7 +1209,7 @@ onMounted(() => {
                     :key="prop"
                     class="flex justify-between gap-2"
                   >
-                    <span class="text-blue-600 shrink-0">{{ prop }}:</span>
+                    <span class="text-blue-600 dark:text-blue-400 shrink-0">{{ prop }}:</span>
                     <span class="text-primary text-right break-all"
                       >{{ info.value
                       }}<span v-if="info.important" class="text-red-500"> !important</span></span
@@ -1223,7 +1231,7 @@ onMounted(() => {
               >
                 <div class="text-[10px] text-faint font-semibold mb-1">继承属性</div>
                 <div v-for="(inh, ii) in elementStyles.inherited" :key="ii" class="mb-1.5">
-                  <div class="text-[10px] text-green-600">← {{ inh.from }}</div>
+                  <div class="text-[10px] text-green-600 dark:text-green-400">← {{ inh.from }}</div>
                   <div class="bg-base rounded px-2 py-0.5 text-[11px] font-mono space-y-0.5 ml-2">
                     <div
                       v-for="(val, prop) in inh.props"
@@ -1319,7 +1327,8 @@ onMounted(() => {
                 @click="selectElement(a.idx)"
                 class="block w-full text-left px-2 py-1 text-xs font-mono rounded hover:bg-blue-soft text-primary"
               >
-                {{ a.tag }}<span v-if="a.id" class="text-blue-600">#{{ a.id }}</span
+                {{ a.tag
+                }}<span v-if="a.id" class="text-blue-600 dark:text-blue-400">#{{ a.id }}</span
                 ><span v-if="a.classes" class="text-faint"
                   >.{{ a.classes.split(" ").join(".") }}</span
                 >
