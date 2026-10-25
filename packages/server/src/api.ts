@@ -14,6 +14,7 @@ import { maybeGzipResponse } from "./gzip.js";
 import { renderSkillPrompt } from "@silkpulse/shared";
 import { performance } from "node:perf_hooks";
 import { fanoutStats } from "./ws-relay.js";
+import { trackExec } from "./stats-reporter.js";
 
 /**
  * 事件循环利用率采样器（增量式单例）
@@ -616,12 +617,15 @@ export async function execOnDevice(
   deviceId: string,
   code: string,
 ): Promise<import("@silkpulse/shared").ExecResult> {
+  const t0 = Date.now();
   const device = registry.get(deviceId);
   if (!device) {
+    trackExec(deviceId, code, false, t0);
     return { success: false, error: `设备 ${deviceId} 不在线` };
   }
   const sock = device.latestSocket;
   if (sock.readyState !== sock.OPEN) {
+    trackExec(deviceId, code, false, t0);
     return { success: false, error: `设备 ${deviceId} 连接已关闭` };
   }
 
@@ -632,17 +636,26 @@ export async function execOnDevice(
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       device.pendingExecs.delete(execId);
+      trackExec(deviceId, code, false, t0);
       resolve({ success: false, error: "执行超时（10s）" });
     }, EXEC_TIMEOUT);
 
-    device.pendingExecs.set(execId, { resolve, timer });
+    /** resolve 时统一打点：包一层让所有出口（成功/失败/超时）都被统计 */
+    device.pendingExecs.set(execId, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        trackExec(deviceId, code, result.success, t0);
+        resolve(result);
+      },
+      timer,
+    });
 
     /** ws.send 可能因竞态（readyState 检查后断开）抛异常，保护之 */
     try {
       sock.send(JSON.stringify({ type: "exec", execId, code }));
     } catch {
       device.pendingExecs.delete(execId);
-      clearTimeout(timer);
+      trackExec(deviceId, code, false, t0);
       resolve({ success: false, error: "发送执行指令失败（连接已断开）" });
     }
   });

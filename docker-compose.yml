@@ -8,5 +8,27 @@ services:
       - ./data:/app/data
     environment:
       - SILKPULSE_ADMIN_KEY=${SILKPULSE_ADMIN_KEY:-}
+      # healthcheck 通过时打此标签，autoheal 据此重启僵死容器
+      - AUTOHEAL=true
     restart: unless-stopped
-    mem_limit: 512m
+    # 上限非预分配：用量随流量动态增长，此值只是防失控的保护栏
+    mem_limit: 2g
+    healthcheck:
+      # server 的 /api/health 返回事件循环利用率等指标，非 200 即不健康
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 健康检查连续失败后自动重启容器（docker 原生 healthcheck 不会触发重启）
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: silkpulse-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+      - AUTOHEAL_INTERVAL=15
+      - AUTOHEAL_START_PERIOD=30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

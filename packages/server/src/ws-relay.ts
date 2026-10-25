@@ -15,6 +15,7 @@ import type { DeviceRegistry } from "./device-registry.js";
 import type { AuthContext } from "./auth.js";
 import { SilkWs, getSilk, type WsUserData } from "./uws/ws-socket.js";
 import { DeviceChannel } from "./device-channel.js";
+import { trackConsoleSession } from "./stats-reporter.js";
 import type { ServerToConsoleMessage, ConsoleMessage } from "@silkpulse/shared";
 
 /** 广播可观测性：发送/截断计数，供 health 端点读取，压测用 */
@@ -39,6 +40,8 @@ export function setupWebSocket(
 } {
   /** 每个 WS 设备连接对应的业务通道（设备端）；控制台端为订阅集合 */
   const deviceChannels = new Map<SilkWs, DeviceChannel>();
+  /** 控制台连接 → 会话结束回调（close 时调用，供旁路统计上报会话时长） */
+  const closeCallbacks = new Map<SilkWs, () => void>();
   /** 控制台订阅：consoleWs → Set<deviceId>，以及反向映射 device → Set<consoleWs> */
   const consoleSubscriptions = new Map<SilkWs, Set<string>>();
   const deviceWatchers = new Map<string, Set<SilkWs>>();
@@ -175,6 +178,8 @@ export function setupWebSocket(
         }
       }
       if (closeUrl.pathname === "/ws/console") {
+        closeCallbacks.get(silk)?.();
+        closeCallbacks.delete(silk);
         unsubscribeAll(silk);
       }
     },
@@ -212,6 +217,15 @@ export function setupWebSocket(
           devices: registry.listByProject(consoleProjectId),
         } satisfies ServerToConsoleMessage),
       );
+      /** 旁路统计：控制台会话开始；用户身份用 projectId（项目密钥持有者，稳定不随刷新变化），超管记为 admin（未知 projectId 的设备控制台也归入） */
+      const authUser =
+        silk.authCtx.role === "project"
+          ? (silk.authCtx.projectId ?? "anonymous")
+          : silk.authCtx.role === "admin"
+            ? "admin"
+            : "anonymous";
+      const endConsoleSession = trackConsoleSession(authUser);
+      closeCallbacks.set(silk, endConsoleSession);
     }
   }
 

@@ -18,6 +18,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import uWS from "uWebSockets.js";
 import { DeviceRegistry } from "./device-registry.js";
+import { trackDeviceOnline, trackDeviceOffline } from "./stats-reporter.js";
 import { setupWebSocket, registerSocketUrl } from "./ws-relay.js";
 import { setupBridge } from "./bridge.js";
 import { handleApiRoute } from "./api.js";
@@ -66,6 +67,15 @@ export async function createServer(
   const registry = new DeviceRegistry();
   /** 日志缓冲落盘：服务重启（部署/崩溃）后恢复各设备历史日志，诊断记录不丢 */
   registry.enableLogPersistence(path.join(defaultDataDir, "device-logs.json"));
+
+  /** 旁路统计：设备上下线事件转发给 silkpulse-stats（未配置环境变量时为 no-op） */
+  registry.onChange((event) => {
+    if (event.type === "online") {
+      trackDeviceOnline(event.device.id, event.device.projectId);
+    } else if (event.type === "offline") {
+      trackDeviceOffline(event.deviceId);
+    }
+  });
 
   /** 静态资源目录：优先用 options.staticRoot，否则用 ../public（console-ui 构建产物 + sdk） */
   const staticRoot = options.staticRoot ?? path.resolve(__dirname, "../public");
