@@ -15,7 +15,7 @@ import { renderSkillPrompt, renderSkillSystemPrompt } from "@silkpulse/shared";
 
 const props = defineProps<{
   modelValue: boolean;
-  /** 当前服务访问地址（如 https://silkpulse.heartstack.space） */
+  /** 当前服务访问地址（如 https://silkpulse.example.com），为空时兜底 location.origin */
   serverUrl: string;
   /** 当前用户的 API key（超管密钥或项目密钥） */
   apiKey: string;
@@ -33,17 +33,20 @@ const activeTab = ref<Tab>("lazy");
 
 const copyState = ref<"idle" | "copied" | "error">("idle");
 
+/** 兜底服务地址：跟随控制台自身访问地址（自部署场景永远展示用户自己的域名/IP，不能写死线上地址） */
+const fallbackOrigin = typeof location !== "undefined" ? location.origin : "";
+
 /** 渲染完整提示词（替换占位符） */
 const fullPrompt = computed(() => {
   const key = props.apiKey || "<你的API密钥>";
-  const origin = props.serverUrl || "https://silkpulse.heartstack.space";
+  const origin = props.serverUrl || fallbackOrigin;
   return renderSkillPrompt(origin, key);
 });
 
 /** 渲染渐进式加载系统提示词 */
 const lazyPrompt = computed(() => {
   const key = props.apiKey || "<你的API密钥>";
-  const origin = props.serverUrl || "https://silkpulse.heartstack.space";
+  const origin = props.serverUrl || fallbackOrigin;
   return renderSkillSystemPrompt(origin, key);
 });
 

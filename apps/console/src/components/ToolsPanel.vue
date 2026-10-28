@@ -20,6 +20,7 @@ import CodecTool from "./tools/CodecTool.vue";
 import ColorTool from "./tools/ColorTool.vue";
 import RegexTool from "./tools/RegexTool.vue";
 import DiffTool from "./tools/DiffTool.vue";
+import EndpointTool from "./tools/EndpointTool.vue";
 
 /** 工具箱内响应式当前时间：驱动 JWT/Cookie 的过期状态随时间自动翻红（30s 低频刷新） */
 const nowTs = ref(Date.now());
@@ -34,6 +35,7 @@ const tools = [
   { id: "codec", icon: "🔐", label: "编解码" },
   { id: "color", icon: "🎨", label: "颜色" },
   { id: "regex", icon: "🔍", label: "正则" },
+  { id: "endpoints", icon: "🧪", label: "测试端点" },
 ];
 
 /** 当前激活工具 id（与 URL ?tool= 双向同步） */
@@ -295,6 +297,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
       <CodecTool v-else-if="activeTool === 'codec'" v-model:kind="codecKind" :now="nowTs" />
       <ColorTool v-else-if="activeTool === 'color'" />
       <RegexTool v-else-if="activeTool === 'regex'" />
+      <EndpointTool v-else-if="activeTool === 'endpoints'" />
     </div>
 
     <!-- 工具页签设置弹层 -->

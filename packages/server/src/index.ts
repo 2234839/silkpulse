@@ -6,6 +6,7 @@
  * 2. WebSocket /ws/console  —— 控制台连接（订阅设备实时数据）
  * 3. HTTP /api/*            —— AI skill 调用入口（devices/snapshot/exec/logs/network/errors）
  * 4. 静态资源               —— 控制台 UI（/）+ SDK 脚本（/sdk.js）
+ * 5. 测试端点               —— 免鉴权（delay-test/sse-test/test-fixtures，见 test-endpoints.ts）
  *
  * uWS 关键约定（与 node:http 的差异）：
  * - 异步 handler 返回前必须 res.onAborted（否则进程 abort）
@@ -23,6 +24,7 @@ import { setupWebSocket, registerSocketUrl } from "./ws-relay.js";
 import { setupBridge } from "./bridge.js";
 import { handleApiRoute } from "./api.js";
 import { handleAgentApiRoute } from "./agent-api.js";
+import { handleTestEndpointRoute } from "./test-endpoints.js";
 import { AuthManager, ProjectStore, handleProjectApiRoute, type AuthContext } from "./auth.js";
 import { maybeGzipResponse } from "./gzip.js";
 import {
@@ -368,81 +370,8 @@ export async function createServer(
       return;
     }
 
-    /** 7. /test-fixtures/crash.js(+.map) —— source map 解析测试用的压缩脚本 + map */
-    /** minified: function n(r){throw new Error(r)}n("source map 测试错误") —— 加载即抛错 */
-    /** throw @ 1:14 → crash.ts:2:2，new Error @ 1:20 → crash.ts:2:8 */
-    if (pathname === "/test-fixtures/crash.js") {
-      writeResponse(
-        ctx,
-        200,
-        { "Content-Type": "application/javascript; charset=utf-8" },
-        'function n(r){throw new Error(r)}n("source map 测试错误")\n//# sourceMappingURL=crash.js.map',
-      );
-      return;
-    }
-    if (pathname === "/test-fixtures/crash.js.map") {
-      writeResponse(
-        ctx,
-        200,
-        { "Content-Type": "application/json; charset=utf-8" },
-        JSON.stringify({
-          version: 3,
-          sources: ["crash.ts"],
-          mappings: "AAAA,SAASA,EAAeC,EAAoB,CAC1C,MAAM,IAAI,MAAMA,CAAG,CACrB,CACAD,EAAe,qCAAiB",
-          names: ["crashOnPurpose", "msg"],
-        }),
-      );
-      return;
-    }
-
-    /**
-     * /sse-test —— SSE 测试端点（text/event-stream）
-     *
-     * 推送 5 条事件（含 event/id/data 字段），每条间隔 500ms，推完关闭连接。
-     * 供 demo 页面的 SSE 测试按钮调用，验证 SDK 的 SSE 流式采集。
-     * 注意：路径不能以 /api/ 开头，否则会被 handleApiRoute 的 404 兜底拦截。
-     */
-    if (pathname === "/sse-test") {
-      if (ctx.responded || ctx.aborted) return;
-      /** SSE 头先写，进入流式模式（writeStatus 后用 write 连续推送） */
-      ctx.res.cork(() => {
-        ctx.res.writeStatus("200 OK");
-        ctx.res.writeHeader("Content-Type", "text/event-stream");
-        ctx.res.writeHeader("Cache-Control", "no-cache");
-        ctx.res.writeHeader("Access-Control-Allow-Origin", "*");
-      });
-      const events = [
-        { event: "message", data: "SSE 连接已建立" },
-        { event: "update", id: "1", data: JSON.stringify({ count: 1, msg: "第一条更新" }) },
-        { event: "update", id: "2", data: JSON.stringify({ count: 2, msg: "第二条更新" }) },
-        { event: "ping", data: "heartbeat" },
-        { event: "done", id: "3", data: "SSE 流结束" },
-      ];
-      let idx = 0;
-      const timer = setInterval(() => {
-        if (ctx.aborted) {
-          clearInterval(timer);
-          return;
-        }
-        if (idx >= events.length) {
-          clearInterval(timer);
-          ctx.res.end();
-          return;
-        }
-        const { event, id, data } = events[idx++];
-        let chunk = "";
-        if (id) chunk += `id: ${id}\n`;
-        chunk += `event: ${event}\n`;
-        chunk += `data: ${data}\n\n`;
-        ctx.res.write(chunk);
-      }, 500);
-      /** 客户端断开时清理定时器 */
-      ctx.res.onAborted(() => {
-        ctx.aborted = true;
-        clearInterval(timer);
-      });
-      return;
-    }
+    /** 7. 测试端点集合（delay-test / sse-test / test-fixtures，实现在 test-endpoints.ts） */
+    if (handleTestEndpointRoute(ctx, pathname)) return;
 
     /** 8. 其他静态资源（控制台 UI 的 JS/CSS/图片） */
     const filePath = path.resolve(staticRoot, pathname.slice(1));
