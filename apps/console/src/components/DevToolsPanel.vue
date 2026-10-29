@@ -24,9 +24,12 @@
  *   请求设备端激活 backend Agent
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { devToolsDocks, getDock } from "../utils/devtools-docks";
 import { apiFetch } from "../utils/api";
 import type { LogEntry, NetworkEntry } from "@silkpulse/shared";
+
+const { t } = useI18n();
 
 /**
  * devtools relay 桥接函数（由父组件从 useConsoleSocket 传入，避免重复建连） */
@@ -78,7 +81,9 @@ watch(
 const pluginUnsupported = computed(() => !activeDock.value.isSupported(props.frameworks));
 
 /** 目标页实际检测到的框架名（不支持提示文案用，未知框架名原样显示） */
-const detectedLabel = computed(() => (props.frameworks ?? []).join(" + ") || "无");
+const detectedLabel = computed(
+  () => (props.frameworks ?? []).join(" + ") || t("devToolsPanel.none"),
+);
 
 /** 探测结果到达后当前插件已不支持 → 重置连接状态（不再显示「已连接」误导） */
 watch(pluginUnsupported, (unsupported) => {
@@ -407,7 +412,7 @@ onBeforeUnmount(() => {
           <span
             v-if="frameworks?.includes(d.plugin)"
             class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle"
-            title="目标页检测到该框架"
+            :title="t('devToolsPanel.frameworkDetectedTitle')"
           />
         </button>
       </template>
@@ -420,23 +425,19 @@ onBeforeUnmount(() => {
         <button
           :disabled="pluginUnsupported || refreshing"
           class="px-2 py-1 rounded-md transition-colors text-muted hover:bg-base disabled:opacity-40 disabled:cursor-not-allowed"
-          :title="
-            refreshing
-              ? '正在拉取最新数据…'
-              : '原地拉取最新组件树与数据（保留当前展开/选中状态）。生产构建的页面没有框架更新推送，数据不会自动更新，需要时点此刷新'
-          "
+          :title="refreshing ? t('devToolsPanel.refreshingTitle') : t('devToolsPanel.refreshTitle')"
           @click="refreshData()"
         >
           <span :class="refreshing ? 'inline-block animate-spin' : 'inline-block'">⟳</span>
-          {{ refreshing ? "刷新中…" : "刷新" }}
+          {{ refreshing ? t("devToolsPanel.refreshing") : t("devToolsPanel.refresh") }}
         </button>
         <span v-if="relayActive" class="text-green-600 dark:text-green-400 flex items-center gap-1">
           <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
-          已连接
+          {{ t("devToolsPanel.connected") }}
         </span>
         <span v-else class="text-amber-600 dark:text-amber-400 flex items-center gap-1">
           <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-          连接中…
+          {{ t("devToolsPanel.connecting") }}
         </span>
       </div>
     </div>
@@ -446,8 +447,7 @@ onBeforeUnmount(() => {
       class="px-3 py-1.5 text-xs text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20 border-b border-base flex items-center gap-2"
     >
       <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-      正在连接目标页的 {{ activeDock.label }} DevTools backend…（需要目标页注入了 SilkPulse SDK
-      且运行 {{ activeDock.label }} 应用）
+      {{ t("devToolsPanel.connectingTo", { dock: activeDock.label }) }}
     </div>
     <!-- 插件明确不支持：明确提示，不加载 client（避免无意义的转圈等待） -->
     <div
@@ -455,12 +455,14 @@ onBeforeUnmount(() => {
       class="flex-1 flex flex-col items-center justify-center gap-2 bg-surface text-muted p-6 text-center"
     >
       <div class="text-3xl">🚫</div>
-      <div class="text-sm font-medium">当前页面不支持 {{ activeDock.label }} DevTools</div>
+      <div class="text-sm font-medium">
+        {{ t("devToolsPanel.unsupportedTitle", { dock: activeDock.label }) }}
+      </div>
       <div v-if="(frameworks ?? []).length > 0" class="text-xs">
-        目标页是 {{ detectedLabel }} 应用，请切换到对应插件
+        {{ t("devToolsPanel.unsupportedDetected", { detected: detectedLabel }) }}
       </div>
       <div v-else class="text-xs">
-        目标页未检测到 Vue / React 应用（纯静态页或未接入框架的页面无法使用 DevTools）
+        {{ t("devToolsPanel.unsupportedNone") }}
       </div>
     </div>
     <!-- devtools client：vue 官方 SPA / react 自建 frontend -->

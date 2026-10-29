@@ -7,10 +7,12 @@
  */
 import { computed, watch } from "vue";
 import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { POSTS } from "./posts";
 import BlogHeader from "./BlogHeader.vue";
 
 const route = useRoute();
+const { t } = useI18n();
 
 /** 当前 slug 对应的帖子 meta（不存在为 null） */
 const post = computed(() => POSTS.find((p) => p.slug === route.params.slug) ?? null);
@@ -38,7 +40,7 @@ watch(
         <div class="flex items-center gap-3 text-xs text-faint mb-3">
           <time :datetime="post.date">{{ post.date }}</time>
           <span>·</span>
-          <span>约 {{ post.readingMinutes }} 分钟</span>
+          <span>{{ t("blog.readingTime", { minutes: post.readingMinutes }) }}</span>
         </div>
         <h1 class="text-3xl font-bold text-primary leading-tight mb-3">{{ post.title }}</h1>
         <div class="flex items-center gap-2 flex-wrap">
@@ -56,24 +58,26 @@ watch(
 
       <!-- 底部导航 -->
       <footer class="mt-12 pt-6 border-t border-base flex items-center justify-between text-sm">
-        <router-link to="/blog" class="text-blue-key hover:underline underline-offset-2"
-          >← 所有文章</router-link
-        >
-        <router-link to="/" class="text-muted hover:text-primary underline underline-offset-2"
-          >打开 silkpulse 控制台</router-link
-        >
+        <router-link to="/blog" class="text-blue-key hover:underline underline-offset-2">{{
+          t("blog.allPosts")
+        }}</router-link>
+        <router-link to="/" class="text-muted hover:text-primary underline underline-offset-2">{{
+          t("blog.postOpenConsole")
+        }}</router-link>
       </footer>
     </main>
 
     <!-- 404 -->
     <main v-else class="max-w-3xl mx-auto px-4 sm:px-6 py-20 text-center">
       <p class="text-5xl mb-4">🔍</p>
-      <h1 class="text-xl font-semibold text-primary mb-2">文章不存在</h1>
-      <p class="text-secondary text-sm mb-6">slug「{{ route.params.slug }}」没有对应的帖子。</p>
+      <h1 class="text-xl font-semibold text-primary mb-2">{{ t("blog.notFoundTitle") }}</h1>
+      <p class="text-secondary text-sm mb-6">
+        {{ t("blog.notFound", { slug: route.params.slug }) }}
+      </p>
       <router-link
         to="/blog"
         class="inline-block px-4 py-2 rounded bg-teal-600 text-white text-sm hover:bg-teal-700"
-        >← 返回文章列表</router-link
+        >{{ t("blog.backToList") }}</router-link
       >
     </main>
   </div>

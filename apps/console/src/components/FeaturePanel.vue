@@ -7,8 +7,11 @@
  * 支持搜索筛选 + 刷新重测。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
+
+const { t } = useI18n();
 
 interface FeatureResult {
   id: string;
@@ -33,15 +36,15 @@ const loading = ref(false);
 /** 错误信息 */
 const error = ref<string | null>(null);
 
-/** 分类显示名 */
-const CATEGORY_LABELS: Record<string, string> = {
-  css: "CSS 特性",
-  "js-api": "JS API",
-  network: "网络能力",
-  media: "媒体能力",
-  storage: "存储能力",
-  device: "设备信息",
-  element: "HTML 元素",
+/** 分类 → 消息包 key（显示名走 t()，切换语言实时生效；未知分类兜底显示原始 key） */
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  css: "featurePanel.catCss",
+  "js-api": "featurePanel.catJsApi",
+  network: "featurePanel.catNetwork",
+  media: "featurePanel.catMedia",
+  storage: "featurePanel.catStorage",
+  device: "featurePanel.catDevice",
+  element: "featurePanel.catElement",
 };
 
 /** 分类排列顺序 */
@@ -57,7 +60,7 @@ const groupedResults = computed(() => {
   }
   return CATEGORY_ORDER.filter((cat) => grouped.has(cat)).map((cat) => ({
     category: cat,
-    label: CATEGORY_LABELS[cat] ?? cat,
+    label: t(CATEGORY_LABEL_KEYS[cat] ?? cat),
     items: grouped.get(cat)!,
   }));
 });
@@ -146,14 +149,14 @@ async function copyResults() {
     <div class="flex items-center gap-2 px-4 py-2 border-b border-base bg-surface">
       <input
         v-model="searchQuery"
-        placeholder="搜索特性（名称 / true / false）"
+        :placeholder="t('featurePanel.searchPlaceholder')"
         class="flex-1 text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
       />
       <span class="text-xs text-faint whitespace-nowrap">
-        {{ stats.supported }}/{{ stats.total }} 支持
-        <span v-if="stats.unsupported > 0" class="text-red-500"
-          >· {{ stats.unsupported }} 不支持</span
-        >
+        {{ t("featurePanel.supportSummary", { supported: stats.supported, total: stats.total }) }}
+        <span v-if="stats.unsupported > 0" class="text-red-500">{{
+          t("featurePanel.unsupportedCount", { count: stats.unsupported })
+        }}</span>
       </span>
       <button
         @click="onlyUnsupported = !onlyUnsupported"
@@ -163,22 +166,26 @@ async function copyResults() {
             : 'border-base bg-elevated hover:bg-elevated-hover text-secondary'
         "
         class="px-2 py-1 text-xs rounded border transition-colors whitespace-nowrap"
-        title="只显示当前设备不支持的特性"
+        :title="t('featurePanel.onlyUnsupportedTitle')"
       >
-        {{ onlyUnsupported ? "✗ 只看不支持" : "只看不支持" }}
+        {{
+          onlyUnsupported
+            ? t("featurePanel.onlyUnsupportedActive")
+            : t("featurePanel.onlyUnsupported")
+        }}
       </button>
       <button
         @click="copyResults"
         class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors whitespace-nowrap"
       >
-        {{ copyState === "copied" ? "✓ 已复制" : "复制" }}
+        {{ copyState === "copied" ? t("common.copied") : t("common.copy") }}
       </button>
       <button
         @click="fetchFeatures"
         :disabled="loading"
         class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors whitespace-nowrap disabled:opacity-50"
       >
-        {{ loading ? "检测中..." : "刷新" }}
+        {{ loading ? t("featurePanel.detecting") : t("featurePanel.refresh") }}
       </button>
     </div>
 
@@ -187,19 +194,19 @@ async function copyResults() {
       v-if="loading && results.length === 0"
       class="flex-1 flex items-center justify-center text-faint text-sm"
     >
-      正在检测目标设备特性...
+      {{ t("featurePanel.loading") }}
     </div>
 
     <!-- 错误 -->
     <div v-else-if="error" class="flex-1 flex items-center justify-center">
       <div class="text-center">
-        <p class="text-red-500 text-sm mb-2">检测失败</p>
+        <p class="text-red-500 text-sm mb-2">{{ t("featurePanel.detectFailed") }}</p>
         <p class="text-faint text-xs font-mono mb-3">{{ error }}</p>
         <button
           @click="fetchFeatures"
           class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
         >
-          重试
+          {{ t("featurePanel.retry") }}
         </button>
       </div>
     </div>
@@ -251,7 +258,7 @@ async function copyResults() {
               target="_blank"
               rel="noopener"
               class="text-blue-400 hover:text-blue-500 text-[10px] shrink-0"
-              title="MDN 文档"
+              :title="t('featurePanel.mdnTitle')"
               >↗</a
             >
             <!-- 检测值 -->
@@ -271,7 +278,7 @@ async function copyResults() {
       </div>
 
       <div v-if="filteredGroups.length === 0" class="text-faint text-center py-8 text-sm">
-        {{ searchQuery ? "无匹配特性" : "暂无检测结果" }}
+        {{ searchQuery ? t("featurePanel.noMatch") : t("featurePanel.empty") }}
       </div>
     </div>
   </div>

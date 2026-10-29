@@ -14,6 +14,9 @@
  * secret / pattern / auto 可组合使用，命中的区段全部模糊。
  */
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 要展示的文本 */
@@ -109,7 +112,11 @@ const wholeMasked = computed(() => maskRanges.value.length === 0);
 </script>
 
 <template>
-  <span class="secret-text inline cursor-pointer" title="点击查看/隐藏明文" @click="toggle">
+  <span
+    class="secret-text inline cursor-pointer"
+    :title="t('secretText.toggleTitle')"
+    @click="toggle"
+  >
     <template v-if="wholeMasked">
       <!-- 整段模糊模式 -->
       <span
@@ -130,6 +137,8 @@ const wholeMasked = computed(() => maskRanges.value.length === 0);
         >
       </template>
     </template>
-    <span v-if="!revealed" class="text-muted text-[10px] ml-1 align-middle">🔒 点击查看</span>
+    <span v-if="!revealed" class="text-muted text-[10px] ml-1 align-middle">{{
+      t("secretText.clickToView")
+    }}</span>
   </span>
 </template>

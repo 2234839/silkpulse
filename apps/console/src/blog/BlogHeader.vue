@@ -6,8 +6,10 @@
  * blog 是公开区域，不依赖鉴权/设备状态。
  */
 import { useTheme } from "../composables/useTheme";
+import { useI18n } from "vue-i18n";
 
 const { theme, toggleTheme } = useTheme();
+const { t } = useI18n();
 </script>
 
 <template>
@@ -23,13 +25,13 @@ const { theme, toggleTheme } = useTheme();
         <router-link
           to="/"
           class="px-3 py-1.5 text-xs font-medium rounded bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1"
-          title="回到调试控制台"
-          >🎯 控制台</router-link
+          :title="t('blog.consoleTitle')"
+          >{{ t("blog.console") }}</router-link
         >
         <button
           @click="toggleTheme"
           class="px-2 py-1 text-xs rounded text-muted hover:text-primary hover:bg-elevated"
-          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+          :title="theme === 'dark' ? t('shell.toLightTitle') : t('shell.toDarkTitle')"
         >
           {{ theme === "dark" ? "☀️" : "🌙" }}
         </button>

@@ -225,44 +225,52 @@ function renderText(s: string): string {
   return showControlChars.value ? visualizeControls(s) : s;
 }
 
-const sseSample = `event: message
-data: {"ts":"2026-08-09T06:00:00Z","level":"info","msg":"服务启动"}
+/** SSE 示例数据（演示日志，中文内容不参与 i18n） */
+const sseSample = [
+  "event: message",
+  'data: {"ts":"2026-08-09T06:00:00Z","level":"info","msg":"服务启动"}', // i18n-allowed
+  "",
+  "event: update",
+  "id: 1",
+  'data: {"ts":"2026-08-09T06:00:01Z","level":"info","msg":"收到请求","path":"/api/users"}', // i18n-allowed
+  "",
+  "event: error",
+  "id: 2",
+  'data: {"ts":"2026-08-09T06:00:02Z","level":"error","msg":"数据库超时","code":"DB_TIMEOUT"}', // i18n-allowed
+  "",
+  "event: done",
+  "data: [DONE]",
+].join("\n");
 
-event: update
-id: 1
-data: {"ts":"2026-08-09T06:00:01Z","level":"info","msg":"收到请求","path":"/api/users"}
+/** JSONL 示例数据（演示日志，中文内容不参与 i18n） */
+const jsonlSample = [
+  '{"ts":"2026-08-09T06:00:00Z","level":"info","msg":"服务启动","pid":1234}', // i18n-allowed
+  '{"ts":"2026-08-09T06:00:01Z","level":"info","msg":"收到请求","path":"/api/users","duration":45}', // i18n-allowed
+  '{"ts":"2026-08-09T06:00:02Z","level":"error","msg":"数据库超时","code":"DB_TIMEOUT","duration":5000}', // i18n-allowed
+  '{"ts":"2026-08-09T06:00:03Z","level":"warn","msg":"重连成功","retry":2}', // i18n-allowed
+].join("\n");
 
-event: error
-id: 2
-data: {"ts":"2026-08-09T06:00:02Z","level":"error","msg":"数据库超时","code":"DB_TIMEOUT"}
-
-event: done
-data: [DONE]`;
-
-const jsonlSample = `{"ts":"2026-08-09T06:00:00Z","level":"info","msg":"服务启动","pid":1234}
-{"ts":"2026-08-09T06:00:01Z","level":"info","msg":"收到请求","path":"/api/users","duration":45}
-{"ts":"2026-08-09T06:00:02Z","level":"error","msg":"数据库超时","code":"DB_TIMEOUT","duration":5000}
-{"ts":"2026-08-09T06:00:03Z","level":"warn","msg":"重连成功","retry":2}`;
-
-/** ANSI 彩色日志示例（终端 raw 模式粘贴典型形态） */
-const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid=1234
-\x1b[36m[DEBUG]\x1b[0m 请求路径\x1b[1m/api/users\x1b[0m 耗时 45ms
-\x1b[31m[ERROR]\x1b[0m 数据库超时\x07 code=DB_TIMEOUT duration=5000ms
-\x1b[33m[WARN]\x1b[0m 重连成功 retry=2
-\x1b[1;34m[FATAL]\x1b[0m 进程退出\x1b[5D\x1b[1A 清理完成`;
+/** ANSI 彩色日志示例（终端 raw 模式粘贴典型形态；演示内容不参与 i18n） */
+const ansiSample = [
+  "\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid=1234", // i18n-allowed
+  "\x1b[36m[DEBUG]\x1b[0m 请求路径\x1b[1m/api/users\x1b[0m 耗时 45ms", // i18n-allowed
+  "\x1b[31m[ERROR]\x1b[0m 数据库超时\x07 code=DB_TIMEOUT duration=5000ms", // i18n-allowed
+  "\x1b[33m[WARN]\x1b[0m 重连成功 retry=2", // i18n-allowed
+  "\x1b[1;34m[FATAL]\x1b[0m 进程退出\x1b[5D\x1b[1A 清理完成", // i18n-allowed
+].join("\n");
 </script>
 
 <template>
   <ToolSplitLayout storage-key="silkpulse.tools-split.log" :initial-width="400" :max-width="640">
     <template #left>
       <div class="flex flex-col gap-2 min-w-0 h-full">
-        <label class="text-xs text-muted">日志输入</label>
+        <label class="text-xs text-muted">{{ $t("logTool.inputLabel") }}</label>
         <textarea
           v-model="logInput"
           rows="16"
           spellcheck="false"
           class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
-          placeholder='event: message&#10;data: {"msg":"hello"}&#10;&#10;或直接粘贴日志文本 / 终端 ANSI 彩色输出'
+          :placeholder="$t('logTool.inputPlaceholder')"
         ></textarea>
         <!-- 格式 + 示例 -->
         <div class="flex gap-2 items-center">
@@ -276,17 +284,19 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
           </select>
           <button
             v-for="s in [
-              { label: 'SSE 示例', v: sseSample },
-              { label: 'JSONL 示例', v: jsonlSample },
-              { label: 'ANSI 示例', v: ansiSample },
+              { label: 'logTool.sampleSse', v: sseSample },
+              { label: 'logTool.sampleJsonl', v: jsonlSample },
+              { label: 'logTool.sampleAnsi', v: ansiSample },
             ]"
             :key="s.label"
             @click="logInput = s.v"
             class="px-2.5 py-1.5 text-xs rounded border border-base text-faint hover:text-primary hover:border-blue-500 transition-colors"
           >
-            {{ s.label }}
+            {{ $t(s.label) }}
           </button>
-          <span class="text-xs text-faint ml-auto shrink-0">{{ events.length }} 条</span>
+          <span class="text-xs text-faint ml-auto shrink-0">{{
+            $t("logTool.count", { count: events.length })
+          }}</span>
         </div>
         <!-- 处理管道：过滤器 + 映射器 -->
         <div class="flex gap-2 items-center">
@@ -299,7 +309,8 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
                 : 'border-base text-primary hover:border-blue-500'
             "
           >
-            🔽 过滤器<span v-if="logFilter" class="ml-1 text-faint"
+            {{ $t("logTool.filterBtn")
+            }}<span v-if="logFilter" class="ml-1 text-faint"
               >· {{ matchCount }}/{{ events.length }}</span
             >
           </button>
@@ -312,13 +323,13 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
                 : 'border-base text-primary hover:border-blue-500'
             "
           >
-            ⚡ 映射器
+            {{ $t("logTool.mapperBtn") }}
           </button>
           <label
             class="flex items-center gap-1 text-xs text-faint cursor-pointer select-none ml-auto"
           >
             <input v-model="showControlChars" type="checkbox" class="accent-blue-500" />
-            控制符
+            {{ $t("logTool.controlChars") }}
           </label>
         </div>
         <!-- 过滤器面板 -->
@@ -327,12 +338,12 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
           class="rounded border border-base bg-input p-2 flex flex-col gap-1.5"
         >
           <div class="flex items-center gap-2">
-            <span class="text-xs font-medium text-primary">过滤器 Filter</span>
+            <span class="text-xs font-medium text-primary">{{ $t("logTool.filterTitle") }}</span>
             <label
               class="flex items-center gap-1 text-xs text-faint cursor-pointer select-none ml-auto"
             >
               <input v-model="filterRegex" type="checkbox" class="accent-blue-500" />
-              正则
+              {{ $t("logTool.regexToggle") }}
             </label>
           </div>
           <input
@@ -340,7 +351,7 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
             type="text"
             spellcheck="false"
             class="w-full bg-surface border border-base rounded px-2 py-1.5 text-xs font-mono text-primary focus:outline-none focus:border-blue-500"
-            :placeholder="filterRegex ? '.*error|timeout.*' : '关键词包含匹配...'"
+            :placeholder="filterRegex ? '.*error|timeout.*' : $t('logTool.filterTextPlaceholder')"
           />
           <p v-if="filterError" class="text-xs text-red-500">⚠ {{ filterError }}</p>
         </div>
@@ -350,13 +361,13 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
           class="rounded border border-base bg-input p-2 flex flex-col gap-1.5"
         >
           <div class="flex items-center gap-2">
-            <span class="text-xs font-medium text-primary">映射器 Mapper</span>
+            <span class="text-xs font-medium text-primary">{{ $t("logTool.mapperTitle") }}</span>
             <button
               v-if="logParserCode"
               @click="logParserCode = ''"
               class="text-xs text-faint hover:text-red-500 ml-auto"
             >
-              清除
+              {{ $t("logTool.clearParser") }}
             </button>
           </div>
           <textarea
@@ -364,7 +375,7 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
             rows="3"
             spellcheck="false"
             class="w-full bg-surface border border-base rounded p-2 text-xs font-mono text-primary focus:outline-none focus:border-blue-500"
-            placeholder="// 参数 data，返回映射后的展示值&#10;// 例: return JSON.parse(data).msg"
+            :placeholder="$t('logTool.mapperPlaceholder')"
           ></textarea>
           <p v-if="parserError" class="text-xs text-red-500">⚠ {{ parserError }}</p>
         </div>
@@ -398,10 +409,10 @@ const ansiSample = `\x1b[32m[INFO]\x1b[0m 2026-08-09 06:00:00 服务启动\t pid
       </VirtualList>
       <template v-else>
         <div v-if="events.length === 0" class="text-xs text-faint text-center py-8">
-          粘贴日志数据后自动解析...
+          {{ $t("logTool.emptyInput") }}
         </div>
         <div v-else-if="processedEvents.length === 0" class="text-xs text-faint text-center py-8">
-          无匹配项
+          {{ $t("logTool.noMatch") }}
         </div>
       </template>
     </template>

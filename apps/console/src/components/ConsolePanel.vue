@@ -13,6 +13,7 @@
  */
 import { ref, computed, useTemplateRef, watch, nextTick } from "vue";
 import type { LogEntry, SerializedValue } from "@silkpulse/shared";
+import { useI18n } from "vue-i18n";
 import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
 import { useExecHistory } from "../composables/useExecHistory";
@@ -25,6 +26,8 @@ import {
 } from "../composables/useAutocomplete";
 import CompletionDropdown from "./CompletionDropdown.vue";
 import ObjectInspector from "./ObjectInspector.vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 远程设备日志列表 */
@@ -42,7 +45,8 @@ const logColor = (type: string): string => {
   if (type === "debug") return "text-faint";
   if (type === "table") return "text-purple-600 dark:text-purple-400";
   if (type === "trace") return "text-gray-500 dark:text-gray-400";
-  if (type === "group" || type === "groupEnd") return "text-blue-500 dark:text-blue-400 font-semibold";
+  if (type === "group" || type === "groupEnd")
+    return "text-blue-500 dark:text-blue-400 font-semibold";
   if (type === "count") return "text-cyan-600 dark:text-cyan-400";
   if (type === "time") return "text-green-600 dark:text-green-400";
   if (type === "dir") return "text-indigo-600";
@@ -417,7 +421,7 @@ async function runExecInput() {
       output = data.result ?? "undefined";
       resultValue = data.resultValue;
     } else {
-      output = data.error ?? "未知错误";
+      output = data.error ?? t("consolePanel.unknownError");
     }
   } catch (e) {
     output = e instanceof Error ? e.message : String(e);
@@ -534,7 +538,7 @@ function clearExecResults() {
               : 'bg-elevated text-secondary bg-elevated-hover'
           "
         >
-          {{ lvl === "all" ? "全部" : lvl.toUpperCase() }}
+          {{ lvl === "all" ? t("consolePanel.allLevels") : lvl.toUpperCase() }}
           <span v-if="lvl !== 'all' && levelCount(lvl) > 0" class="ml-1 opacity-75">{{
             levelCount(lvl)
           }}</span>
@@ -542,32 +546,32 @@ function clearExecResults() {
       </div>
       <input
         v-model="logSearch"
-        placeholder="搜索日志..."
+        :placeholder="t('consolePanel.searchPlaceholder')"
         class="ml-auto px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 w-48"
       />
       <span class="text-xs text-faint">{{ filteredLogs.length }}/{{ props.logs.length }}</span>
       <span
         v-if="(props.droppedCount ?? 0) > 0"
         class="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap"
-        title="长会话缓冲区已满，最早的日志已被滚动淘汰（新日志不受影响）"
-        >⚠ 已滚动丢弃最早 {{ props.droppedCount }} 条</span
+        :title="t('consolePanel.droppedTitle')"
+        >{{ t("consolePanel.dropped", { count: props.droppedCount }) }}</span
       >
       <!-- 复制全部：复制当前过滤后的全部日志 -->
       <button
         @click="copyAllLogs"
         :disabled="filteredLogs.length === 0"
         class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary hover:bg-elevated-hover disabled:opacity-50 disabled:cursor-not-allowed"
-        title="复制当前过滤后的全部日志"
+        :title="t('consolePanel.copyAllTitle')"
       >
-        复制全部 ({{ filteredLogs.length }})
+        {{ t("consolePanel.copyAll", { count: filteredLogs.length }) }}
       </button>
       <!-- 清空视图（仅前端隐藏，server 缓冲不变，新日志正常出现） -->
       <button
         @click="clearLogs"
         class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary hover:bg-elevated-hover"
-        title="清空当前视图（新日志仍会出现）"
+        :title="t('consolePanel.clearViewTitle')"
       >
-        清空
+        {{ t("consolePanel.clear") }}
       </button>
     </div>
     <!-- 日志列表 -->
@@ -582,7 +586,7 @@ function clearExecResults() {
         @click="expandRenderWindow"
         class="w-full py-1.5 mb-2 text-xs text-center rounded bg-elevated text-secondary hover:bg-elevated-hover"
       >
-        ↑ 加载更早日志（还有 {{ hiddenCount }} 条未渲染）
+        {{ t("consolePanel.loadOlder", { count: hiddenCount }) }}
       </button>
       <div
         v-for="(log, i) in displayLogs"
@@ -591,7 +595,11 @@ function clearExecResults() {
         class="py-0.5 border-b border-light cursor-pointer hover:bg-blue-soft px-1 -mx-1 rounded transition-colors group"
         :class="copyingLogTs === log.timestamp ? 'bg-blue-soft' : ''"
         :style="log.groupDepth > 0 ? { paddingLeft: `${log.groupDepth * 16 + 4}px` } : undefined"
-        :title="copyingLogTs === log.timestamp ? '✓ 已复制' : '点击复制'"
+        :title="
+          copyingLogTs === log.timestamp
+            ? t('consolePanel.copiedTitle')
+            : t('consolePanel.clickToCopy')
+        "
       >
         <span class="text-faint text-xs mr-2">{{
           new Date(log.timestamp).toLocaleTimeString()
@@ -614,26 +622,26 @@ function clearExecResults() {
           >×{{ log.repeat }}</span
         >
         <span class="text-[10px] text-blue-key opacity-0 group-hover:opacity-60 ml-1">{{
-          copyingLogTs === log.timestamp ? "✓" : "复制"
+          copyingLogTs === log.timestamp ? "✓" : t("consolePanel.copy")
         }}</span>
       </div>
       <div
         v-if="displayLogs.length === 0 && execResults.length === 0"
         class="text-faint text-center py-8"
       >
-        {{ props.logs.length === 0 ? "暂无日志" : "无匹配日志" }}
+        {{ props.logs.length === 0 ? t("consolePanel.emptyAll") : t("consolePanel.emptyFiltered") }}
       </div>
 
       <!-- 执行结果区（日志流下方，与日志同向滚动） -->
       <div v-if="execResults.length" class="mt-2 border-t border-light pt-2">
         <div class="flex items-center justify-between mb-1 px-1">
-          <span class="text-[10px] text-faint uppercase">执行结果</span>
+          <span class="text-[10px] text-faint uppercase">{{ t("consolePanel.execResults") }}</span>
           <button
             @click="clearExecResults"
             class="text-[10px] text-faint hover:text-red-500"
-            title="清空执行结果"
+            :title="t('consolePanel.clearExecTitle')"
           >
-            清空
+            {{ t("consolePanel.clear") }}
           </button>
         </div>
         <div
@@ -704,12 +712,16 @@ function clearExecResults() {
         autocorrect="off"
         :disabled="execRunning || !deviceId"
         :placeholder="
-          deviceId ? '输入代码，Enter 执行 · Shift+Enter 换行 · Tab 补全 · ↑↓ 历史' : '请先选择设备'
+          deviceId ? t('consolePanel.inputPlaceholder') : t('consolePanel.selectDeviceFirst')
         "
         class="flex-1 resize-none text-sm font-mono bg-transparent text-primary focus:outline-none placeholder:text-faint disabled:opacity-50 leading-5"
       />
-      <span v-if="acLoading" class="text-xs text-faint shrink-0">采集上下文...</span>
-      <span v-else-if="execRunning" class="text-xs text-faint shrink-0">执行中...</span>
+      <span v-if="acLoading" class="text-xs text-faint shrink-0">{{
+        t("consolePanel.probingContext")
+      }}</span>
+      <span v-else-if="execRunning" class="text-xs text-faint shrink-0">{{
+        t("consolePanel.running")
+      }}</span>
     </div>
   </div>
 </template>

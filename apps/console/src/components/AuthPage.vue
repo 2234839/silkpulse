@@ -6,7 +6,22 @@
  * 游客可一键进入 Playground，也可创建自己的临时项目 Key（最长 5 天）。
  */
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { copyText } from "../utils/clipboard";
+import { locales } from "../i18n";
+import { useLocale } from "../composables/useLocale";
+
+const { t, locale } = useI18n();
+const { setLocale } = useLocale();
+
+/** 语言菜单展开状态（点击外部关闭） */
+const langMenuOpen = ref(false);
+
+/** 各语言的自我显示名（语言名用本语言书写是惯例，不走消息包） */
+const LANG_LABELS: Record<"en" | "zh", string> = {
+  en: "English",
+  zh: "简体中文", // i18n-allowed
+};
 
 const emit = defineEmits<{
   /** 验证成功 */
@@ -49,13 +64,13 @@ async function submitAuth() {
   try {
     const ok = await props.onVerify(authKeyInput.value.trim());
     if (!ok) {
-      authError.value = "密钥无效或已过期，请检查后重试";
+      authError.value = t("auth.invalidKey");
       return;
     }
     authKeyInput.value = "";
     emit("success");
   } catch {
-    authError.value = "网络错误，请检查服务器连接";
+    authError.value = t("common.networkError");
   } finally {
     authLoading.value = false;
   }
@@ -68,36 +83,58 @@ async function handleGuestLogin() {
   try {
     const ok = await props.onGuestLogin();
     if (!ok) {
-      authError.value = "游客模式暂不可用，请稍后重试";
+      authError.value = t("auth.guestUnavailable");
       return;
     }
     emit("success");
   } catch {
-    authError.value = "网络错误，请检查服务器连接";
+    authError.value = t("common.networkError");
   } finally {
     authLoading.value = false;
   }
 }
 
 /** ── 游客自建项目 Key ── */
-/** 随机项目名：形容词 + 名词 + 4 位尾缀，好记不撞车 */
+/** 各语言随机项目名词库：形容词 + 名词 + 4 位尾缀，好记不撞车 */
+const NAME_POOLS: Record<"en" | "zh", { adjectives: string[]; nouns: string[] }> = {
+  en: {
+    adjectives: [
+      "Happy",
+      "Quiet",
+      "Flashy",
+      "Wavy",
+      "Cloudy",
+      "Meteoric",
+      "Lemony",
+      "Piney",
+      "Dolphin",
+      "Sunset",
+    ],
+    nouns: [
+      "Puppy",
+      "Lighthouse",
+      "Tangerine",
+      "Glacier",
+      "Firefly",
+      "Letter",
+      "Windchime",
+      "Seashell",
+      "Mist",
+      "Mountain",
+    ],
+  },
+  zh: {
+    adjectives: ["快乐", "安静", "闪也", "波涛", "云朵", "流星", "柠檬", "松果", "海豚", "晚霞"], // i18n-allowed: 中文词库
+    nouns: ["小狗", "灯塔", "橘子", "冰川", "萤火", "信笺", "风铃", "拾贝", "晨雾", "远山"], // i18n-allowed: 中文词库
+  },
+};
+
+/** 随机项目名：取当前语言的词库，形容词 + 名词 + 4 位尾缀 */
 function randomProjectName(): string {
-  const adjectives = [
-    "快乐",
-    "安静",
-    "闪也",
-    "波涛",
-    "云朵",
-    "流星",
-    "柠檬",
-    "松果",
-    "海豚",
-    "晚霞",
-  ];
-  const nouns = ["小狗", "灯塔", "橘子", "冰川", "萤火", "信笺", "风铃", "拾贝", "晨雾", "远山"];
+  const pools = locale.value === "zh" ? NAME_POOLS.zh : NAME_POOLS.en;
   const tail = Math.random().toString(36).slice(2, 6);
   const pick = <T>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
-  return `${pick(adjectives)}${pick(nouns)}-${tail}`;
+  return `${pick(pools.adjectives)}${pick(pools.nouns)}-${tail}`;
 }
 /** 自定义项目名（可选，默认预填随机名，可一键换） */
 const guestNameInput = ref(randomProjectName());
@@ -125,7 +162,7 @@ async function guestEnterConsole() {
     guestResult.value = null;
     emit("success");
   } else {
-    authError.value = "创建成功但登录失败，请把密钥粘贴到上方登录框重试";
+    authError.value = t("auth.createdButLoginFailed");
   }
 }
 
@@ -136,7 +173,7 @@ async function handleGuestCreate() {
   try {
     const result = await props.onGuestCreateProject(guestNameInput.value);
     if (!result) {
-      authError.value = "创建失败（可能太频繁，每小时最多 5 个）";
+      authError.value = t("auth.createFailed");
       return;
     }
     guestResult.value = result;
@@ -146,7 +183,7 @@ async function handleGuestCreate() {
     /** 创建即进控制台：密钥已在剪贴板，控制台内还会弹窗再展一次 */
     await guestEnterConsole();
   } catch {
-    authError.value = "网络错误，请检查服务器连接";
+    authError.value = t("common.networkError");
   } finally {
     authLoading.value = false;
   }
@@ -160,13 +197,39 @@ async function handleGuestCopy() {
 
 /** 到期时间格式化 */
 function fmtExpires(iso?: string): string {
-  if (!iso) return "5 天后";
+  if (!iso) return t("auth.expiresDefault");
   return new Date(iso).toLocaleString();
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col-reverse lg:flex-row bg-gray-900 text-white">
+  <div class="min-h-screen flex flex-col-reverse lg:flex-row bg-gray-900 text-white relative">
+    <!-- 语言切换（右上角） -->
+    <div class="absolute top-3 right-3 z-20">
+      <button
+        @click="langMenuOpen = !langMenuOpen"
+        class="px-2.5 py-1.5 text-xs rounded-lg text-gray-400 hover:text-white hover:bg-white/10 border border-gray-700 transition"
+      >
+        🌐 {{ t("shell.language") }}
+      </button>
+      <div
+        v-if="langMenuOpen"
+        class="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[120px] z-50"
+      >
+        <button
+          v-for="lang in locales"
+          :key="lang"
+          @click="
+            setLocale(lang);
+            langMenuOpen = false;
+          "
+          class="w-full text-left px-3 py-2 text-xs transition"
+          :class="locale === lang ? 'text-blue-400 font-medium' : 'text-gray-300 hover:bg-white/10'"
+        >
+          {{ LANG_LABELS[lang] }}
+        </button>
+      </div>
+    </div>
     <!-- 左侧：产品自述（窄屏时排在登录区下方） -->
     <div
       class="flex-1 flex flex-col justify-center px-6 py-10 sm:px-10 lg:px-16 lg:py-0 lg:max-w-[55%]"
@@ -182,48 +245,46 @@ function fmtExpires(iso?: string): string {
           <span class="text-2xl font-bold tracking-tight">SilkPulse</span>
           <span
             class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20"
-            >悬丝诊脉</span
+            >{{ t("auth.brandBadge") }}</span
           >
         </div>
 
         <!-- 一句话定位 -->
         <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold leading-tight mb-3">
-          AI 原生的<br class="hidden sm:block" />远程设备调试器
+          {{ t("auth.taglineLine1") }}<br class="hidden sm:block" />{{ t("auth.taglineLine2") }}
         </h1>
         <p class="text-gray-400 text-sm sm:text-base leading-relaxed mb-8">
-          测试同学报「测试机上白屏」「手机上打不开」时，开发者无法用本地 DevTools
-          调试远在别处的设备。 SilkPulse 让 AI
-          直接接入远程页面——看结构、读日志、执行诊断、操作元素，完成「远程诊断→操作→验证」闭环。
+          {{ t("auth.positioning") }}
         </p>
 
         <!-- 核心能力卡片 -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
             <div class="text-lg mb-1.5">🔍</div>
-            <h3 class="font-semibold text-sm mb-1">远程透视</h3>
+            <h3 class="font-semibold text-sm mb-1">{{ t("auth.cardXrayTitle") }}</h3>
             <p class="text-gray-500 text-xs leading-relaxed">
-              console / 网络 / 错误 / DOM 快照，穿透 shadow DOM + iframe
+              {{ t("auth.cardXrayDesc") }}
             </p>
           </div>
           <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
             <div class="text-lg mb-1.5">🤖</div>
-            <h3 class="font-semibold text-sm mb-1">AI 操作</h3>
+            <h3 class="font-semibold text-sm mb-1">{{ t("auth.cardAiTitle") }}</h3>
             <p class="text-gray-500 text-xs leading-relaxed">
-              AI 直接在远程页面点击、输入、滚动、截图，像人类一样操作
+              {{ t("auth.cardAiDesc") }}
             </p>
           </div>
           <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
             <div class="text-lg mb-1.5">📡</div>
-            <h3 class="font-semibold text-sm mb-1">多设备并发</h3>
+            <h3 class="font-semibold text-sm mb-1">{{ t("auth.cardConcurrentTitle") }}</h3>
             <p class="text-gray-500 text-xs leading-relaxed">
-              同时调试多台设备，断线重连不丢历史，环形缓冲区兜底
+              {{ t("auth.cardConcurrentDesc") }}
             </p>
           </div>
           <div class="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
             <div class="text-lg mb-1.5">🧩</div>
-            <h3 class="font-semibold text-sm mb-1">零侵入接入</h3>
+            <h3 class="font-semibold text-sm mb-1">{{ t("auth.cardZeroIntroTitle") }}</h3>
             <p class="text-gray-500 text-xs leading-relaxed">
-              script 标签 / bookmarklet / userscript，不改源码也能接入
+              {{ t("auth.cardZeroIntroDesc") }}
             </p>
           </div>
         </div>
@@ -235,7 +296,7 @@ function fmtExpires(iso?: string): string {
             target="_blank"
             rel="noopener noreferrer"
             class="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-            title="GitHub 开源地址，觉得有用求个 Star ⭐"
+            :title="t('auth.githubTitle')"
             >⭐ GitHub</a
           >
           <span class="text-gray-700">·</span>
@@ -245,7 +306,7 @@ function fmtExpires(iso?: string): string {
             >📝 Blog</router-link
           >
           <span class="text-gray-700">·</span>
-          <span>Script 标签</span>
+          <span>{{ t("auth.scriptTag") }}</span>
           <span class="text-gray-700">·</span>
           <span>Bookmarklet</span>
           <span class="text-gray-700">·</span>
@@ -262,15 +323,15 @@ function fmtExpires(iso?: string): string {
     >
       <div class="w-full max-w-sm space-y-6">
         <div class="text-center lg:text-left">
-          <h2 class="text-xl font-bold mb-1">登录控制台</h2>
-          <p class="text-gray-500 text-sm">输入密钥以访问远程设备</p>
+          <h2 class="text-xl font-bold mb-1">{{ t("auth.signInTitle") }}</h2>
+          <p class="text-gray-500 text-sm">{{ t("auth.signInSubtitle") }}</p>
         </div>
 
         <div class="space-y-3">
           <input
             v-model="authKeyInput"
             type="password"
-            placeholder="超管密钥或项目密钥"
+            :placeholder="t('auth.keyPlaceholder')"
             class="w-full px-4 py-3 bg-gray-800 text-white rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none text-sm"
             @keydown.enter="submitAuth"
             :disabled="authLoading"
@@ -280,7 +341,7 @@ function fmtExpires(iso?: string): string {
             :disabled="authLoading || !authKeyInput.trim()"
             class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white rounded-lg font-medium text-sm transition"
           >
-            {{ authLoading ? "验证中..." : "登录" }}
+            {{ authLoading ? t("auth.signingIn") : t("auth.signIn") }}
           </button>
           <p v-if="authError" class="text-red-400 text-sm text-center">{{ authError }}</p>
 
@@ -288,7 +349,7 @@ function fmtExpires(iso?: string): string {
           <div v-if="playgroundEnabled" class="pt-2">
             <div class="flex items-center gap-3 mb-3">
               <div class="flex-1 h-px bg-gray-700"></div>
-              <span class="text-xs text-gray-500">或</span>
+              <span class="text-xs text-gray-500">{{ t("auth.or") }}</span>
               <div class="flex-1 h-px bg-gray-700"></div>
             </div>
             <button
@@ -297,7 +358,7 @@ function fmtExpires(iso?: string): string {
               class="w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition flex items-center justify-center gap-2"
             >
               <span>🎮</span>
-              <span>游客访问 Playground</span>
+              <span>{{ t("auth.guestPlayground") }}</span>
             </button>
           </div>
 
@@ -305,20 +366,23 @@ function fmtExpires(iso?: string): string {
           <div v-if="guestProjectsEnabled" class="pt-4">
             <div class="flex items-center gap-3 mb-3">
               <div class="flex-1 h-px bg-gray-700"></div>
-              <span class="text-xs text-gray-500">游客进阶</span>
+              <span class="text-xs text-gray-500">{{ t("auth.guestExtras") }}</span>
               <div class="flex-1 h-px bg-gray-700"></div>
             </div>
 
             <!-- 创建表单 -->
             <div v-if="!guestResult" class="space-y-2">
               <p class="text-xs text-gray-500 leading-relaxed">
-                创建一个<span class="text-gray-300">只属于你</span>的临时项目 Key，设备互相隔离。
-                <span class="text-yellow-500">最长存活 5 天</span>，到期自动销毁。
+                {{ t("auth.guestCreatePrefix")
+                }}<span class="text-gray-300">{{ t("auth.guestYoursAlone") }}</span
+                >{{ t("auth.guestCreateMiddle") }}
+                <span class="text-yellow-500">{{ t("auth.guestLivesMax5Days") }}</span
+                >{{ t("auth.guestCreateSuffix") }}
               </p>
               <div class="flex gap-2">
                 <input
                   v-model="guestNameInput"
-                  placeholder="项目名称（可选）"
+                  :placeholder="t('auth.guestNamePlaceholder')"
                   maxlength="30"
                   class="flex-1 px-3 py-2 bg-gray-800 text-white rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none text-sm"
                   @keydown.enter="handleGuestCreate"
@@ -326,7 +390,7 @@ function fmtExpires(iso?: string): string {
                 />
                 <button
                   @click="guestNameInput = randomProjectName()"
-                  title="换一个随机项目名"
+                  :title="t('auth.randomNameTitle')"
                   class="px-2.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-lg border border-gray-700 text-sm transition"
                 >
                   🎲
@@ -336,7 +400,7 @@ function fmtExpires(iso?: string): string {
                   :disabled="authLoading"
                   class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition whitespace-nowrap"
                 >
-                  {{ authLoading ? "创建中..." : "🔑 创建我的 Key" }}
+                  {{ authLoading ? t("auth.creating") : t("auth.createMyKey") }}
                 </button>
               </div>
             </div>
@@ -345,10 +409,10 @@ function fmtExpires(iso?: string): string {
             <div v-else class="space-y-3">
               <div class="bg-yellow-900/20 border border-yellow-700/40 rounded-lg p-3 space-y-2">
                 <p class="text-xs text-yellow-400 font-semibold">
-                  ⚠️ 这是你的项目密钥，仅展示这一次，请立即复制保存！
+                  {{ t("auth.keyShowOnceWarning") }}
                 </p>
                 <p class="text-xs text-yellow-500/70 leading-relaxed">
-                  关闭此页后将无法再查看（服务器只存哈希）。丢了只能重新创建。
+                  {{ t("auth.keyShowOnceHint") }}
                 </p>
                 <code
                   class="block px-2 py-1.5 text-xs bg-gray-900 rounded font-mono break-all text-green-400 select-all"
@@ -359,12 +423,12 @@ function fmtExpires(iso?: string): string {
                     @click="guestEnterConsole"
                     :title="
                       guestCopied
-                        ? '密钥已复制，直接进入控制台'
-                        : '尚未复制成功，进入后请自行保存密钥'
+                        ? t('auth.enterConsoleCopiedTitle')
+                        : t('auth.enterConsoleNotCopiedTitle')
                     "
                     class="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-medium text-xs transition"
                   >
-                    🚀 直接进控制台
+                    {{ t("auth.enterConsole") }}
                   </button>
                   <button
                     @click="handleGuestCopy"
@@ -375,13 +439,17 @@ function fmtExpires(iso?: string): string {
                     "
                     class="px-3 py-2 rounded font-medium text-xs transition"
                   >
-                    {{ guestCopied ? "✓ 已复制" : "📋 复制" }}
+                    {{ guestCopied ? t("common.copied") : t("common.copy") }}
                   </button>
                 </div>
               </div>
               <p class="text-[11px] text-gray-500">
-                项目「{{ guestResult.projectName }}」·
-                {{ fmtExpires(guestResult.expiresAt) }}自动销毁 · Project ID:
+                {{
+                  t("auth.projectInfo", {
+                    name: guestResult.projectName,
+                    expires: fmtExpires(guestResult.expiresAt),
+                  })
+                }}
                 <code class="text-gray-400">{{ guestResult.projectId }}</code>
               </p>
             </div>
@@ -390,10 +458,12 @@ function fmtExpires(iso?: string): string {
 
         <div class="pt-4 space-y-2">
           <p class="text-xs text-gray-500 leading-relaxed">
-            <span class="text-gray-400">超管密钥</span>可查看所有项目和设备<br />
-            <span class="text-gray-400">项目密钥</span>只能查看对应项目的设备
+            <span class="text-gray-400">{{ t("auth.keyScopeAdminLabel") }}</span
+            >{{ t("auth.keyScopeAdminRest") }}<br />
+            <span class="text-gray-400">{{ t("auth.keyScopeProjectLabel") }}</span
+            >{{ t("auth.keyScopeProjectRest") }}
           </p>
-          <p class="text-xs text-gray-600">密钥安全存储在浏览器本地</p>
+          <p class="text-xs text-gray-600">{{ t("auth.keyStorageHint") }}</p>
         </div>
 
         <!-- 游客模式提示 -->
@@ -402,13 +472,13 @@ function fmtExpires(iso?: string): string {
           class="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3"
         >
           <p class="text-xs text-yellow-400/80 leading-relaxed">
-            🎮 以上是对游客的限制：数据在公网传输、项目最长存活 5 天、到期自动销毁<br />
+            {{ t("auth.guestNotice") }}<br />
             <a
               :href="GITHUB_URL"
               target="_blank"
               rel="noopener noreferrer"
               class="text-yellow-600 hover:text-yellow-500 underline underline-offset-2"
-              >有长期需要建议自己部署一份（开源免费，顺手求个 ⭐）</a
+              >{{ t("auth.guestDeployLink") }}</a
             >
           </p>
         </div>

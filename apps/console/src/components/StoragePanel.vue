@@ -9,8 +9,11 @@
  * 复用 server 的 /storage 端点（GET 读 / POST set|delete）。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import ObjectInspector from "./ObjectInspector.vue";
 import { apiFetch } from "../utils/api";
+
+const { t } = useI18n();
 type StorageType = "local" | "session" | "cookie" | "indexeddb";
 
 /**
@@ -226,7 +229,7 @@ async function saveSelected() {
     }),
   });
   if (res.ok) {
-    showStorageFeedback("✓ 已保存");
+    showStorageFeedback(t("storagePanel.saved"));
     await loadStorage();
   }
 }
@@ -263,7 +266,7 @@ async function saveNewStorage() {
     }),
   });
   if (res.ok) {
-    showStorageFeedback("✓ 已保存");
+    showStorageFeedback(t("storagePanel.saved"));
     cancelAddStorage();
     await loadStorage();
   }
@@ -282,7 +285,7 @@ async function deleteStorage(key: string) {
     }),
   });
   if (res.ok) {
-    showStorageFeedback("✓ 已删除");
+    showStorageFeedback(t("storagePanel.deleted"));
     await loadStorage();
   }
 }
@@ -359,7 +362,7 @@ function exportStorage() {
   a.download = `silkpulse-storage-${storageTypeLabel.value}-${date}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  showStorageFeedback("✓ 已导出");
+  showStorageFeedback(t("storagePanel.exported"));
 }
 
 /**
@@ -391,7 +394,7 @@ async function onImportFile(e: Event) {
     }
     entries = obj;
   } catch {
-    showStorageFeedback("导入失败：文件格式不正确", true);
+    showStorageFeedback(t("storagePanel.importFailed"), true);
     return;
   }
   let ok = 0;
@@ -409,7 +412,7 @@ async function onImportFile(e: Event) {
     if (res.ok) ok++;
   }
   await loadStorage(true);
-  showStorageFeedback(`✓ 已导入 ${ok}/${Object.keys(entries).length} 条`);
+  showStorageFeedback(t("storagePanel.imported", { ok, total: Object.keys(entries).length }));
 }
 
 /** IndexedDB store 展开/收起 */
@@ -443,7 +446,7 @@ async function deleteIndexedDBRecord(_dbName: string, storeName: string, key: st
     }),
   });
   if (res.ok) {
-    showStorageFeedback("✓ 已删除");
+    showStorageFeedback(t("storagePanel.deleted"));
     await loadStorage();
   }
 }
@@ -567,13 +570,13 @@ const isNewValueJson = computed(() => {
       <div class="ml-auto flex items-center gap-2">
         <span v-if="formattedUpdateTime" class="text-[10px] text-faint flex items-center gap-1">
           <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-          实时 · {{ formattedUpdateTime }}
+          {{ t("storagePanel.live", { time: formattedUpdateTime }) }}
         </span>
         <!-- 搜索（仅平铺 storage 类型） -->
         <input
           v-if="storageType !== 'indexeddb'"
           v-model="storageSearch"
-          placeholder="搜索 key / value..."
+          :placeholder="t('storagePanel.searchPlaceholder')"
           class="w-44 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
         />
         <!-- 导出/导入（仅平铺 storage 类型） -->
@@ -582,13 +585,13 @@ const isNewValueJson = computed(() => {
             @click="exportStorage"
             class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
           >
-            导出
+            {{ t("storagePanel.export") }}
           </button>
           <button
             @click="triggerImport"
             class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
           >
-            导入
+            {{ t("storagePanel.import") }}
           </button>
           <input
             ref="importFileInput"
@@ -603,7 +606,7 @@ const isNewValueJson = computed(() => {
           @click="startAddStorage"
           class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
         >
-          + 新增
+          {{ t("storagePanel.add") }}
         </button>
         <button
           v-if="storageType === 'indexeddb'"
@@ -611,7 +614,7 @@ const isNewValueJson = computed(() => {
           :disabled="storageLoading"
           class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary disabled:opacity-50"
         >
-          {{ storageLoading ? "..." : "刷新" }}
+          {{ storageLoading ? "..." : t("storagePanel.refresh") }}
         </button>
         <span
           v-if="storageFeedback"
@@ -629,11 +632,11 @@ const isNewValueJson = computed(() => {
     <!-- ==================== IndexedDB 树状视图 ==================== -->
     <div v-if="storageType === 'indexeddb'" class="flex-1 overflow-y-auto p-4 font-mono text-xs">
       <div v-if="storageLoading && indexedDBData.length === 0" class="text-faint text-center py-8">
-        加载中...
+        {{ t("storagePanel.loading") }}
       </div>
       <div v-else-if="indexedDBData.length === 0" class="text-faint text-center py-8">
-        暂无 IndexedDB 数据库<br />
-        <span class="text-[10px]">（IndexedDB 需要浏览器支持 indexedDB.databases() API）</span>
+        {{ t("storagePanel.indexedDbEmpty") }}<br />
+        <span class="text-[10px]">{{ t("storagePanel.indexedDbEmptyHint") }}</span>
       </div>
       <template v-else>
         <div v-for="db in indexedDBData" :key="db.name" class="mb-4">
@@ -657,7 +660,9 @@ const isNewValueJson = computed(() => {
                   isStoreExpanded(db.name, store.name) ? "▼" : "▶"
                 }}</span>
                 <span>📦 {{ store.name }}</span>
-                <span class="text-faint text-[10px]">({{ store.recordCount }} 条)</span>
+                <span class="text-faint text-[10px]">{{
+                  t("storagePanel.recordCount", { count: store.recordCount })
+                }}</span>
                 <span v-if="store.keyPath" class="text-faint text-[10px]"
                   >keyPath:
                   {{ Array.isArray(store.keyPath) ? store.keyPath.join(".") : store.keyPath }}</span
@@ -677,16 +682,20 @@ const isNewValueJson = computed(() => {
                   <button
                     @click="deleteIndexedDBRecord(db.name, store.name, record.key)"
                     class="text-[10px] text-faint hover:text-red-500 opacity-0 group-hover:opacity-100 shrink-0"
-                    title="删除此条"
+                    :title="t('storagePanel.deleteRecordTitle')"
                   >
                     ✕
                   </button>
                 </div>
-                <div v-if="store.records.length === 0" class="text-faint italic ml-2">空 store</div>
+                <div v-if="store.records.length === 0" class="text-faint italic ml-2">
+                  {{ t("storagePanel.emptyStore") }}
+                </div>
               </div>
             </div>
           </div>
-          <div v-else class="ml-4 text-faint italic text-[10px] mt-1">无 objectStore</div>
+          <div v-else class="ml-4 text-faint italic text-[10px] mt-1">
+            {{ t("storagePanel.noObjectStore") }}
+          </div>
         </div>
       </template>
     </div>
@@ -695,17 +704,19 @@ const isNewValueJson = computed(() => {
     <template v-else>
       <!-- 表格（可滚动区域） -->
       <div class="flex-1 overflow-y-auto">
-        <div v-if="storageLoading" class="text-faint text-center py-8">加载中...</div>
+        <div v-if="storageLoading" class="text-faint text-center py-8">
+          {{ t("storagePanel.loading") }}
+        </div>
         <table v-else class="w-full text-sm">
           <thead
             class="bg-surface text-secondary text-xs uppercase sticky top-0 z-10 shadow-[0_1px_0_0_var(--cs-border)]"
           >
             <tr>
-              <th class="text-left px-3 py-2 w-1/4">Key</th>
-              <th class="text-left px-3 py-2">Value</th>
-              <th class="text-left px-3 py-2 w-16">大小</th>
-              <th class="text-left px-3 py-2 w-28">更新时间</th>
-              <th class="text-right px-3 py-2 w-16">操作</th>
+              <th class="text-left px-3 py-2 w-1/4">{{ t("storagePanel.colKey") }}</th>
+              <th class="text-left px-3 py-2">{{ t("storagePanel.colValue") }}</th>
+              <th class="text-left px-3 py-2 w-16">{{ t("storagePanel.colSize") }}</th>
+              <th class="text-left px-3 py-2 w-28">{{ t("storagePanel.colUpdated") }}</th>
+              <th class="text-right px-3 py-2 w-16">{{ t("storagePanel.colActions") }}</th>
             </tr>
           </thead>
           <tbody>
@@ -737,22 +748,26 @@ const isNewValueJson = computed(() => {
                     @click="deleteStorage(String(key))"
                     class="text-xs px-2 py-0.5 rounded border border-red-soft text-red-500 hover:bg-red-soft"
                   >
-                    删除
+                    {{ t("storagePanel.delete") }}
                   </button>
                 </td>
               </tr>
             </template>
             <!-- 搜索无命中 -->
             <tr v-else-if="storageSearch.trim()">
-              <td :colspan="4" class="text-faint text-center py-8 text-sm">无匹配项</td>
+              <td :colspan="4" class="text-faint text-center py-8 text-sm">
+                {{ t("storagePanel.noMatch") }}
+              </td>
             </tr>
             <!-- 空状态 -->
             <tr v-else-if="!storageAdding">
               <td :colspan="4" class="text-faint text-center py-8 text-sm">
                 {{
                   storageType === "cookie"
-                    ? "暂无 Cookie"
-                    : `暂无 ${storageType === "local" ? "localStorage" : "sessionStorage"} 数据`
+                    ? t("storagePanel.emptyCookie")
+                    : t("storagePanel.emptyTyped", {
+                        name: storageType === "local" ? "localStorage" : "sessionStorage",
+                      })
                 }}
               </td>
             </tr>
@@ -765,7 +780,7 @@ const isNewValueJson = computed(() => {
         <!-- 新增模式 -->
         <div v-if="storageAdding" class="p-4 space-y-3">
           <div class="flex items-center gap-2">
-            <span class="text-xs text-faint">新增 key:</span>
+            <span class="text-xs text-faint">{{ t("storagePanel.newKeyLabel") }}</span>
             <input
               v-model="storageNewKey"
               placeholder="key"
@@ -776,21 +791,21 @@ const isNewValueJson = computed(() => {
               @click="saveNewStorage"
               class="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 shrink-0"
             >
-              保存
+              {{ t("storagePanel.save") }}
             </button>
             <button
               @click="cancelAddStorage"
               class="text-xs px-3 py-1.5 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary shrink-0"
             >
-              取消
+              {{ t("storagePanel.cancel") }}
             </button>
           </div>
           <div>
-            <div class="text-[10px] text-faint mb-1">value（支持 JSON 自动格式化）</div>
+            <div class="text-[10px] text-faint mb-1">{{ t("storagePanel.newValueHint") }}</div>
             <textarea
               v-model="storageNewValue"
               rows="4"
-              placeholder='value（如 {"key":"val"} 或 plain string）'
+              :placeholder="t('storagePanel.valuePlaceholder')"
               class="w-full text-xs font-mono px-2 py-1.5 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
               @keydown.esc="cancelAddStorage"
             />
@@ -799,7 +814,7 @@ const isNewValueJson = computed(() => {
               <div
                 class="mt-1 rounded border border-light bg-elevated p-2 overflow-x-auto max-h-64 overflow-y-auto"
               >
-                <div class="text-[10px] text-faint mb-1">JSON 树编辑</div>
+                <div class="text-[10px] text-faint mb-1">{{ t("storagePanel.jsonTreeEdit") }}</div>
                 <ObjectInspector
                   :json="storageNewValue"
                   :editable="true"
@@ -835,7 +850,7 @@ const isNewValueJson = computed(() => {
               >
               <!-- 更新时间 -->
               <span v-if="getKeyTime(selectedKey)" class="text-[10px] text-faint">
-                {{ getKeyTime(selectedKey) }} 更新
+                {{ t("storagePanel.updatedAtSuffix", { time: getKeyTime(selectedKey) }) }}
               </span>
             </div>
             <div class="flex items-center gap-1">
@@ -843,13 +858,13 @@ const isNewValueJson = computed(() => {
                 @click="saveSelected"
                 class="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
               >
-                保存
+                {{ t("storagePanel.save") }}
               </button>
               <button
                 @click="deselectKey"
                 class="text-xs px-3 py-1.5 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary"
               >
-                关闭
+                {{ t("storagePanel.close") }}
               </button>
             </div>
           </div>
@@ -862,7 +877,7 @@ const isNewValueJson = computed(() => {
               class="rounded border border-light bg-elevated p-2 overflow-x-auto max-h-64 overflow-y-auto"
             >
               <div class="text-[10px] text-faint mb-1">
-                JSON 树编辑（点击值直接修改，点击 ▶ 展开/折叠）
+                {{ t("storagePanel.jsonTreeEditHint") }}
               </div>
               <ObjectInspector
                 :json="editDraft"
@@ -873,7 +888,7 @@ const isNewValueJson = computed(() => {
             <!-- 纯文本编辑（JSON 类型可折叠收起；非 JSON 类型直接显示） -->
             <details v-if="selectedValueType === 'json'" class="mt-2">
               <summary class="text-[10px] text-faint cursor-pointer hover:text-secondary">
-                纯文本编辑
+                {{ t("storagePanel.plainTextEdit") }}
               </summary>
               <textarea
                 v-model="editDraft"
@@ -894,7 +909,7 @@ const isNewValueJson = computed(() => {
               @keydown.esc="deselectKey"
             />
             <!-- 操作提示 -->
-            <div class="mt-1 text-[10px] text-faint">⌘/Ctrl+Enter 保存 · Esc 关闭</div>
+            <div class="mt-1 text-[10px] text-faint">{{ t("storagePanel.shortcutHint") }}</div>
           </div>
         </div>
       </div>

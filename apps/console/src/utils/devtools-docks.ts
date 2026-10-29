@@ -8,6 +8,7 @@
  * 注意：devtools-relay 的 wire 格式（vue SuperJSON 信封 / react wall 对象）
  * 由各官方 frontend 决定，dock 只封装差异，不改协议。
  */
+import { t } from "../i18n";
 
 /** dock 注册信息（每个 devtools 插件一份，vue / react / 未来扩展） */
 export interface DevToolsDock {
@@ -148,6 +149,6 @@ export const devToolsDocks: DevToolsDock[] = [elementsDock, vueDock, reactDock];
 /** 按 plugin 名取 dock */
 export function getDock(plugin: string): DevToolsDock {
   const dock = devToolsDocks.find((d) => d.plugin === plugin);
-  if (!dock) throw new Error(`[DevToolsDock] 未注册的 devtools 插件: ${plugin}`);
+  if (!dock) throw new Error(t("devtoolsDocks.unregisteredPlugin", { plugin }));
   return dock;
 }

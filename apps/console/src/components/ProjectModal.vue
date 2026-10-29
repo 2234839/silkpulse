@@ -6,6 +6,7 @@
  * 创建/轮换后返回的 apiKey 仅展示一次，需立即复制保存。
  */
 import { ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { apiFetch } from "../utils/api";
 import { copyText } from "../utils/clipboard";
 import SecretText from "./SecretText.vue";
@@ -25,6 +26,8 @@ interface ProjectPublic {
 
 const props = defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
+
+const { t } = useI18n();
 
 /** 项目列表 */
 const projects = ref<ProjectPublic[]>([]);
@@ -98,7 +101,7 @@ async function rotateProjectKey(pid: string) {
       createdApiKey.value = data.apiKey;
     } else {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      errorMsg.value = data?.error || `操作失败 (${res.status})`;
+      errorMsg.value = data?.error || t("projectModal.operationFailed", { status: res.status });
     }
   } catch {
     /* 忽略 */
@@ -118,7 +121,7 @@ async function toggleProject(pid: string, enabled: boolean) {
       await loadProjects();
     } else {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      errorMsg.value = data?.error || `操作失败 (${res.status})`;
+      errorMsg.value = data?.error || t("projectModal.operationFailed", { status: res.status });
     }
   } catch {
     /* 忽略 */
@@ -127,7 +130,7 @@ async function toggleProject(pid: string, enabled: boolean) {
 
 /** 删除项目 */
 async function deleteProject(pid: string, name: string) {
-  if (!confirm(`确定删除项目「${name}」？关联设备的 projectId 将被清除。`)) return;
+  if (!confirm(t("projectModal.deleteConfirm", { name }))) return;
   errorMsg.value = "";
   try {
     const res = await apiFetch(`/api/projects/${pid}`, { method: "DELETE" });
@@ -135,7 +138,7 @@ async function deleteProject(pid: string, name: string) {
       await loadProjects();
     } else {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      errorMsg.value = data?.error || `操作失败 (${res.status})`;
+      errorMsg.value = data?.error || t("projectModal.operationFailed", { status: res.status });
     }
   } catch {
     /* 忽略 */
@@ -145,7 +148,7 @@ async function deleteProject(pid: string, name: string) {
 /** 复制密钥 */
 async function doCopy(key: string) {
   const ok = await copyText(key);
-  if (ok) createdApiKey.value = "✓ 已复制";
+  if (ok) createdApiKey.value = t("common.copied");
 }
 
 /** 游客项目剩余天数（向上取整） */
@@ -168,7 +171,7 @@ defineExpose({ projects, loadProjects });
       class="bg-surface rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col border border-base"
     >
       <div class="flex items-center justify-between px-5 py-3 border-b border-base">
-        <h3 class="text-sm font-semibold text-primary">📁 项目管理</h3>
+        <h3 class="text-sm font-semibold text-primary">{{ t("projectModal.title") }}</h3>
         <button
           @click="emit('update:modelValue', false)"
           class="text-muted hover:text-primary text-lg"
@@ -187,17 +190,19 @@ defineExpose({ projects, loadProjects });
         </div>
         <!-- 创建项目 -->
         <div class="space-y-2 p-3 rounded border border-base bg-base/50">
-          <h4 class="text-xs font-semibold text-secondary">创建新项目</h4>
+          <h4 class="text-xs font-semibold text-secondary">
+            {{ t("projectModal.createTitle") }}
+          </h4>
           <div class="flex gap-2">
             <input
               v-model="newProjectName"
-              placeholder="项目名称"
+              :placeholder="t('projectModal.namePlaceholder')"
               class="flex-1 px-3 py-1.5 text-sm border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
               @keydown.enter="createProject"
             />
             <input
               v-model="newProjectDesc"
-              placeholder="描述（可选）"
+              :placeholder="t('projectModal.descPlaceholder')"
               class="flex-1 px-3 py-1.5 text-sm border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
             />
             <button
@@ -205,7 +210,7 @@ defineExpose({ projects, loadProjects });
               :disabled="!newProjectName.trim()"
               class="px-4 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
             >
-              创建
+              {{ t("projectModal.create") }}
             </button>
           </div>
           <!-- 新创建的密钥一次性展示 -->
@@ -214,7 +219,7 @@ defineExpose({ projects, loadProjects });
             class="p-3 rounded bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700"
           >
             <p class="text-xs text-yellow-800 dark:text-yellow-200 font-medium mb-1">
-              ⚠️ 密钥仅展示一次，请立即复制保存：
+              {{ t("projectModal.keyShowOnceWarning") }}
             </p>
             <div class="flex items-center gap-2">
               <code
@@ -228,7 +233,7 @@ defineExpose({ projects, loadProjects });
                 @click="doCopy(createdApiKey)"
                 class="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap"
               >
-                复制
+                {{ t("common.copy") }}
               </button>
             </div>
           </div>
@@ -236,7 +241,9 @@ defineExpose({ projects, loadProjects });
 
         <!-- 项目列表 -->
         <div class="space-y-2">
-          <h4 class="text-xs font-semibold text-secondary">已有项目 ({{ projects.length }})</h4>
+          <h4 class="text-xs font-semibold text-secondary">
+            {{ t("projectModal.existingTitle", { count: projects.length }) }}
+          </h4>
           <div
             v-for="p in projects"
             :key="p.id"
@@ -252,17 +259,26 @@ defineExpose({ projects, loadProjects });
                       : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                   "
                   class="ml-2 px-1.5 py-0.5 text-[10px] rounded font-medium"
-                  >{{ p.enabled ? "启用" : "禁用" }}</span
+                  >{{
+                    p.enabled ? t("projectModal.statusEnabled") : t("projectModal.statusDisabled")
+                  }}</span
                 >
                 <span
                   v-if="p.guest"
                   class="ml-1 px-1.5 py-0.5 text-[10px] rounded font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
                   :title="
                     p.expiresAt
-                      ? `${new Date(p.expiresAt).toLocaleString()}自动销毁`
-                      : '最长存活 5 天'
+                      ? t('projectModal.guestBadgeExpires', {
+                          time: new Date(p.expiresAt).toLocaleString(),
+                        })
+                      : t('projectModal.guestBadgeNoExpiry')
                   "
-                  >🔑 游客 · {{ p.expiresAt ? `剩 ${remainDays(p.expiresAt)} 天` : "5 天限" }}</span
+                  >🔑 {{ t("projectModal.guestBadge") }} ·
+                  {{
+                    p.expiresAt
+                      ? t("projectModal.guestDaysLeft", { days: remainDays(p.expiresAt) })
+                      : t("projectModal.guestDaysFixed")
+                  }}</span
                 >
                 <span class="ml-1 text-[10px] text-faint">{{
                   new Date(p.createdAt).toLocaleDateString()
@@ -273,20 +289,20 @@ defineExpose({ projects, loadProjects });
                   @click="toggleProject(p.id, !p.enabled)"
                   class="px-2 py-1 text-[10px] rounded text-secondary hover:bg-base-hover"
                 >
-                  {{ p.enabled ? "禁用" : "启用" }}
+                  {{ p.enabled ? t("projectModal.actionDisable") : t("projectModal.actionEnable") }}
                 </button>
                 <button
                   @click="rotateProjectKey(p.id)"
                   class="px-2 py-1 text-[10px] rounded text-secondary hover:bg-base-hover"
-                  title="重新生成密钥（旧密钥立即失效）"
+                  :title="t('projectModal.rotateTitle')"
                 >
-                  🔄 轮换密钥
+                  {{ t("projectModal.rotate") }}
                 </button>
                 <button
                   @click="deleteProject(p.id, p.name)"
                   class="px-2 py-1 text-[10px] rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
                 >
-                  删除
+                  {{ t("projectModal.delete") }}
                 </button>
               </div>
             </div>
@@ -294,7 +310,7 @@ defineExpose({ projects, loadProjects });
             <div class="text-[10px] text-faint font-mono truncate">{{ p.id }}</div>
           </div>
           <div v-if="projects.length === 0" class="text-center text-xs text-faint py-4">
-            暂无项目，创建一个来管理设备密钥
+            {{ t("projectModal.empty") }}
           </div>
         </div>
       </div>

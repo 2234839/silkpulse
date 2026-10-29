@@ -38,7 +38,7 @@ const { width: leftWidth, onDragStart } = useResizable({
     <!-- 拖拽手柄：悬停/激活加宽高亮，易于发现和抓取 -->
     <div
       class="group relative w-1.5 cursor-col-resize flex-shrink-0 -mx-1 z-10"
-      title="拖拽调整分栏比例"
+      :title="$t('toolCommon.dragSplitTitle')"
       @mousedown="onDragStart"
     >
       <!-- 命中热区比视觉条更宽，容易抓 -->

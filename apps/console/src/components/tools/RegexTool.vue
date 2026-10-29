@@ -67,12 +67,8 @@ const regexResult = computed(() => {
     <template #left>
       <div class="flex flex-col gap-2 min-w-0 h-full">
         <label class="text-xs text-muted flex items-center gap-2">
-          正则表达式
-          <span
-            class="text-faint cursor-help"
-            title="安全提示：对不可信来源的正则建议先做 ReDoS 检测——嵌套量词 (a+)+、(a|a)*、重叠交替 (a|ab)* 都可能触发灾难性回溯。本页有 250ms 输入防抖 + 500 条匹配上限兜底，但浏览器主线程仍可能被长回溯阻塞数秒。可用 recheck（https://makenowjust-labs.github.io/recheck/）或 Node 的 re2 库预检。"
-            >⚠️ ReDoS</span
-          >
+          {{ $t("regexTool.patternLabel") }}
+          <span class="text-faint cursor-help" :title="$t('regexTool.redosTitle')">⚠️ ReDoS</span>
         </label>
         <div class="flex items-center gap-1">
           <span class="text-sm text-muted">/</span>
@@ -92,14 +88,14 @@ const regexResult = computed(() => {
             placeholder="gim"
           />
         </div>
-        <label class="text-xs text-muted mt-2">测试文本</label>
+        <label class="text-xs text-muted mt-2">{{ $t("regexTool.testTextLabel") }}</label>
         <textarea
           v-model="regexInput"
           rows="10"
           spellcheck="false"
           class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
         ></textarea>
-        <label class="text-xs text-muted mt-1">替换为（可选）</label>
+        <label class="text-xs text-muted mt-1">{{ $t("regexTool.replaceLabel") }}</label>
         <input
           v-model="regexReplace"
           type="text"
@@ -112,8 +108,10 @@ const regexResult = computed(() => {
     <template #right>
       <div class="flex-1 overflow-auto min-w-0 h-full">
         <label class="text-xs text-muted block mb-2">
-          匹配结果
-          <span v-if="regexMatches" class="text-green-500">（{{ regexMatches.length }} 个）</span>
+          {{ $t("regexTool.matchesLabel") }}
+          <span v-if="regexMatches" class="text-green-500">{{
+            $t("regexTool.matchCount", { count: regexMatches.length })
+          }}</span>
         </label>
         <div
           v-if="regexError"
@@ -125,7 +123,7 @@ const regexResult = computed(() => {
           v-else-if="regexReplace && regexResult !== null"
           class="bg-surface border border-base rounded p-3"
         >
-          <div class="text-xs text-muted mb-1">替换结果</div>
+          <div class="text-xs text-muted mb-1">{{ $t("regexTool.replaceResult") }}</div>
           <pre class="text-xs text-green-500 whitespace-pre-wrap break-all">{{ regexResult }}</pre>
         </div>
         <div v-else-if="regexMatches" class="bg-surface border border-base rounded p-3 space-y-2">
@@ -134,7 +132,7 @@ const regexResult = computed(() => {
             :key="i"
             class="border-b border-base/30 pb-2 last:border-0"
           >
-            <span class="text-xs text-green-500">Match {{ i + 1 }}</span>
+            <span class="text-xs text-green-500">{{ $t("regexTool.matchN", { n: i + 1 }) }}</span>
             <span class="text-xs text-muted"> @{{ m.index }}</span>
             <code class="block text-xs text-orange-400 py-1 break-all">{{ m.full }}</code>
             <div v-for="(g, gi) in m.groups" :key="gi" class="text-xs text-muted">
@@ -142,7 +140,7 @@ const regexResult = computed(() => {
             </div>
           </div>
         </div>
-        <div v-else class="text-xs text-faint">输入正则和文本后自动匹配...</div>
+        <div v-else class="text-xs text-faint">{{ $t("regexTool.emptyInput") }}</div>
       </div>
     </template>
   </ToolSplitLayout>

@@ -6,7 +6,10 @@
  * 选择器调色时把 HEX 回写输入框
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { useI18n } from "vue-i18n";
 import ColorPicker from "./ColorPicker.vue";
+
+const { t } = useI18n();
 import { parseColor, rgbToHex, type Rgb } from "../../../utils/color";
 
 /** 色值字符串 */
@@ -86,13 +89,13 @@ onBeforeUnmount(() => document.removeEventListener("mousedown", onDocClick));
         spellcheck="false"
         class="flex-1 min-w-0 bg-input border rounded-l p-1.5 text-xs font-mono text-primary focus:outline-none"
         :class="parsed ? 'border-base focus:border-blue-500' : 'border-red-500'"
-        :placeholder="props.placeholder ?? '颜色'"
+        :placeholder="props.placeholder ?? t('colorInput.defaultPlaceholder')"
       />
       <!-- 色块按钮：点击弹出选择器。alpha=1 纯色；alpha<1 才透出大格棋盘格衬底 -->
       <button
         class="w-9 rounded-r border border-l-0 border-base flex-shrink-0"
         :style="swatchStyle"
-        title="打开颜色选择器"
+        :title="t('colorInput.openPickerTitle')"
         @click="open = !open"
       ></button>
     </div>

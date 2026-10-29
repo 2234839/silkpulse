@@ -33,7 +33,7 @@ const emit = defineEmits<{
     >
       <span>{{ message }}</span>
       <button @click="emit('undo')" class="text-blue-400 hover:text-blue-300 font-medium">
-        撤销
+        {{ $t("toolCommon.undo") }}
       </button>
     </div>
   </Transition>

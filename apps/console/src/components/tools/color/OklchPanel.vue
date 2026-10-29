@@ -8,6 +8,7 @@
  * 滑杆不在边界被"弹回来"，能真正调到广色域并得到 color(display-p3 ...) 输出
  */
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   rgbToOklch,
   oklchToRgb,
@@ -18,6 +19,8 @@ import {
   type Oklch,
   type Rgb,
 } from "../../../utils/color";
+
+const { t } = useI18n();
 
 /** 当前颜色（裁剪后的 RGB，单一数据源） */
 const rgb = defineModel<Rgb>({ required: true });
@@ -139,8 +142,12 @@ function onGamutBarClick(e: MouseEvent) {
 }
 
 /** 色域标签文案 */
-const gamutLabel = computed(
-  () => ({ srgb: "sRGB 内", p3: "P3 广色域", out: "超出 P3" })[gamut.value],
+const gamutLabel = computed(() =>
+  gamut.value === "srgb"
+    ? t("oklchPanel.gamutSrgb")
+    : gamut.value === "p3"
+      ? t("oklchPanel.gamutP3")
+      : t("oklchPanel.gamutOut"),
 );
 
 /** 在色相环上按下/拖动：把指针角度换算为 OKLCH 色相（0° 在正上方，顺时针），写 raw 不受 sRGB 裁剪 */
@@ -189,7 +196,7 @@ const wheelPointerStyle = computed(() => {
   <div class="flex flex-col gap-1.5">
     <div class="flex items-baseline justify-between">
       <span class="text-xs font-medium text-primary"
-        >OKLCH <span class="text-faint">L 亮度 · C 鲜艳度 · H 色相</span></span
+        >OKLCH <span class="text-faint">{{ t("oklchPanel.axisHint") }}</span></span
       >
       <span class="text-[10px] text-faint font-mono"
         >{{ lPct }}% {{ oklchValue.c.toFixed(3) }} {{ oklchValue.h }}</span
@@ -200,7 +207,7 @@ const wheelPointerStyle = computed(() => {
       <div
         class="relative w-14 h-14 rounded-full flex-shrink-0 cursor-crosshair wheel"
         :style="{ background: wheelBg }"
-        title="OKLCH 色相环：H 也是 0-360° 角度，但角度定义与 HSL 不同（如 OKLCH 30° ≈ HSL 25° 附近）；环色固定当前 L/C，反映真实亮度下的色相分布"
+        :title="t('oklchPanel.wheelTitle')"
         @mousedown="onWheelPointerDown"
       >
         <div class="absolute inset-[9px] rounded-full bg-surface pointer-events-none"></div>
@@ -274,9 +281,9 @@ const wheelPointerStyle = computed(() => {
         <!-- 色域可视化：当前 L/H 下扫描 C 轴，灰 = sRGB 内 / 蓝 = 仅 P3 / 红 = 两都装不下 -->
         <div class="flex flex-col gap-0.5 pt-1 border-t border-base">
           <div class="flex items-baseline justify-between">
-            <span class="text-[10px] font-medium text-primary"
-              >色域（C 轴扫描 @ L={{ lPct }}% H={{ oklchValue.h }}°）</span
-            >
+            <span class="text-[10px] font-medium text-primary">{{
+              t("oklchPanel.gamutScanTitle", { l: lPct, h: oklchValue.h })
+            }}</span>
             <span
               class="text-[10px] font-mono"
               :class="
@@ -288,7 +295,7 @@ const wheelPointerStyle = computed(() => {
           <div
             class="relative h-4 rounded cursor-pointer gamut-bar"
             :style="{ background: gamutBarStyle }"
-            title="点击设定色度 C；灰色段 sRGB 可显示，蓝色段仅 P3 屏更艳，红色段两边都装不下"
+            :title="t('oklchPanel.gamutBarTitle')"
             @click="onGamutBarClick"
           >
             <span
@@ -297,8 +304,10 @@ const wheelPointerStyle = computed(() => {
             ></span>
           </div>
           <div class="flex justify-between text-[9px] text-faint">
-            <span>0 灰</span><span class="text-muted">sRGB 边界</span
-            ><span class="text-blue-500">P3 边界</span><span>0.4</span>
+            <span>{{ t("oklchPanel.legendGray") }}</span
+            ><span class="text-muted">{{ t("oklchPanel.legendSrgb") }}</span
+            ><span class="text-blue-500">{{ t("oklchPanel.legendP3") }}</span
+            ><span>0.4</span>
           </div>
           <!-- 固定占位：始终渲染，避免出现/消失时页面高度抖动 -->
           <div class="flex items-center gap-1 min-h-[15px]">
@@ -309,9 +318,7 @@ const wheelPointerStyle = computed(() => {
         </div>
       </div>
     </div>
-    <p class="text-[10px] text-faint">
-      等 L 滑动时 perceived 亮度不变，适合做设计系统色阶；色相环转动 H，环色固定当前 L/C
-    </p>
+    <p class="text-[10px] text-faint">{{ t("oklchPanel.footerHint") }}</p>
   </div>
 </template>
 

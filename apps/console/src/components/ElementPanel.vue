@@ -8,6 +8,7 @@
  * 复用 server 的 /element/tree（懒加载子元素）和 /element/inspect（诊断单元素）。
  */
 import { ref, computed, watch, onMounted, nextTick, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import ElementTreeNode from "./ElementTreeNode.vue";
 import { apiFetch } from "../utils/api";
 import { useSnapshot } from "../composables/useSnapshot";
@@ -27,6 +28,8 @@ interface DomChangeData {
   kinds: Array<"added" | "removed" | "attributes" | "text">;
   timestamp: number;
 }
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 当前选中设备 id */
@@ -107,11 +110,11 @@ const screenCanvasRef = ref<HTMLCanvasElement | null>(null);
 const screenStatusText = computed(() => {
   switch (props.screenShareStatus) {
     case "sharing":
-      return "实时中";
+      return t("elementPanel.statusSharing");
     case "stopped":
-      return "已停止";
+      return t("elementPanel.statusStopped");
     case "error":
-      return "出错";
+      return t("elementPanel.statusError");
     default:
       return null;
   }
@@ -159,13 +162,13 @@ async function takeSnapshot() {
     );
     if (!res.ok) {
       const text = await res.text();
-      console.error("[快照失败]", text);
+      console.error("[snapshot failed]", text);
       return;
     }
     const blob = await res.blob();
     snapshotUrl.value = URL.createObjectURL(blob);
   } catch (err) {
-    console.error("[快照异常]", err);
+    console.error("[snapshot error]", err);
   } finally {
     snapshotLoading.value = false;
   }
@@ -536,7 +539,7 @@ async function syncValueToRemote(val: string) {
       body: JSON.stringify({ code }),
     });
   } catch (err) {
-    console.error("[值同步失败]", err);
+    console.error("[value sync failed]", err);
   } finally {
     syncingValue.value = false;
   }
@@ -666,14 +669,14 @@ async function screenshotElement() {
     const url = `/api/devices/${props.deviceId}/screenshot?idx=${selectedElementIdx.value}&format=png&scale=2`;
     const res = await apiFetch(url);
     if (!res.ok) {
-      const text = await res.text().catch(() => "未知错误");
-      console.error("[元素截图失败]", text);
+      const text = await res.text().catch(() => "unknown error");
+      console.error("[element screenshot failed]", text);
       return;
     }
     const blob = await res.blob();
     elementScreenshotUrl.value = URL.createObjectURL(blob);
   } catch (err) {
-    console.error("[元素截图异常]", err);
+    console.error("[element screenshot error]", err);
   } finally {
     elementScreenshotLoading.value = false;
   }
@@ -847,7 +850,7 @@ onMounted(() => {
               : 'bg-elevated text-muted hover:text-primary'
           "
         >
-          DOM 树
+          {{ t("elementPanel.viewTree") }}
         </button>
         <button
           @click="leftView = 'preview'"
@@ -858,7 +861,7 @@ onMounted(() => {
               : 'bg-elevated text-muted hover:text-primary'
           "
         >
-          布局预览
+          {{ t("elementPanel.viewPreview") }}
         </button>
         <button
           @click="leftView = 'screen'"
@@ -869,7 +872,7 @@ onMounted(() => {
               : 'bg-elevated text-muted hover:text-primary'
           "
         >
-          画面
+          {{ t("elementPanel.viewScreen") }}
         </button>
       </div>
       <button
@@ -878,13 +881,15 @@ onMounted(() => {
         :disabled="elementTreeLoading"
         class="text-xs text-faint hover:text-primary disabled:opacity-50"
       >
-        {{ elementTreeLoading ? "加载中..." : "刷新" }}
+        {{ elementTreeLoading ? t("elementPanel.loading") : t("elementPanel.refresh") }}
       </button>
-      <span v-else-if="snapshotData" class="text-xs text-faint whitespace-nowrap"
-        >{{ rectElements.length }} 元素 · {{ snapshotData.viewportWidth }}×{{
-          snapshotData.viewportHeight
-        }}</span
-      >
+      <span v-else-if="snapshotData" class="text-xs text-faint whitespace-nowrap">{{
+        t("elementPanel.previewSummary", {
+          count: rectElements.length,
+          width: snapshotData.viewportWidth,
+          height: snapshotData.viewportHeight,
+        })
+      }}</span>
     </div>
 
     <!-- ═══ 主体区域 ═══ -->
@@ -904,7 +909,7 @@ onMounted(() => {
               v-model="filterQuery"
               @input="onFilterInput"
               type="text"
-              placeholder="搜索元素 (tag/id/class/text)..."
+              :placeholder="t('elementPanel.searchPlaceholder')"
               spellcheck="false"
               autocomplete="off"
               class="w-full text-xs px-2 py-1 bg-base border border-base rounded text-primary placeholder:text-faint focus:outline-none focus:border-primary"
@@ -914,12 +919,16 @@ onMounted(() => {
           <div class="flex-1 overflow-y-auto p-2 font-mono text-xs">
             <!-- filter 搜索模式 -->
             <template v-if="isFiltering">
-              <div v-if="filterLoading" class="text-faint text-center py-4">搜索中...</div>
+              <div v-if="filterLoading" class="text-faint text-center py-4">
+                {{ t("elementPanel.searching") }}
+              </div>
               <div v-else-if="filterResults.length === 0" class="text-faint text-center py-4">
-                无匹配元素
+                {{ t("elementPanel.noMatch") }}
               </div>
               <template v-else>
-                <div class="text-faint text-[10px] mb-2">{{ filterResults.length }} 个匹配</div>
+                <div class="text-faint text-[10px] mb-2">
+                  {{ t("elementPanel.matchCount", { count: filterResults.length }) }}
+                </div>
                 <ElementTreeNode
                   v-for="item in filterResults"
                   :key="item.idx"
@@ -937,10 +946,10 @@ onMounted(() => {
                 v-if="elementTreeLoading && elementTreeRoot.length === 0"
                 class="text-faint text-center py-8"
               >
-                加载中...
+                {{ t("elementPanel.loading") }}
               </div>
               <div v-else-if="elementTreeRoot.length === 0" class="text-faint text-center py-8">
-                暂无元素
+                {{ t("elementPanel.empty") }}
               </div>
               <template v-else>
                 <ElementTreeNode
@@ -977,10 +986,10 @@ onMounted(() => {
         "
       >
         <div v-if="elementInspectLoading" class="text-faint text-center py-8 text-sm">
-          诊断中...
+          {{ t("elementPanel.diagnosing") }}
         </div>
         <div v-else-if="!elementInspect" class="text-faint text-center py-8 text-sm">
-          点击元素查看诊断
+          {{ t("elementPanel.clickToInspect") }}
         </div>
         <template v-else>
           <!-- 悬浮模式下的关闭按钮 + 标题栏 -->
@@ -989,20 +998,27 @@ onMounted(() => {
             class="flex items-center justify-between mb-3 pb-2 border-b border-base"
           >
             <div class="flex items-center gap-2">
-              <span class="text-xs font-semibold text-secondary">元素诊断</span>
+              <span class="text-xs font-semibold text-secondary">{{
+                t("elementPanel.inspectTitle")
+              }}</span>
               <button
                 @click="screenshotElement"
                 :disabled="elementScreenshotLoading"
                 class="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                title="截取此元素"
+                :title="t('elementPanel.screenshotTitle')"
               >
-                📷 {{ elementScreenshotLoading ? "截图中..." : "截图" }}
+                📷
+                {{
+                  elementScreenshotLoading
+                    ? t("elementPanel.screenshotting")
+                    : t("elementPanel.screenshot")
+                }}
               </button>
             </div>
             <button
               @click="floatDiagnosticVisible = false"
               class="text-faint hover:text-primary text-xs px-1"
-              title="关闭诊断面板"
+              :title="t('elementPanel.closePanelTitle')"
             >
               ✕
             </button>
@@ -1022,9 +1038,9 @@ onMounted(() => {
                 @click="screenshotElement"
                 :disabled="elementScreenshotLoading"
                 class="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors shrink-0"
-                title="截取此元素"
+                :title="t('elementPanel.screenshotTitle')"
               >
-                📷 {{ elementScreenshotLoading ? "..." : "截图" }}
+                📷 {{ elementScreenshotLoading ? "..." : t("elementPanel.screenshot") }}
               </button>
             </div>
             <div v-if="elementInspect.classes" class="text-xs text-muted font-mono mt-1">
@@ -1036,15 +1052,19 @@ onMounted(() => {
                 :src="elementScreenshotUrl"
                 @click="screenshotDialogVisible = true"
                 class="w-full rounded border border-base cursor-zoom-in hover:opacity-80 transition-opacity"
-                alt="元素截图"
+                :alt="t('elementPanel.screenshotAlt')"
               />
-              <div class="text-[10px] text-faint mt-0.5 text-center">点击图片放大查看</div>
+              <div class="text-[10px] text-faint mt-0.5 text-center">
+                {{ t("elementPanel.zoomHint") }}
+              </div>
             </div>
           </div>
 
           <!-- 可见性诊断 -->
           <div class="bg-surface border border-base rounded p-3 mb-3">
-            <h4 class="text-xs font-semibold text-secondary mb-2">可见性</h4>
+            <h4 class="text-xs font-semibold text-secondary mb-2">
+              {{ t("elementPanel.visibilityTitle") }}
+            </h4>
             <div class="space-y-1 text-xs font-mono">
               <div class="flex justify-between">
                 <span class="text-faint">display:</span
@@ -1059,7 +1079,7 @@ onMounted(() => {
                 ><span class="text-primary">{{ elementInspect.visibility.opacity }}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-faint">尺寸:</span
+                <span class="text-faint">{{ t("elementPanel.sizeLabel") }}</span
                 ><span class="text-primary"
                   >{{ Math.round(elementInspect.visibility.width) }}×{{
                     Math.round(elementInspect.visibility.height)
@@ -1067,18 +1087,22 @@ onMounted(() => {
                 >
               </div>
               <div class="flex justify-between">
-                <span class="text-faint">在视口内:</span
+                <span class="text-faint">{{ t("elementPanel.inViewportLabel") }}</span
                 ><span
                   :class="
                     elementInspect.visibility.inViewport
                       ? 'text-green-600 dark:text-green-400'
                       : 'text-amber-600 dark:text-amber-400'
                   "
-                  >{{ elementInspect.visibility.inViewport ? "✓ 是" : "✗ 否" }}</span
+                  >{{
+                    elementInspect.visibility.inViewport
+                      ? t("elementPanel.yes")
+                      : t("elementPanel.no")
+                  }}</span
                 >
               </div>
               <div v-if="elementInspect.visibility.coveredBy" class="pt-1 border-t border-light">
-                <span class="text-red-500">被遮挡:</span>
+                <span class="text-red-500">{{ t("elementPanel.coveredByLabel") }}</span>
                 <span class="text-primary">
                   {{ elementInspect.visibility.coveredBy.tag
                   }}<span v-if="elementInspect.visibility.coveredBy.id"
@@ -1095,11 +1119,13 @@ onMounted(() => {
             class="bg-surface border border-base rounded p-3 mb-3"
           >
             <h4 class="text-xs font-semibold text-secondary mb-2 flex items-center gap-2">
-              值同步
-              <span v-if="syncingValue" class="text-blue-500 font-normal animate-pulse"
-                >同步中...</span
-              >
-              <span v-else class="text-faint font-normal">↔ 双向绑定</span>
+              {{ t("elementPanel.valueSyncTitle") }}
+              <span v-if="syncingValue" class="text-blue-500 font-normal animate-pulse">{{
+                t("elementPanel.syncing")
+              }}</span>
+              <span v-else class="text-faint font-normal">{{
+                t("elementPanel.twoWayBinding")
+              }}</span>
             </h4>
             <!-- checkbox / radio -->
             <label
@@ -1114,7 +1140,7 @@ onMounted(() => {
               />
               <span class="text-primary"
                 >{{ elementInspect.inputValue.type }} ({{
-                  editingChecked ? "已选中" : "未选中"
+                  editingChecked ? t("elementPanel.checked") : t("elementPanel.unchecked")
                 }})</span
               >
             </label>
@@ -1137,7 +1163,7 @@ onMounted(() => {
               :placeholder="
                 ('placeholder' in elementInspect.inputValue
                   ? elementInspect.inputValue.placeholder
-                  : '') || '输入值...'
+                  : '') || t('elementPanel.valuePlaceholder')
               "
               rows="2"
               class="w-full text-xs px-2 py-1.5 bg-base border border-base rounded text-primary font-mono focus:outline-none focus:border-blue-500 resize-y"
@@ -1147,15 +1173,17 @@ onMounted(() => {
           <!-- 样式规则（DevTools Styles 面板风格） -->
           <div class="bg-surface border border-base rounded p-3 mb-3">
             <h4 class="text-xs font-semibold text-secondary mb-2 flex items-center gap-2">
-              样式规则
-              <span v-if="elementStylesLoading" class="text-faint font-normal">加载中...</span>
-              <span v-else-if="elementStyles" class="text-faint font-normal"
-                >{{ elementStyles.matchedRules.length }} 条规则</span
-              >
+              {{ t("elementPanel.stylesTitle") }}
+              <span v-if="elementStylesLoading" class="text-faint font-normal">{{
+                t("elementPanel.loading")
+              }}</span>
+              <span v-else-if="elementStyles" class="text-faint font-normal">{{
+                t("elementPanel.rulesCount", { count: elementStyles.matchedRules.length })
+              }}</span>
             </h4>
 
             <div v-if="elementStylesLoading" class="text-faint text-center py-4 text-xs">
-              获取匹配的 CSS 规则...
+              {{ t("elementPanel.loadingRules") }}
             </div>
 
             <template v-else-if="elementStyles && !elementStyles.error">
@@ -1195,9 +1223,9 @@ onMounted(() => {
                   }}</span>
                   <span class="text-faint">← {{ rule.source }}</span>
                   <span v-if="rule.media" class="text-blue-500">@media {{ rule.media }}</span>
-                  <span v-if="rule.crossOrigin" class="text-amber-600 dark:text-amber-400"
-                    >⚠ 跨域不可读</span
-                  >
+                  <span v-if="rule.crossOrigin" class="text-amber-600 dark:text-amber-400">{{
+                    t("elementPanel.crossOriginWarning")
+                  }}</span>
                 </button>
                 <!-- 规则属性（展开时显示） -->
                 <div
@@ -1220,7 +1248,11 @@ onMounted(() => {
                   v-else-if="expandedRules.has(ri) && Object.keys(rule.props).length === 0"
                   class="text-faint text-[10px] ml-4 italic"
                 >
-                  {{ rule.crossOrigin ? "跨域样式表无法读取规则内容" : "无属性" }}
+                  {{
+                    rule.crossOrigin
+                      ? t("elementPanel.crossOriginRuleHint")
+                      : t("elementPanel.noProps")
+                  }}
                 </div>
               </div>
 
@@ -1229,7 +1261,9 @@ onMounted(() => {
                 v-if="elementStyles.inherited.length > 0"
                 class="mt-3 pt-2 border-t border-light"
               >
-                <div class="text-[10px] text-faint font-semibold mb-1">继承属性</div>
+                <div class="text-[10px] text-faint font-semibold mb-1">
+                  {{ t("elementPanel.inheritedTitle") }}
+                </div>
                 <div v-for="(inh, ii) in elementStyles.inherited" :key="ii" class="mb-1.5">
                   <div class="text-[10px] text-green-600 dark:text-green-400">← {{ inh.from }}</div>
                   <div class="bg-base rounded px-2 py-0.5 text-[11px] font-mono space-y-0.5 ml-2">
@@ -1253,7 +1287,7 @@ onMounted(() => {
                 "
                 class="text-faint text-center py-2 text-xs"
               >
-                无匹配的 CSS 规则
+                {{ t("elementPanel.noMatchedRules") }}
               </div>
             </template>
 
@@ -1264,7 +1298,9 @@ onMounted(() => {
 
           <!-- 计算样式 -->
           <div class="bg-surface border border-base rounded p-3 mb-3">
-            <h4 class="text-xs font-semibold text-secondary mb-2">计算样式</h4>
+            <h4 class="text-xs font-semibold text-secondary mb-2">
+              {{ t("elementPanel.computedTitle") }}
+            </h4>
             <div class="space-y-1 text-xs font-mono">
               <div
                 v-for="(v, k) in elementInspect.computedStyle"
@@ -1279,7 +1315,9 @@ onMounted(() => {
 
           <!-- 盒模型 -->
           <div class="bg-surface border border-base rounded p-3 mb-3">
-            <h4 class="text-xs font-semibold text-secondary mb-2">盒模型</h4>
+            <h4 class="text-xs font-semibold text-secondary mb-2">
+              {{ t("elementPanel.boxModelTitle") }}
+            </h4>
             <div class="text-xs font-mono space-y-0.5">
               <div>
                 <span class="text-faint">content:</span>
@@ -1319,7 +1357,9 @@ onMounted(() => {
             v-if="elementInspect.ancestors.length > 0"
             class="bg-surface border border-base rounded p-3"
           >
-            <h4 class="text-xs font-semibold text-secondary mb-2">祖先链</h4>
+            <h4 class="text-xs font-semibold text-secondary mb-2">
+              {{ t("elementPanel.ancestorsTitle") }}
+            </h4>
             <div class="space-y-1">
               <button
                 v-for="a in elementInspect.ancestors"
@@ -1341,9 +1381,11 @@ onMounted(() => {
       <template v-if="leftView === 'preview'">
         <div class="flex-1 flex flex-col overflow-hidden min-w-0" ref="sentinelRef">
           <div class="flex-1 overflow-auto">
-            <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">加载快照...</div>
+            <div v-if="snapLoading" class="text-faint text-center py-8 text-xs">
+              {{ t("elementPanel.snapshotLoading") }}
+            </div>
             <div v-else-if="!snapshotData" class="text-faint text-center py-8 text-xs">
-              快照不可用
+              {{ t("elementPanel.snapshotUnavailable") }}
             </div>
             <template v-else>
               <div
@@ -1411,10 +1453,7 @@ onMounted(() => {
               <div
                 class="px-3 py-1.5 border-t border-base bg-surface flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-muted"
               >
-                <span class="text-faint italic"
-                  >点击元素 → 选中（再次点击 → 选父元素）· Alt+点击 → 直接选父元素 · 📷
-                  截图选中元素</span
-                >
+                <span class="text-faint italic">{{ t("elementPanel.previewHint") }}</span>
               </div>
             </template>
           </div>
@@ -1424,7 +1463,7 @@ onMounted(() => {
             @click="floatDiagnosticVisible = true"
             class="absolute bottom-3 right-3 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg shadow-lg hover:bg-blue-700 z-30"
           >
-            📋 显示诊断
+            📋 {{ t("elementPanel.showDiagnostics") }}
           </button>
         </div>
       </template>
@@ -1442,9 +1481,12 @@ onMounted(() => {
                 @click="takeSnapshot"
                 :disabled="snapshotLoading"
                 class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                title="截取远端页面当前视口（一次性）"
+                :title="t('elementPanel.viewportSnapshotTitle')"
               >
-                📸 {{ snapshotLoading ? "截图中..." : "快照" }}
+                📸
+                {{
+                  snapshotLoading ? t("elementPanel.screenshotting") : t("elementPanel.snapshot")
+                }}
               </button>
               <!-- 实时画面开关 -->
               <div class="w-px h-4 bg-base"></div>
@@ -1453,14 +1495,14 @@ onMounted(() => {
                 @click="startScreenShare"
                 class="px-3 py-1 bg-elevated text-xs rounded hover:bg-base transition-colors"
               >
-                ▶ 实时画面
+                ▶ {{ t("elementPanel.startLive") }}
               </button>
               <button
                 v-else
                 @click="stopScreenShare"
                 class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
               >
-                ⏹ 停止实时
+                ⏹ {{ t("elementPanel.stopLive") }}
               </button>
               <span
                 v-if="screenStatusText"
@@ -1522,13 +1564,13 @@ onMounted(() => {
               :src="snapshotUrl"
               @click="snapshotDialogVisible = true"
               class="max-w-full max-h-full shadow-lg rounded cursor-zoom-in hover:opacity-90 transition-opacity"
-              alt="页面快照"
+              :alt="t('elementPanel.pageSnapshotAlt')"
             />
             <!-- 空状态 -->
             <div v-else class="text-center py-12 px-4">
               <div class="text-4xl mb-3 opacity-30">📸</div>
-              <p class="text-sm text-muted mb-1">点击「📸 快照」截取当前页面</p>
-              <p class="text-xs text-faint">或开启「实时画面」持续查看</p>
+              <p class="text-sm text-muted mb-1">{{ t("elementPanel.emptySnapshotHint") }}</p>
+              <p class="text-xs text-faint">{{ t("elementPanel.emptyLiveHint") }}</p>
             </div>
           </div>
         </div>
@@ -1545,7 +1587,7 @@ onMounted(() => {
         <button
           @click="screenshotDialogVisible = false"
           class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl px-3"
-          title="关闭"
+          :title="t('elementPanel.close')"
         >
           ✕
         </button>
@@ -1553,7 +1595,7 @@ onMounted(() => {
           :src="elementScreenshotUrl ?? ''"
           class="max-w-[90vw] max-h-[90vh] object-contain rounded shadow-2xl"
           @click.stop
-          alt="元素截图（放大）"
+          :alt="t('elementPanel.screenshotZoomAlt')"
         />
       </div>
     </Teleport>

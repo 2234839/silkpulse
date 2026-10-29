@@ -6,7 +6,15 @@
  * 人类时间输入支持 Date 可解析的任意格式。
  */
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { humanDuration } from "../../utils/json-tools";
+
+const { t, locale } = useI18n();
+
+/** 按当前界面语言格式化本地时间展示 */
+function localeString(d: Date): string {
+  return d.toLocaleString(locale.value === "zh" ? "zh-CN" : "en-US");
+}
 
 const tsInput = ref("");
 const tsResult = ref<{ local: string; utc: string; iso: string; relative: string } | null>(null);
@@ -27,7 +35,7 @@ function convertTs() {
   }
   if (isNaN(Number(raw))) {
     tsResult.value = null;
-    tsError.value = `「${raw}」不是合法的数字时间戳`;
+    tsError.value = t("timestampTool.invalidTs", { raw });
     return;
   }
   let num = Number(raw);
@@ -35,16 +43,19 @@ function convertTs() {
   const d = new Date(num);
   if (isNaN(d.getTime())) {
     tsResult.value = null;
-    tsError.value = `「${raw}」超出可表示的时间范围`;
+    tsError.value = t("timestampTool.outOfRange", { raw });
     return;
   }
   tsError.value = "";
   const now = Date.now();
   const diff = now - num;
+  /** 相对时间：duration 复用 jsonTools.* 时长键（humanDuration 内部已走 i18n） */
   const rel =
-    diff > 0 ? `${humanDuration(Math.abs(diff))} 前` : `${humanDuration(Math.abs(diff))} 后`;
+    diff > 0
+      ? t("timestampTool.relAgo", { duration: humanDuration(Math.abs(diff)) })
+      : t("timestampTool.relLater", { duration: humanDuration(Math.abs(diff)) });
   tsResult.value = {
-    local: d.toLocaleString("zh-CN"),
+    local: localeString(d),
     utc: d.toUTCString(),
     iso: d.toISOString(),
     relative: rel,
@@ -61,7 +72,7 @@ function convertDate() {
   const d = new Date(dateInput.value);
   if (isNaN(d.getTime())) {
     dateResult.value = null;
-    dateError.value = `「${dateInput.value}」无法解析为日期`;
+    dateError.value = t("timestampTool.invalidDate", { raw: dateInput.value });
     return;
   }
   dateError.value = "";
@@ -72,14 +83,14 @@ function convertDate() {
 <template>
   <div>
     <div>
-      <label class="text-xs text-muted block mb-2">时间戳 → 人类时间</label>
+      <label class="text-xs text-muted block mb-2">{{ $t("timestampTool.tsToDate") }}</label>
       <div class="flex gap-2">
         <input
           v-model="tsInput"
           type="text"
           spellcheck="false"
           class="flex-1 bg-input border border-base rounded px-2 py-1.5 text-xs font-mono text-primary focus:outline-none focus:border-blue-500"
-          placeholder="1691563200000 (ms) 或 1691563200 (s)"
+          :placeholder="$t('timestampTool.tsPlaceholder')"
           @input="convertTs"
         />
         <button
@@ -89,7 +100,7 @@ function convertDate() {
           "
           class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          现在
+          {{ $t("timestampTool.now") }}
         </button>
       </div>
       <div v-if="tsResult" class="bg-surface border border-base rounded p-3 mt-2 space-y-1 text-xs">
@@ -98,12 +109,12 @@ function convertDate() {
         </div>
         <div class="text-muted">🌍 UTC: {{ tsResult.utc }}</div>
         <div class="text-muted">🌍 ISO: {{ tsResult.iso }}</div>
-        <div class="text-muted">🕐 相对: {{ tsResult.relative }}</div>
+        <div class="text-muted">🕐 {{ $t("timestampTool.relative") }}: {{ tsResult.relative }}</div>
       </div>
       <p v-else-if="tsError" class="text-xs text-red-500 mt-2">⚠ {{ tsError }}</p>
     </div>
     <div>
-      <label class="text-xs text-muted block mb-2">人类时间 → 时间戳</label>
+      <label class="text-xs text-muted block mb-2">{{ $t("timestampTool.dateToTs") }}</label>
       <input
         v-model="dateInput"
         type="text"

@@ -5,6 +5,7 @@
  * 超时或替换为新清空时丢弃暂存内容。
  */
 import { ref, onUnmounted } from "vue";
+import { t } from "../i18n";
 
 /**
  * @param timeoutMs toast 存续时长（ms），默认 5000
@@ -22,7 +23,7 @@ export function useUndoToast(timeoutMs = 5000) {
    * @param restore 执行撤销时的内容恢复回调
    * @param message toast 文案
    */
-  function clearWithUndo(restore: () => void, message = "已清空") {
+  function clearWithUndo(restore: () => void, message = t("undoToast.cleared")) {
     snapshot = restore;
     toastMessage.value = message;
     visible.value = true;

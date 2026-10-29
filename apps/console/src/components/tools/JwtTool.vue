@@ -6,6 +6,7 @@
  * 含 exp 过期检测，过期状态随全局时钟（父组件 nowTs 经 props 传入）自动翻红。
  */
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import ObjectInspector from "../ObjectInspector.vue";
 import ToolSplitLayout from "./ToolSplitLayout.vue";
 
@@ -14,6 +15,13 @@ const jwtInput = defineModel<string>("input", { default: "" });
 
 /** 父组件注入的响应式当前时间戳（ms），驱动过期状态随时间自动变化 */
 const props = defineProps<{ now: number }>();
+
+const { locale } = useI18n();
+
+/** 按当前界面语言格式化本地时间展示 */
+function localeString(d: Date): string {
+  return d.toLocaleString(locale.value === "zh" ? "zh-CN" : "en-US");
+}
 
 const jwtDecoded = computed(() => {
   const token = jwtInput.value.trim();
@@ -32,7 +40,7 @@ const jwtDecoded = computed(() => {
     let expTime: string | null = null;
     let expired = false;
     if (payload.exp && typeof payload.exp === "number") {
-      expTime = new Date(payload.exp * 1000).toLocaleString("zh-CN");
+      expTime = localeString(new Date(payload.exp * 1000));
       expired = payload.exp * 1000 < props.now;
     }
     return { header, payload, expTime, expired };
@@ -75,16 +83,16 @@ const jwtDecoded = computed(() => {
             v-if="jwtDecoded.expired"
             class="text-red-500 text-xs p-2 bg-red-500/10 border border-red-500/30 rounded"
           >
-            ⏰ Token 已过期（{{ jwtDecoded.expTime }}）
+            {{ $t("jwtTool.expired", { time: jwtDecoded.expTime }) }}
           </div>
           <div
             v-else-if="jwtDecoded.expTime"
             class="text-green-500 text-xs p-2 bg-green-500/10 border border-green-500/30 rounded"
           >
-            ✅ 有效期至：{{ jwtDecoded.expTime }}
+            {{ $t("jwtTool.validUntil", { time: jwtDecoded.expTime }) }}
           </div>
         </template>
-        <div v-else class="text-xs text-faint">粘贴 JWT token 自动解码...</div>
+        <div v-else class="text-xs text-faint">{{ $t("jwtTool.emptyInput") }}</div>
       </div>
     </template>
   </ToolSplitLayout>

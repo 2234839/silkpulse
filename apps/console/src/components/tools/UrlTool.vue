@@ -6,11 +6,14 @@
  * 每项支持单独复制（带「✓ 已复制」反馈）；非法 URL 给红字提示。
  */
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCopyFlash } from "../../composables/useCopyFlash";
 import ToolSplitLayout from "./ToolSplitLayout.vue";
 
 /** 工具箱复制按钮的统一「✓ 已复制」反馈（key 前缀 url:） */
 const { copiedKey, copy: copyWithFlash } = useCopyFlash();
+
+const { t } = useI18n();
 
 const urlInput = ref("");
 
@@ -30,9 +33,9 @@ const urlParts = computed<UrlPart[] | null>(() => {
     return [
       { label: "protocol", value: u.protocol },
       { label: "host", value: u.host },
-      { label: "port", value: u.port || "(默认)" },
+      { label: "port", value: u.port || t("urlTool.defaultPort") },
       { label: "pathname", value: u.pathname },
-      { label: "hash", value: u.hash || "(空)" },
+      { label: "hash", value: u.hash || t("urlTool.emptyHash") },
     ];
   } catch {
     return null;
@@ -84,7 +87,7 @@ const urlQueryRows = computed<{ key: string; value: string }[]>(() => {
       <div class="flex-1 overflow-auto min-w-0 h-full">
         <template v-if="urlInvalid">
           <div class="text-red-500 text-xs p-3 bg-red-500/10 border border-red-500/30 rounded">
-            ⚠ 无法解析为 URL
+            {{ $t("urlTool.invalid") }}
           </div>
         </template>
         <template v-else-if="urlParts">
@@ -101,12 +104,12 @@ const urlQueryRows = computed<{ key: string; value: string }[]>(() => {
                     : 'border-base text-muted hover:border-blue-500 hover:text-primary'
                 "
               >
-                {{ copiedKey === "url-" + p.label ? "✓ 已复制" : "复制" }}
+                {{ copiedKey === "url-" + p.label ? $t("common.copied") : $t("urlTool.copy") }}
               </button>
             </div>
           </div>
           <div v-if="urlQueryRows.length > 0">
-            <label class="text-xs text-muted block mb-1">Query 参数</label>
+            <label class="text-xs text-muted block mb-1">{{ $t("urlTool.queryParams") }}</label>
             <div class="bg-surface border border-base rounded overflow-hidden">
               <table class="w-full text-xs">
                 <thead>
@@ -134,7 +137,7 @@ const urlQueryRows = computed<{ key: string; value: string }[]>(() => {
                             : 'border-base text-muted hover:border-blue-500 hover:text-primary'
                         "
                       >
-                        {{ copiedKey === "urlq-" + i ? "✓" : "复制" }}
+                        {{ copiedKey === "urlq-" + i ? "✓" : $t("urlTool.copy") }}
                       </button>
                     </td>
                   </tr>
@@ -143,7 +146,7 @@ const urlQueryRows = computed<{ key: string; value: string }[]>(() => {
             </div>
           </div>
         </template>
-        <div v-else class="text-xs text-faint">粘贴 URL 后自动解析...</div>
+        <div v-else class="text-xs text-faint">{{ $t("urlTool.emptyInput") }}</div>
       </div>
     </template>
   </ToolSplitLayout>

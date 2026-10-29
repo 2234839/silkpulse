@@ -6,8 +6,11 @@
  * 内联标签编辑。
  */
 import { ref, computed, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import type { DeviceInfo } from "@silkpulse/shared";
 import { apiFetch } from "../utils/api";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 所有设备 */
@@ -63,11 +66,11 @@ const filteredDevices = computed(() => {
   );
 });
 
-/** 无项目归属的标签名 */
-const NO_PROJECT = "未分组";
+/** 无项目归属的分组 key（内部标识，不直接展示；展示名走消息包 ungrouped） */
+const NO_PROJECT = "__ungrouped__";
 /** 分组 key（projectId 或 NO_PROJECT）→ 项目名 */
 function groupLabel(key: string): string {
-  if (key === NO_PROJECT) return NO_PROJECT;
+  if (key === NO_PROJECT) return t("deviceList.ungrouped");
   return props.projectNameMap[key] ?? key.slice(0, 8);
 }
 
@@ -127,7 +130,7 @@ const deletingDeviceId = ref<string | null>(null);
 
 /** 硬删设备（含历史缓冲数据），仅离线设备展示删除入口 */
 async function removeDevice(device: DeviceInfo) {
-  if (!confirm(`确定删除设备「${device.title}」？其日志/网络记录将一并清除。`)) return;
+  if (!confirm(t("deviceList.confirmDelete", { name: device.title }))) return;
   deletingDeviceId.value = device.id;
   try {
     await apiFetch(`/api/devices/${device.id}`, { method: "DELETE" });
@@ -149,12 +152,8 @@ async function clearOfflineDevices(groupKey?: string) {
       : (groupedDevices.value.find((g) => g.key === groupKey)?.devices ?? []);
   const offline = scoped.filter((d) => !isOnline(d));
   if (offline.length === 0) return;
-  const scopeLabel = groupKey === undefined ? "当前范围" : groupLabel(groupKey);
-  if (
-    !confirm(
-      `确定清理「${scopeLabel}」的 ${offline.length} 台离线设备？其日志/网络记录将一并清除。`,
-    )
-  )
+  const scopeLabel = groupKey === undefined ? t("deviceList.currentScope") : groupLabel(groupKey);
+  if (!confirm(t("deviceList.confirmClearOffline", { scope: scopeLabel, count: offline.length })))
     return;
   clearingGroupKey.value = groupKey ?? "__all__";
   try {
@@ -218,11 +217,11 @@ onUnmounted(() => clearInterval(relativeTimeTimer));
 function relativeTime(ts: number): string {
   const elapsed = Math.max(0, now.value - ts);
   const mins = Math.floor(elapsed / 60000);
-  if (mins < 1) return "刚刚";
-  if (mins < 60) return `${mins} 分钟`;
+  if (mins < 1) return t("deviceList.justNow");
+  if (mins < 60) return t("deviceList.minsAgo", { n: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} 小时`;
-  return `${Math.floor(hours / 24)} 天`;
+  if (hours < 24) return t("deviceList.hoursAgo", { n: hours });
+  return t("deviceList.daysAgo", { n: Math.floor(hours / 24) });
 }
 </script>
 
@@ -238,21 +237,21 @@ function relativeTime(ts: number): string {
           ></span>
           <span class="relative inline-flex w-2 h-2 rounded-full bg-green-500"></span>
         </span>
-        在线设备
+        {{ t("deviceList.onlineDevices") }}
         <span class="text-faint font-normal">({{ onlineCount }}/{{ devices.length }})</span>
         <button
           v-if="!isAdmin && onlineCount < devices.length"
           @click="clearOfflineDevices()"
           :disabled="clearingGroupKey === '__all__'"
           class="ml-auto text-[10px] text-faint hover:text-red-500 disabled:opacity-40"
-          title="删除全部离线设备及其历史数据"
+          :title="t('deviceList.clearOfflineAllTitle')"
         >
-          清理离线
+          {{ t("deviceList.clearOffline") }}
         </button>
       </h2>
       <input
         v-model="deviceSearch"
-        placeholder="搜索设备（标题/URL/类型）..."
+        :placeholder="t('deviceList.searchPlaceholder')"
         class="mt-2 w-full px-2.5 py-1.5 text-xs border border-input rounded-lg bg-input text-primary placeholder:text-faint focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15 transition"
       />
     </div>
@@ -270,9 +269,9 @@ function relativeTime(ts: number): string {
               @click="clearOfflineDevices(group.key)"
               :disabled="clearingGroupKey === group.key"
               class="ml-auto text-[10px] text-faint hover:text-red-500 disabled:opacity-40"
-              title="删除该分组全部离线设备及其历史数据"
+              :title="t('deviceList.clearOfflineGroupTitle')"
             >
-              清理离线
+              {{ t("deviceList.clearOffline") }}
             </button>
           </div>
           <li
@@ -300,15 +299,17 @@ function relativeTime(ts: number): string {
               <span
                 v-if="!isOnline(d)"
                 class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-base text-faint align-middle"
-                :title="`离线于 ${new Date(d.offlineAt!).toLocaleString()}`"
-                >离线</span
+                :title="
+                  t('deviceList.offlineSince', { time: new Date(d.offlineAt!).toLocaleString() })
+                "
+                >{{ t("deviceList.offline") }}</span
               >
               <!-- 编辑标签按钮 -->
               <button
                 v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
                 @click.stop="startEditTags(d.id)"
                 class="ml-1 text-faint hover:text-blue-500 text-xs align-middle"
-                title="编辑标签/备注"
+                :title="t('deviceList.editTagsTitle')"
               >
                 🏷️
               </button>
@@ -318,7 +319,7 @@ function relativeTime(ts: number): string {
                 @click.stop="removeDevice(d)"
                 :disabled="deletingDeviceId === d.id"
                 class="ml-1 text-faint hover:text-red-500 text-xs align-middle disabled:opacity-40"
-                title="删除设备及其历史数据"
+                :title="t('deviceList.deleteDeviceTitle')"
               >
                 🗑️
               </button>
@@ -346,14 +347,14 @@ function relativeTime(ts: number): string {
             <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
               <input
                 v-model="tagDraft"
-                placeholder="标签（逗号分隔）"
+                :placeholder="t('deviceList.tagsPlaceholder')"
                 class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
                 @keydown.enter="saveTags"
                 @keydown.escape="cancelEditTags"
               />
               <input
                 v-model="noteDraft"
-                placeholder="备注（可选）"
+                :placeholder="t('deviceList.notePlaceholder')"
                 class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
                 @keydown.enter="saveTags"
                 @keydown.escape="cancelEditTags"
@@ -363,13 +364,13 @@ function relativeTime(ts: number): string {
                   @click="saveTags"
                   class="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
-                  保存
+                  {{ t("deviceList.save") }}
                 </button>
                 <button
                   @click="cancelEditTags"
                   class="px-2 py-0.5 text-[10px] bg-elevated text-secondary rounded bg-elevated-hover"
                 >
-                  取消
+                  {{ t("deviceList.cancel") }}
                 </button>
               </div>
             </div>
@@ -387,19 +388,19 @@ function relativeTime(ts: number): string {
               <span
                 v-if="d.errorCount > 0"
                 class="text-xs text-red-500 font-medium whitespace-nowrap"
-                >{{ d.errorCount }} 错误</span
+                >{{ t("deviceList.errorCount", { count: d.errorCount }) }}</span
               >
             </div>
           </li>
         </template>
         <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
-          暂无设备
+          {{ t("deviceList.empty") }}
         </li>
         <li
           v-else-if="filteredDevices.length === 0"
           class="px-4 py-8 text-center text-sm text-faint"
         >
-          无匹配设备
+          {{ t("deviceList.noMatch") }}
         </li>
       </template>
 
@@ -429,14 +430,16 @@ function relativeTime(ts: number): string {
             <span
               v-if="!isOnline(d)"
               class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-base text-faint align-middle"
-              :title="`离线于 ${new Date(d.offlineAt!).toLocaleString()}`"
-              >离线</span
+              :title="
+                t('deviceList.offlineSince', { time: new Date(d.offlineAt!).toLocaleString() })
+              "
+              >{{ t("deviceList.offline") }}</span
             >
             <button
               v-if="selectedDeviceId === d.id && editingTagDeviceId !== d.id"
               @click.stop="startEditTags(d.id)"
               class="ml-1 text-faint hover:text-blue-500 text-xs align-middle"
-              title="编辑标签/备注"
+              :title="t('deviceList.editTagsTitle')"
             >
               🏷️
             </button>
@@ -446,7 +449,7 @@ function relativeTime(ts: number): string {
               @click.stop="removeDevice(d)"
               :disabled="deletingDeviceId === d.id"
               class="ml-1 text-faint hover:text-red-500 text-xs align-middle disabled:opacity-40"
-              title="删除设备及其历史数据"
+              :title="t('deviceList.deleteDeviceTitle')"
             >
               🗑️
             </button>
@@ -472,14 +475,14 @@ function relativeTime(ts: number): string {
           <div v-if="editingTagDeviceId === d.id" class="mt-1 space-y-1" @click.stop>
             <input
               v-model="tagDraft"
-              placeholder="标签（逗号分隔）"
+              :placeholder="t('deviceList.tagsPlaceholder')"
               class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
               @keydown.enter="saveTags"
               @keydown.escape="cancelEditTags"
             />
             <input
               v-model="noteDraft"
-              placeholder="备注（可选）"
+              :placeholder="t('deviceList.notePlaceholder')"
               class="w-full px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-500"
               @keydown.enter="saveTags"
               @keydown.escape="cancelEditTags"
@@ -489,13 +492,13 @@ function relativeTime(ts: number): string {
                 @click="saveTags"
                 class="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700"
               >
-                保存
+                {{ t("deviceList.save") }}
               </button>
               <button
                 @click="cancelEditTags"
                 class="px-2 py-0.5 text-[10px] bg-elevated text-secondary rounded bg-elevated-hover"
               >
-                取消
+                {{ t("deviceList.cancel") }}
               </button>
             </div>
           </div>
@@ -510,19 +513,21 @@ function relativeTime(ts: number): string {
               :title="new Date(d.onlineAt).toLocaleString()"
               >· {{ relativeTime(d.onlineAt) }}</span
             >
-            <span v-if="d.errorCount > 0" class="text-xs text-red-500 font-medium whitespace-nowrap"
-              >{{ d.errorCount }} 错误</span
+            <span
+              v-if="d.errorCount > 0"
+              class="text-xs text-red-500 font-medium whitespace-nowrap"
+              >{{ t("deviceList.errorCount", { count: d.errorCount }) }}</span
             >
           </div>
         </li>
         <li v-if="devices.length === 0" class="px-4 py-8 text-center text-sm text-faint">
-          暂无在线设备
+          {{ t("deviceList.emptyOnline") }}
         </li>
         <li
           v-else-if="filteredDevices.length === 0"
           class="px-4 py-8 text-center text-sm text-faint"
         >
-          无匹配设备
+          {{ t("deviceList.noMatch") }}
         </li>
       </template>
     </ul>

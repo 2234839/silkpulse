@@ -10,10 +10,13 @@
  */
 import { ref, computed, watch, onMounted, onUnmounted, type Ref } from "vue";
 import type { NetworkEntry } from "@silkpulse/shared";
+import { useI18n } from "vue-i18n";
 import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
 import { useResizable } from "../composables/useResizable";
 import ObjectInspector from "./ObjectInspector.vue";
+
+const { t, locale } = useI18n();
 
 /** 请求列表宽度可拖拽 */
 const { width: listWidth, onDragStart: onListResize } = useResizable({
@@ -90,15 +93,23 @@ const RESOURCE_ICONS: Record<ResourceCategory, string> = {
   other: "📦",
 };
 
-/** 资源分类 → 中文标签 */
-const RESOURCE_LABELS: Record<ResourceCategory, string> = {
-  css: "CSS",
-  js: "JS",
-  img: "Img",
-  font: "Font",
-  media: "Media",
-  other: "Other",
+/** 资源分类 → 按 locale 键控的显示名 */
+const RESOURCE_LABELS: Record<ResourceCategory, Record<"en" | "zh", string>> = {
+  css: { en: "CSS", zh: "CSS" },
+  js: { en: "JS", zh: "JS" },
+  img: { en: "Img", zh: "图片" }, // i18n-allowed
+  font: { en: "Font", zh: "字体" }, // i18n-allowed
+  media: { en: "Media", zh: "媒体" }, // i18n-allowed
+  other: { en: "Other", zh: "其他" }, // i18n-allowed
 };
+
+/**
+ * 资源分类的当前语言显示名
+ */
+function resourceLabel(n: NetworkEntry): string {
+  const labels = RESOURCE_LABELS[getResourceCategory(n)];
+  return labels[locale.value === "zh" ? "zh" : "en"];
+}
 
 /**
  * 获取网络条目的显示图标
@@ -794,15 +805,15 @@ const networkKindFilter = ref<"all" | "fetch" | "xhr" | "ws" | "resource">("all"
  */
 const networkCategoryFilter = ref<ResourceCategory | "all">("all");
 
-/** 分类筛选可选项（含「全部」） */
+/** 分类筛选可选项（含「全部」，label 为消息键） */
 const CATEGORY_OPTIONS: Array<{ value: ResourceCategory | "all"; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "js", label: "JS" },
-  { value: "css", label: "CSS" },
-  { value: "img", label: "IMG" },
-  { value: "font", label: "字体" },
-  { value: "media", label: "媒体" },
-  { value: "other", label: "其他" },
+  { value: "all", label: "networkPanel.catAll" },
+  { value: "js", label: "networkPanel.catJs" },
+  { value: "css", label: "networkPanel.catCss" },
+  { value: "img", label: "networkPanel.catImg" },
+  { value: "font", label: "networkPanel.catFont" },
+  { value: "media", label: "networkPanel.catMedia" },
+  { value: "other", label: "networkPanel.catOther" },
 ];
 
 /**
@@ -928,7 +939,7 @@ async function refetchResource() {
           })
           encoding = 'base64'
         } else {
-          body = '[Binary ' + (blob.type || 'unknown') + ' ' + blob.size + ' bytes — 超过 512KB 限制]'
+          body = '[Binary ' + (blob.type || 'unknown') + ' ' + blob.size + ' bytes — exceeds the 512KB limit]'
         }
       } else {
         /** 文本类（含 JSON/HTML/CSS/JS）→ 纯文本完整读取（exec 通道支持 500KB） */
@@ -947,7 +958,7 @@ async function refetchResource() {
     const data = await res.json();
 
     if (!data.success) {
-      refetchError.value = data.error || "exec 执行失败";
+      refetchError.value = data.error || t("networkPanel.execFailed");
     } else {
       /**
        * exec result 经过 serializeResult(JSON.stringify) 双重序列化：
@@ -957,7 +968,7 @@ async function refetchResource() {
        */
       const raw = data.result ?? "";
       if (!raw || raw === "undefined") {
-        refetchError.value = "exec 返回空结果";
+        refetchError.value = t("networkPanel.execEmptyResult");
       } else {
         try {
           const innerJson = JSON.parse(raw);
@@ -974,7 +985,7 @@ async function refetchResource() {
             };
           }
         } catch {
-          refetchError.value = `结果解析失败: ${raw.slice(0, 200)}`;
+          refetchError.value = t("networkPanel.parseFailed", { raw: raw.slice(0, 200) });
         }
       }
     }
@@ -1009,7 +1020,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
       <div class="p-2 border-b border-light bg-surface space-y-2">
         <input
           v-model="networkSearch"
-          placeholder="搜索请求（URL / 方法 / 状态码）"
+          :placeholder="t('networkPanel.searchPlaceholder')"
           class="w-full text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
         />
         <!-- 类型筛选：全部 / Fetch / XHR / WS / 资源 -->
@@ -1027,9 +1038,9 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           >
             {{
               kf === "all"
-                ? "全部"
+                ? t("networkPanel.kindAll")
                 : kf === "resource"
-                  ? "资源"
+                  ? t("networkPanel.kindResource")
                   : kf === "ws"
                     ? "WS"
                     : kf.toUpperCase()
@@ -1049,7 +1060,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 : 'bg-elevated text-secondary bg-elevated-hover'
             "
           >
-            {{ opt.label }}
+            {{ t(opt.label) }}
           </button>
         </div>
         <!-- 状态筛选：全部 / 成功 / 失败 -->
@@ -1067,7 +1078,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 : 'bg-elevated text-secondary bg-elevated-hover'
             "
           >
-            {{ sf === "all" ? "全部" : sf === "success" ? "成功" : "失败" }}
+            {{
+              sf === "all"
+                ? t("networkPanel.statusAll")
+                : sf === "success"
+                  ? t("networkPanel.statusSuccess")
+                  : t("networkPanel.statusError")
+            }}
           </button>
           <button
             @click="toggleDurationSort"
@@ -1079,25 +1096,25 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             "
             :title="
               networkDurationSort === 'desc'
-                ? '当前：耗时降序，点击取消恢复原序'
-                : '按耗时降序排列当前列表'
+                ? t('networkPanel.sortDescResetTitle')
+                : t('networkPanel.sortOffTitle')
             "
           >
-            耗时↓
+            {{ t("networkPanel.sortBtn") }}
           </button>
           <button
             @click="exportAllNetwork"
             class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
-            title="导出当前过滤后的全部请求为 JSON"
+            :title="t('networkPanel.exportAllTitle')"
           >
-            ⬇ 导出全部
+            {{ t("networkPanel.exportAll") }}
           </button>
           <button
             @click="clearNetwork"
             class="px-2 py-0.5 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
-            title="清空当前视图（不影响服务端缓冲）"
+            :title="t('networkPanel.clearTitle')"
           >
-            🚫 清空
+            {{ t("networkPanel.clear") }}
           </button>
           <span class="text-xs text-faint">
             {{ filteredNetwork.length }}/{{ props.network.length }}</span
@@ -1108,11 +1125,11 @@ function formatRefetchHeaders(h: Record<string, string>): string {
         <table class="w-full text-sm">
           <thead class="bg-elevated text-secondary text-xs uppercase sticky top-0">
             <tr>
-              <th class="text-left px-3 py-2">时间</th>
-              <th class="text-left px-3 py-2">方法</th>
-              <th class="text-left px-3 py-2">状态</th>
+              <th class="text-left px-3 py-2">{{ t("networkPanel.colTime") }}</th>
+              <th class="text-left px-3 py-2">{{ t("networkPanel.colMethod") }}</th>
+              <th class="text-left px-3 py-2">{{ t("networkPanel.colStatus") }}</th>
               <th class="text-left px-3 py-2">URL</th>
-              <th class="text-right px-3 py-2">大小</th>
+              <th class="text-right px-3 py-2">{{ t("networkPanel.colSize") }}</th>
               <th class="text-right px-3 py-2">
                 <button
                   @click="toggleDurationSort"
@@ -1120,13 +1137,14 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   :class="networkDurationSort !== 'time' ? 'text-primary' : ''"
                   :title="
                     networkDurationSort === 'time'
-                      ? '点击按耗时降序'
+                      ? t('networkPanel.sortByDurationTitle')
                       : networkDurationSort === 'desc'
-                        ? '当前：耗时降序（慢请求在上）'
-                        : '当前：耗时升序'
+                        ? t('networkPanel.sortDescActiveTitle')
+                        : t('networkPanel.sortAscActiveTitle')
                   "
                 >
-                  耗时<span class="text-[10px]">{{
+                  {{ t("networkPanel.colDuration")
+                  }}<span class="text-[10px]">{{
                     networkDurationSort === "desc" ? "▼" : networkDurationSort === "asc" ? "▲" : "↕"
                   }}</span>
                 </button>
@@ -1172,7 +1190,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 <span
                   v-if="n.kind === 'resource'"
                   class="inline-block px-1 mr-1 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 align-middle"
-                  >{{ RESOURCE_LABELS[getResourceCategory(n)] }}</span
+                  >{{ resourceLabel(n) }}</span
                 >
                 <span v-if="getEntryIcon(n)" class="mr-0.5">{{ getEntryIcon(n) }}</span>
                 {{ n.url.split("/").pop() || n.url }}
@@ -1185,7 +1203,11 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 :class="
                   calcDuration(n) > SLOW_THRESHOLD ? 'text-amber-500 font-semibold' : 'text-muted'
                 "
-                :title="calcDuration(n) > SLOW_THRESHOLD ? `慢请求（> ${SLOW_THRESHOLD}ms）` : ''"
+                :title="
+                  calcDuration(n) > SLOW_THRESHOLD
+                    ? t('networkPanel.slowTitle', { threshold: SLOW_THRESHOLD })
+                    : ''
+                "
               >
                 {{ calcDuration(n) }}ms
               </td>
@@ -1193,7 +1215,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           </tbody>
         </table>
         <div v-if="filteredNetwork.length === 0" class="text-faint text-center py-8 text-sm">
-          {{ props.network.length === 0 ? "暂无网络请求" : "无匹配请求" }}
+          {{ props.network.length === 0 ? t("networkPanel.empty") : t("networkPanel.noMatch") }}
         </div>
       </div>
     </div>
@@ -1214,30 +1236,30 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               @click="copyReqBody"
               :disabled="!selectedNetwork.reqBody"
               class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="复制请求体原始文本"
+              :title="t('networkPanel.copyReqBodyTitle')"
             >
-              {{ reqCopyState === "copied" ? "✓ 已复制" : "复制请求体" }}
+              {{ reqCopyState === "copied" ? t("common.copied") : t("networkPanel.copyReqBody") }}
             </button>
             <button
               @click="copyResBody"
               :disabled="!selectedNetwork.resBody"
               class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="复制响应体原始文本"
+              :title="t('networkPanel.copyResBodyTitle')"
             >
-              {{ resCopyState === "copied" ? "✓ 已复制" : "复制响应" }}
+              {{ resCopyState === "copied" ? t("common.copied") : t("networkPanel.copyRes") }}
             </button>
             <button
               @click="exportSelectedNetwork"
               class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
-              title="导出该请求完整信息为 JSON 文件"
+              :title="t('networkPanel.exportJsonTitle')"
             >
-              导出 JSON
+              {{ t("networkPanel.exportJson") }}
             </button>
             <button
               @click="copyCurl"
               class="px-3 py-1.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
             >
-              {{ curlCopyState === "copied" ? "✓ 已复制" : "复制为 cURL" }}
+              {{ curlCopyState === "copied" ? t("common.copied") : t("networkPanel.copyCurl") }}
             </button>
           </div>
           <!-- 基本信息 -->
@@ -1251,21 +1273,21 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           </div>
           <div class="flex gap-6 text-sm flex-wrap">
             <div>
-              <span class="text-faint">时间：</span
+              <span class="text-faint">{{ t("networkPanel.detailTime") }}</span
               ><span class="font-mono text-primary">{{
                 new Date(selectedNetwork.timestamp).toLocaleString()
               }}</span>
             </div>
             <div>
-              <span class="text-faint">方法：</span
+              <span class="text-faint">{{ t("networkPanel.detailMethod") }}</span
               ><span class="font-mono text-primary">{{ selectedNetwork.method }}</span>
             </div>
             <div>
-              <span class="text-faint">状态：</span>
+              <span class="text-faint">{{ t("networkPanel.detailStatus") }}</span>
               <span
                 v-if="selectedNetwork.kind === 'resource' && selectedNetwork.status === 0"
                 class="font-mono text-faint"
-                >未知</span
+                >{{ t("networkPanel.statusUnknown") }}</span
               >
               <span
                 v-else
@@ -1279,20 +1301,19 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               >
             </div>
             <div>
-              <span class="text-faint">大小：</span>
+              <span class="text-faint">{{ t("networkPanel.detailSize") }}</span>
               <span class="font-mono text-primary">{{
                 selectedNetwork.protocol === "ws" ? "—" : formatSize(calcResSize(selectedNetwork))
               }}</span>
             </div>
             <div>
-              <span class="text-faint">耗时：</span
+              <span class="text-faint">{{ t("networkPanel.detailDuration") }}</span
               ><span class="font-mono text-primary">{{ calcDuration(selectedNetwork) }}ms</span>
             </div>
             <div v-if="selectedNetwork.kind === 'resource'">
-              <span class="text-faint">类型：</span>
+              <span class="text-faint">{{ t("networkPanel.detailKind") }}</span>
               <span class="font-mono text-primary"
-                >{{ getEntryIcon(selectedNetwork) }}
-                {{ RESOURCE_LABELS[getResourceCategory(selectedNetwork)] }}</span
+                >{{ getEntryIcon(selectedNetwork) }} {{ resourceLabel(selectedNetwork) }}</span
               >
             </div>
           </div>
@@ -1304,10 +1325,9 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="text-xs text-amber-700 dark:text-amber-400 flex-1">
-                  <span class="font-semibold">📦 静态资源加载</span>
+                  <span class="font-semibold">{{ t("networkPanel.resourceNoticeTitle") }}</span>
                   <p class="mt-1 text-amber-600 dark:text-amber-500">
-                    SilkPulse 无法直接采集静态资源请求的请求头和响应体。点击右侧按钮可让设备重新
-                    fetch 该 URL，获取完整的响应头和响应体。
+                    {{ t("networkPanel.resourceNoticeBody") }}
                   </p>
                 </div>
                 <button
@@ -1316,14 +1336,14 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   :disabled="refetchLoading"
                   class="shrink-0 px-3 py-1.5 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
-                  {{ refetchLoading ? "请求中..." : "🔄 重新请求" }}
+                  {{ refetchLoading ? t("networkPanel.refetching") : t("networkPanel.refetch") }}
                 </button>
               </div>
             </div>
 
             <!-- 重新请求错误 -->
             <div v-if="refetchError" class="bg-red-soft border border-red-soft rounded p-3">
-              <div class="text-xs text-red-400 mb-1">重新请求失败</div>
+              <div class="text-xs text-red-400 mb-1">{{ t("networkPanel.refetchFailed") }}</div>
               <div class="text-sm text-red-key font-mono break-all">{{ refetchError }}</div>
             </div>
 
@@ -1331,7 +1351,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             <template v-if="refetchResult">
               <!-- 响应头 -->
               <div>
-                <div class="text-xs text-faint mb-1">响应头（重新请求）</div>
+                <div class="text-xs text-faint mb-1">{{ t("networkPanel.refetchResHeaders") }}</div>
                 <pre
                   class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all"
                   >{{ formatRefetchHeaders(refetchResult.headers) }}</pre>
@@ -1339,7 +1359,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               <!-- 响应体 -->
               <div>
                 <div class="flex items-center justify-between mb-1">
-                  <div class="text-xs text-faint">响应体（重新请求）</div>
+                  <div class="text-xs text-faint">{{ t("networkPanel.refetchResBody") }}</div>
                   <span class="text-xs text-faint font-mono"
                     >{{ refetchResult.status }} · {{ refetchResult.mime }}</span
                   >
@@ -1349,7 +1369,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   <template v-if="isRefetchImage(refetchResult)">
                     <img
                       :src="refetchResult.body"
-                      alt="资源预览"
+                      :alt="t('networkPanel.refetchImageAlt')"
                       class="max-w-full rounded border border-light"
                       style="max-height: 300px"
                     />
@@ -1367,24 +1387,26 @@ function formatRefetchHeaders(h: Record<string, string>): string {
 
           <!-- 错误 -->
           <div v-if="selectedNetwork.error" class="bg-red-soft border border-red-soft rounded p-3">
-            <div class="text-xs text-red-400 mb-1">错误</div>
+            <div class="text-xs text-red-400 mb-1">{{ t("networkPanel.errorLabel") }}</div>
             <div class="text-sm text-red-key font-mono">{{ selectedNetwork.error }}</div>
           </div>
 
           <!-- WebSocket 帧时间线（仅 WS 连接条目，对齐 DevTools 的 Messages 面板） -->
           <div v-if="selectedNetwork.protocol === 'ws'">
             <div class="flex items-center gap-2 mb-1">
-              <span class="text-xs text-faint">帧时间线</span>
-              <span class="text-xs text-faint"
-                >({{ processedWsFrames.length }} /
-                {{ selectedNetwork.frames?.length ?? 0 }} 帧)</span
-              >
+              <span class="text-xs text-faint">{{ t("networkPanel.wsTimeline") }}</span>
+              <span class="text-xs text-faint">{{
+                t("networkPanel.framesCount", {
+                  shown: processedWsFrames.length,
+                  total: selectedNetwork.frames?.length ?? 0,
+                })
+              }}</span>
             </div>
             <!-- Filter + Parser 工具栏 -->
             <div class="flex items-center gap-1 mb-2 flex-wrap">
               <input
                 v-model="streamFilter"
-                placeholder="🔍 过滤帧内容..."
+                :placeholder="t('networkPanel.filterFramesPlaceholder')"
                 class="flex-1 min-w-[120px] text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
               />
               <button
@@ -1401,7 +1423,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 <textarea
                   v-model="streamParser"
                   rows="2"
-                  placeholder="// 输入 JS 函数体，参数 data 是帧内容字符串&#10;// 例: return JSON.parse(data).msg"
+                  :placeholder="t('networkPanel.parserPlaceholderFrames')"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
                 ></textarea>
@@ -1411,7 +1433,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   "
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                 >
-                  📋 模板
+                  {{ t("networkPanel.templateBtn") }}
                 </button>
                 <button
                   v-if="parserHistory.length"
@@ -1419,13 +1441,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                   :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
                 >
-                  📚 历史
+                  {{ t("networkPanel.historyBtn") }}
                 </button>
                 <button
                   @click="runParser"
                   class="px-2 py-1 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white whitespace-nowrap"
                 >
-                  ▶ 执行
+                  {{ t("networkPanel.runBtn") }}
                 </button>
               </div>
               <!-- 历史下拉列表 -->
@@ -1490,13 +1512,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 v-if="!selectedNetwork.frames?.length"
                 class="text-faint text-center py-4 text-xs"
               >
-                暂无帧（连接已建立，等待收发消息）
+                {{ t("networkPanel.wsEmpty") }}
               </div>
               <div
                 v-else-if="!processedWsFrames.length"
                 class="text-faint text-center py-4 text-xs"
               >
-                无匹配帧
+                {{ t("networkPanel.wsNoMatch") }}
               </div>
             </div>
           </div>
@@ -1504,7 +1526,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           <!-- SSE 事件时间线（仅 SSE 连接条目，对齐 DevTools 的 EventStream 面板） -->
           <div v-if="selectedNetwork.sseState">
             <div class="flex items-center gap-2 mb-1">
-              <span class="text-xs text-faint">SSE 事件流</span>
+              <span class="text-xs text-faint">{{ t("networkPanel.sseTimeline") }}</span>
               <span
                 class="text-xs"
                 :class="
@@ -1513,23 +1535,30 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                     : 'text-faint'
                 "
               >
-                {{ selectedNetwork.sseState === "open" ? "● 连接中" : "○ 已关闭" }}
-              </span>
-              <span class="text-xs text-faint"
-                >({{ processedSseEvents.length }} /
                 {{
-                  streamJsonMode
-                    ? processedSseJsonTotal
-                    : (selectedNetwork.events?.filter((e) => e.event !== "__closed__").length ?? 0)
+                  selectedNetwork.sseState === "open"
+                    ? t("networkPanel.sseOpen")
+                    : t("networkPanel.sseClosed")
                 }}
-                {{ streamJsonMode ? "个 JSON" : "事件" }})</span
-              >
+              </span>
+              <span class="text-xs text-faint">{{
+                streamJsonMode
+                  ? t("networkPanel.sseCountJson", {
+                      shown: processedSseEvents.length,
+                      total: processedSseJsonTotal,
+                    })
+                  : t("networkPanel.sseCountEvents", {
+                      shown: processedSseEvents.length,
+                      total:
+                        selectedNetwork.events?.filter((e) => e.event !== "__closed__").length ?? 0,
+                    })
+              }}</span>
             </div>
             <!-- Filter + Parser 工具栏 -->
             <div class="flex items-center gap-1 mb-2 flex-wrap">
               <input
                 v-model="streamFilter"
-                placeholder="🔍 过滤事件内容/类型..."
+                :placeholder="t('networkPanel.filterEventsPlaceholder')"
                 class="flex-1 min-w-[120px] text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
               />
               <button
@@ -1538,7 +1567,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 :class="
                   streamJsonMode ? 'text-blue-key border-blue-400' : 'border-base text-secondary'
                 "
-                title="SSE 返回连续 JSON（{..}{..}..，一个 JSON 可能拆多个 Event）时开启，按 JSON 值边界切分展示"
+                :title="t('networkPanel.jsonModeTitle')"
               >
                 {} JSON
               </button>
@@ -1556,7 +1585,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 <textarea
                   v-model="streamParser"
                   rows="2"
-                  placeholder="// 输入 JS 函数体，参数 data 是事件 data 字符串&#10;// 例: return JSON.parse(data).msg"
+                  :placeholder="t('networkPanel.parserPlaceholderEvents')"
                   class="flex-1 text-xs font-mono px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400 resize-y"
                   spellcheck="false"
                 ></textarea>
@@ -1566,7 +1595,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   "
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                 >
-                  📋 模板
+                  {{ t("networkPanel.templateBtn") }}
                 </button>
                 <button
                   v-if="parserHistory.length"
@@ -1574,13 +1603,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   class="px-2 py-1 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
                   :class="parserHistoryOpen ? 'text-blue-key border-blue-400' : ''"
                 >
-                  📚 历史
+                  {{ t("networkPanel.historyBtn") }}
                 </button>
                 <button
                   @click="runParser"
                   class="px-2 py-1 text-xs rounded border border-blue-400 bg-blue-500 hover:bg-blue-600 text-white whitespace-nowrap"
                 >
-                  ▶ 执行
+                  {{ t("networkPanel.runBtn") }}
                 </button>
               </div>
               <!-- 历史下拉列表 -->
@@ -1619,8 +1648,8 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                   <span
                     v-if="(e as { pending?: boolean }).pending"
                     class="shrink-0 text-amber-500"
-                    title="JSON 尚未接收完整，等待后续数据"
-                    >⏳ 接收中</span
+                    :title="t('networkPanel.pendingTitle')"
+                    >{{ t("networkPanel.pending") }}</span
                   >
                   <span v-else class="shrink-0 text-purple-key">event: {{ e.event }}</span>
                   <span v-if="e.id" class="shrink-0 text-faint">id: {{ e.id }}</span>
@@ -1641,23 +1670,25 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 class="text-faint text-center py-4 text-xs"
               >
                 {{
-                  streamJsonMode
-                    ? "暂无 JSON（连接已建立，等待服务端推送）"
-                    : "暂无事件（连接已建立，等待服务端推送）"
+                  streamJsonMode ? t("networkPanel.sseJsonEmpty") : t("networkPanel.sseEventsEmpty")
                 }}
               </div>
               <div
                 v-else-if="!processedSseEvents.length"
                 class="text-faint text-center py-4 text-xs"
               >
-                {{ streamJsonMode ? "无匹配 JSON" : "无匹配事件" }}
+                {{
+                  streamJsonMode
+                    ? t("networkPanel.sseJsonNoMatch")
+                    : t("networkPanel.sseEventsNoMatch")
+                }}
               </div>
             </div>
           </div>
 
           <!-- 请求头 -->
           <div v-if="selectedNetwork.reqHeaders">
-            <div class="text-xs text-faint mb-1">请求头</div>
+            <div class="text-xs text-faint mb-1">{{ t("networkPanel.reqHeaders") }}</div>
             <pre
               class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all"
               >{{ formatHeaders(selectedNetwork.reqHeaders) }}</pre>
@@ -1665,7 +1696,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
 
           <!-- 响应头 -->
           <div v-if="selectedNetwork.resHeaders">
-            <div class="text-xs text-faint mb-1">响应头</div>
+            <div class="text-xs text-faint mb-1">{{ t("networkPanel.resHeaders") }}</div>
             <pre
               class="text-xs font-mono text-primary bg-surface p-3 rounded border border-base whitespace-pre-wrap break-all"
               >{{ formatHeaders(selectedNetwork.resHeaders) }}</pre>
@@ -1673,7 +1704,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
 
           <!-- 请求体 -->
           <div v-if="selectedNetwork.reqBody">
-            <div class="text-xs text-faint mb-1">请求体</div>
+            <div class="text-xs text-faint mb-1">{{ t("networkPanel.reqBody") }}</div>
             <div class="bg-surface p-3 rounded border border-base">
               <ObjectInspector :json="fullBodyCache ?? selectedNetwork.reqBody" />
             </div>
@@ -1682,16 +1713,15 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               v-if="selectedNetwork.bodyTruncated && !fullBodyCache"
               class="mt-1 flex items-center gap-2"
             >
-              <span class="text-xs text-amber-500"
-                >⚠ 请求体过大已截断（{{ formatSize(selectedNetwork.reqBody.length) }} /
-                完整内容需懒加载）</span
-              >
+              <span class="text-xs text-amber-500">{{
+                t("networkPanel.reqTruncated", { size: formatSize(selectedNetwork.reqBody.length) })
+              }}</span>
               <button
                 @click="loadFullBody"
                 :disabled="bodyLoading"
                 class="px-2 py-0.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
               >
-                {{ bodyLoading ? "加载中..." : "📥 加载完整内容" }}
+                {{ bodyLoading ? t("networkPanel.loading") : t("networkPanel.loadFull") }}
               </button>
             </div>
           </div>
@@ -1699,7 +1729,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
           <!-- 响应体 -->
           <div v-if="selectedNetwork.resBody">
             <div class="flex items-center justify-between mb-1">
-              <div class="text-xs text-faint">响应体</div>
+              <div class="text-xs text-faint">{{ t("networkPanel.resBody") }}</div>
               <!-- 视图切换：只在 base64 图片和文本之间切换 -->
               <div
                 v-if="isImagePreview(selectedNetwork) || isBinaryInfo(selectedNetwork)"
@@ -1714,7 +1744,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                       : 'bg-elevated text-secondary bg-elevated-hover'
                   "
                 >
-                  预览
+                  {{ t("networkPanel.preview") }}
                 </button>
                 <button
                   @click="resBodyViewMode = 'raw'"
@@ -1725,7 +1755,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                       : 'bg-elevated text-secondary bg-elevated-hover'
                   "
                 >
-                  原始
+                  {{ t("networkPanel.raw") }}
                 </button>
               </div>
             </div>
@@ -1735,7 +1765,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
                 <div class="space-y-2">
                   <img
                     :src="selectedNetwork.resBody"
-                    alt="响应预览"
+                    :alt="t('networkPanel.resImageAlt')"
                     class="max-w-full rounded border border-light"
                     style="max-height: 300px"
                   />
@@ -1761,7 +1791,7 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               </template>
               <!-- info 模式的原始视图（无内容可显示） -->
               <template v-else>
-                <div class="text-xs text-faint">无原始内容（二进制未读取）</div>
+                <div class="text-xs text-faint">{{ t("networkPanel.noRawContent") }}</div>
               </template>
             </div>
             <!-- 懒加载提示：响应体被截断时显示 -->
@@ -1769,19 +1799,21 @@ function formatRefetchHeaders(h: Record<string, string>): string {
               v-if="selectedNetwork.bodyTruncated && !fullBodyCache"
               class="mt-1 flex items-center gap-2"
             >
-              <span class="text-xs text-amber-500"
-                >⚠ 响应体过大已截断{{
-                  selectedNetwork.resBodySize
-                    ? `（原始 ${(selectedNetwork.resBodySize / 1024).toFixed(0)}KB）`
-                    : ""
-                }}，完整内容需懒加载</span
-              >
+              <span class="text-xs text-amber-500">{{
+                t("networkPanel.resTruncated", {
+                  size: selectedNetwork.resBodySize
+                    ? t("networkPanel.resTruncatedSize", {
+                        kb: (selectedNetwork.resBodySize / 1024).toFixed(0),
+                      })
+                    : "",
+                })
+              }}</span>
               <button
                 @click="loadFullBody"
                 :disabled="bodyLoading"
                 class="px-2 py-0.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
               >
-                {{ bodyLoading ? "加载中..." : "📥 加载完整内容" }}
+                {{ bodyLoading ? t("networkPanel.loading") : t("networkPanel.loadFull") }}
               </button>
             </div>
           </div>
@@ -1791,11 +1823,13 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             v-if="!selectedNetwork.reqBody && !selectedNetwork.resBody && !selectedNetwork.error"
             class="text-xs text-faint"
           >
-            此请求无请求体/响应体（可能是 GET 请求或响应未完成）
+            {{ t("networkPanel.noBodyHint") }}
           </div>
         </div>
       </template>
-      <div v-else class="text-faint text-center py-8 text-sm">点击左侧请求查看详情</div>
+      <div v-else class="text-faint text-center py-8 text-sm">
+        {{ t("networkPanel.selectHint") }}
+      </div>
     </div>
   </div>
 </template>

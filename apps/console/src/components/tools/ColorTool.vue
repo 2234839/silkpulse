@@ -10,6 +10,7 @@
  * - 双色渐变生成器（三色彩空间插值对比，方向可选 + 生成 CSS 代码可复制）
  */
 import { ref, computed, watch, type CSSProperties } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCopyFlash } from "../../composables/useCopyFlash";
 import RgbPanel from "./color/RgbPanel.vue";
 import HslPanel from "./color/HslPanel.vue";
@@ -28,6 +29,8 @@ import {
 
 /** 复制反馈 */
 const { copiedKey, copy: copyWithFlash } = useCopyFlash();
+
+const { t } = useI18n();
 
 /* ════════ 核心状态：单一数据源为 RGB，各格式滑杆派生 ════════ */
 
@@ -60,25 +63,25 @@ const formats = computed(() => [
     key: "hex",
     label: "HEX",
     value: hexStr.value,
-    info: "十六进制记法 #RRGGBB，可带两位透明度 #RRGGBBAA；紧凑通用，设计稿/切图最常见",
+    info: t("colorTool.infoHex"),
   },
   {
     key: "rgb",
     label: "RGB",
     value: rgbStr.value,
-    info: "sRGB 三通道红/绿/蓝各 0-255（设备显示的原始坐标），可带 alpha；屏幕发光直接对应它",
+    info: t("colorTool.infoRgb"),
   },
   {
     key: "hsl",
     label: "HSL",
     value: hslStr.value,
-    info: "色相 Hue 0-360°角度 / 饱和度 Saturation % / 亮度 Lightness %；符合直觉但感知不均匀，调出等亮色阶需换 OKLCH",
+    info: t("colorTool.infoHsl"),
   },
   {
     key: "oklch",
     label: "OKLCH",
     value: oklchStr.value,
-    info: "感知均匀：L 亮度 % / C 色度（鲜艳度，无上限）/ H 色相角度；CSS Color 4 标准，同 L 滑动亮度真的不变",
+    info: t("colorTool.infoOklch"),
   },
 ]);
 
@@ -93,7 +96,7 @@ watch(colorInput, (v) => {
     rgb.value = parsed;
     parseError.value = "";
   } else {
-    parseError.value = "无法识别的颜色格式，支持 HEX / rgb() / hsl() / oklch() / CSS 颜色名";
+    parseError.value = t("colorTool.parseError");
   }
 });
 
@@ -131,9 +134,9 @@ function rgbStrWithAlpha(a: number): string {
 
 /** 三种衬底：浅色 / 深色 / 棋盘格 */
 const alphaBgs = [
-  { label: "浅底", under: "#ffffff", checker: false },
-  { label: "深底", under: "#1a1a2e", checker: false },
-  { label: "棋盘格", under: "", checker: true },
+  { id: "light", label: t("colorTool.bgLight"), under: "#ffffff", checker: false },
+  { id: "dark", label: t("colorTool.bgDark"), under: "#1a1a2e", checker: false },
+  { id: "checker", label: t("colorTool.bgChecker"), under: "", checker: true },
 ];
 
 /* ════════ 双色渐变生成器 ════════ */
@@ -161,9 +164,9 @@ watch(gradBInput, (v) => {
 /** 任一端解析失败时给出错误提示 */
 function updateGradError() {
   if (!gradA.value && gradAInput.value.trim())
-    gradError.value = `起始色「${gradAInput.value}」无法解析`;
+    gradError.value = t("colorTool.gradStartError", { value: gradAInput.value });
   else if (!gradB.value && gradBInput.value.trim())
-    gradError.value = `结束色「${gradBInput.value}」无法解析`;
+    gradError.value = t("colorTool.gradEndError", { value: gradBInput.value });
   else gradError.value = "";
 }
 
@@ -194,7 +197,7 @@ const gradSpaces = computed(() => {
     {
       key: "srgb",
       label: "sRGB",
-      desc: "默认插值，中段易发灰发脏",
+      desc: t("colorTool.descSrgb"),
       css: css(""),
       /** 取中点色回填到万能输入用 */
       mid: () => {
@@ -210,7 +213,7 @@ const gradSpaces = computed(() => {
     {
       key: "hsl",
       label: "HSL",
-      desc: "沿色相环过渡，跨色相时会扫过彩虹区",
+      desc: t("colorTool.descHsl"),
       css: css("hsl"),
       mid: () =>
         rgbToHex(
@@ -225,7 +228,7 @@ const gradSpaces = computed(() => {
     {
       key: "oklch",
       label: "OKLCH",
-      desc: "感知均匀，过渡最顺滑（P3 色域可能被 sRGB 屏裁剪）",
+      desc: t("colorTool.descOklch"),
       css: css("oklch"),
       mid: () =>
         rgbToHex(
@@ -304,17 +307,33 @@ function hexA(a: number): string {
 
 /** 混合模式演示：当前色叠加在花底渐变上 */
 const blendModes = [
-  { label: "multiply 正片叠底（做深色变体）", mode: "multiply" },
-  { label: "screen 滤色（做浅色变体）", mode: "screen" },
-  { label: "overlay 叠加（保对比提饱和）", mode: "overlay" },
+  { label: t("colorTool.blendMultiply"), mode: "multiply" },
+  { label: t("colorTool.blendScreen"), mode: "screen" },
+  { label: t("colorTool.blendOverlay"), mode: "overlay" },
 ];
 
 /** color-mix 状态色阶（前端最常用的派生色） */
 const mixVariants = computed(() => [
-  { label: "hover（混白 15%）", css: `color-mix(in oklch, ${curHex.value}, white 15%)` },
-  { label: "active（混黑 15%）", css: `color-mix(in oklch, ${curHex.value}, black 15%)` },
-  { label: "border（混透明 60%）", css: `color-mix(in oklab, ${curHex.value}, transparent 60%)` },
-  { label: "bg-surface（混白 90%）", css: `color-mix(in oklch, ${curHex.value}, white 90%)` },
+  {
+    key: "hover",
+    label: t("colorTool.mixHover"),
+    css: `color-mix(in oklch, ${curHex.value}, white 15%)`,
+  },
+  {
+    key: "active",
+    label: t("colorTool.mixActive"),
+    css: `color-mix(in oklch, ${curHex.value}, black 15%)`,
+  },
+  {
+    key: "border",
+    label: t("colorTool.mixBorder"),
+    css: `color-mix(in oklab, ${curHex.value}, transparent 60%)`,
+  },
+  {
+    key: "bg",
+    label: t("colorTool.mixBg"),
+    css: `color-mix(in oklch, ${curHex.value}, white 90%)`,
+  },
 ]);
 
 /** 文字对比度预览：当前色做底 */
@@ -338,7 +357,7 @@ const contrastFg = computed(() => {
     <!-- 万能输入 + 当前颜色大预览 -->
     <div class="flex gap-3 items-start">
       <div class="flex flex-col gap-1 flex-1 min-w-0">
-        <label class="text-xs text-muted">颜色输入（HEX / rgb() / hsl() / oklch() / 颜色名）</label>
+        <label class="text-xs text-muted">{{ t("colorTool.inputLabel") }}</label>
         <ColorInput v-model="colorInput" class="w-full" />
         <p v-if="parseError" class="text-xs text-red-500">⚠ {{ parseError }}</p>
       </div>
@@ -346,7 +365,7 @@ const contrastFg = computed(() => {
       <div
         class="w-20 h-[62px] rounded border border-base flex-shrink-0 checker"
         :style="{ background: rgbStr }"
-        title="当前颜色"
+        :title="t('colorTool.currentColorTitle')"
       ></div>
     </div>
 
@@ -387,13 +406,13 @@ const contrastFg = computed(() => {
 
     <!-- Alpha 深浅底对比：每底展示 alpha 0→1 横向渐变 + 当前 alpha 位置指针 -->
     <div class="flex flex-col gap-1.5">
-      <span class="text-xs font-medium text-primary"
-        >透明度对比（alpha 0→1 从左到右，白线为当前 A={{ rgb.a.toFixed(2) }}，点击设定 alpha）</span
-      >
+      <span class="text-xs font-medium text-primary">{{
+        t("colorTool.alphaCompareTitle", { alpha: rgb.a.toFixed(2) })
+      }}</span>
       <div class="flex gap-2">
         <div
           v-for="bg in alphaBgs"
-          :key="bg.label"
+          :key="bg.id"
           class="flex-1 rounded border border-base overflow-hidden"
         >
           <div class="text-[10px] text-faint text-center py-0.5 bg-surface">{{ bg.label }}</div>
@@ -402,7 +421,7 @@ const contrastFg = computed(() => {
             class="relative h-10 cursor-pointer"
             :class="bg.checker ? 'checker' : ''"
             :style="bg.checker ? {} : { background: bg.under }"
-            title="点击把 alpha 设为所点位置的值"
+            :title="t('colorTool.alphaClickTitle')"
             @click="
               rgb.a =
                 Math.round(
@@ -425,16 +444,16 @@ const contrastFg = computed(() => {
 
     <!-- 亮度梯度条 -->
     <div class="flex flex-col gap-1.5">
-      <span class="text-xs font-medium text-primary"
-        >同色相明度色阶（H={{ hslValue.h }} S={{ hslValue.s }}%，点击取色）</span
-      >
+      <span class="text-xs font-medium text-primary">{{
+        t("colorTool.lightnessScaleTitle", { hue: hslValue.h, sat: hslValue.s })
+      }}</span>
       <div class="flex rounded overflow-hidden border border-base h-10">
         <div
           v-for="(c, i) in lightnessScale"
           :key="c"
           class="flex-1 cursor-pointer relative hover:scale-y-110 transition-transform"
           :style="{ background: c }"
-          :title="`${c}（L=${(i + 1) * 10}%）`"
+          :title="t('colorTool.scaleStepTitle', { color: c, l: (i + 1) * 10 })"
           @click="colorInput = c"
         >
           <span
@@ -453,10 +472,10 @@ const contrastFg = computed(() => {
 
     <!-- 双色渐变生成器 -->
     <div class="flex flex-col gap-2 border border-base rounded p-3">
-      <span class="text-xs font-medium text-primary">渐变生成器</span>
+      <span class="text-xs font-medium text-primary">{{ t("colorTool.gradientTitle") }}</span>
       <div class="flex gap-2 items-center flex-wrap">
-        <ColorInput v-model="gradAInput" placeholder="起始色" />
-        <ColorInput v-model="gradBInput" placeholder="结束色" />
+        <ColorInput v-model="gradAInput" :placeholder="t('colorTool.gradStartPlaceholder')" />
+        <ColorInput v-model="gradBInput" :placeholder="t('colorTool.gradEndPlaceholder')" />
         <div class="flex gap-0.5">
           <button
             v-for="d in gradDirs"
@@ -485,7 +504,7 @@ const contrastFg = computed(() => {
           <div
             class="h-10 rounded border border-base cursor-crosshair relative overflow-hidden"
             :style="{ background: sp.css }"
-            :title="`点击取 ${sp.label} 插值的中点色`"
+            :title="t('colorTool.gradMidTitle', { space: sp.label })"
             @click="pickGradMid(sp)"
           >
             <span class="absolute inset-y-0 left-1/2 w-px bg-white/60"></span>
@@ -508,14 +527,14 @@ const contrastFg = computed(() => {
 
     <!-- CSS 效果实验室：当前颜色 × 常用 CSS 效果的组合预览 -->
     <div class="flex flex-col gap-3 border border-base rounded p-3">
-      <span class="text-xs font-medium text-primary">CSS 效果实验室（当前颜色 × 常用效果）</span>
+      <span class="text-xs font-medium text-primary">{{ t("colorTool.labTitle") }}</span>
 
       <!-- 毛玻璃 + 彩色阴影 + 混合模式三列预览 -->
       <div class="grid md:grid-cols-3 gap-3">
         <!-- 毛玻璃卡片 -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between">
-            <span class="text-xs font-medium">毛玻璃 backdrop-filter</span>
+            <span class="text-xs font-medium">{{ t("colorTool.glassTitle") }}</span>
             <button
               @click="copyWithFlash('fx:glass', glassCss)"
               class="text-[10px] px-1.5 py-0.5 border-l border-base copy-btn"
@@ -536,7 +555,7 @@ const contrastFg = computed(() => {
               class="absolute inset-x-4 inset-y-3 rounded-lg border border-white/30 p-2 text-[10px] text-white leading-4"
               :style="glassStyle"
             >
-              Glass card · 玻璃拟态<br />文字在模糊层上仍可读
+              {{ t("colorTool.glassCardLine1") }}<br />{{ t("colorTool.glassCardLine2") }}
             </div>
           </div>
           <label class="text-[10px] text-muted flex items-center gap-1.5">
@@ -569,8 +588,8 @@ const contrastFg = computed(() => {
         <!-- 彩色阴影 -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between">
-            <span class="text-xs font-medium">彩色阴影 box-shadow</span>
-            <span class="text-[10px] text-faint">比灰阴影更通透，Web 2.0 起流行</span>
+            <span class="text-xs font-medium">{{ t("colorTool.shadowTitle") }}</span>
+            <span class="text-[10px] text-faint">{{ t("colorTool.shadowHint") }}</span>
           </div>
           <div class="flex flex-col gap-3 items-center py-2">
             <div
@@ -588,8 +607,8 @@ const contrastFg = computed(() => {
         <!-- 混合模式 -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between">
-            <span class="text-xs font-medium">混合模式 mix-blend-mode</span>
-            <span class="text-[10px] text-faint">叠在花底上看混合结果</span>
+            <span class="text-xs font-medium">{{ t("colorTool.blendTitle") }}</span>
+            <span class="text-[10px] text-faint">{{ t("colorTool.blendHint") }}</span>
           </div>
           <div
             class="h-24 rounded relative overflow-hidden"
@@ -619,38 +638,38 @@ const contrastFg = computed(() => {
       <!-- color-mix 状态色阶 + 文字对比度 -->
       <div class="grid md:grid-cols-3 gap-3 pt-1 border-t border-base">
         <div class="flex flex-col gap-1.5 md:col-span-2">
-          <span class="text-xs font-medium">color-mix 派生状态色（设计系统常用）</span>
+          <span class="text-xs font-medium">{{ t("colorTool.mixVariantsTitle") }}</span>
           <div class="grid grid-cols-4 gap-2">
-            <div v-for="mv in mixVariants" :key="mv.label" class="flex flex-col gap-0.5">
+            <div v-for="mv in mixVariants" :key="mv.key" class="flex flex-col gap-0.5">
               <div
                 class="h-8 rounded border border-base cursor-pointer"
                 :style="{ background: mv.css }"
-                :title="`点击复制 ${mv.css}`"
-                @click="copyWithFlash('mix:' + mv.label, mv.css)"
+                :title="t('colorTool.mixCopyTitle', { css: mv.css })"
+                @click="copyWithFlash('mix:' + mv.key, mv.css)"
               ></div>
               <span class="text-[9px] text-faint">{{ mv.label }}</span>
             </div>
           </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium">文字对比度（当前色做底）</span>
+          <span class="text-xs font-medium">{{ t("colorTool.contrastTitle") }}</span>
           <div class="flex gap-2">
             <div
               class="flex-1 h-8 rounded flex items-center justify-center text-sm font-medium text-white"
               :style="{ background: curHex }"
-              :title="`白字对比度 ${contrastFg.white}:1`"
+              :title="t('colorTool.whiteContrastTitle', { ratio: contrastFg.white })"
             >
               Aa {{ contrastFg.white }}
             </div>
             <div
               class="flex-1 h-8 rounded flex items-center justify-center text-sm font-medium text-black"
               :style="{ background: curHex }"
-              :title="`黑字对比度 ${contrastFg.black}:1`"
+              :title="t('colorTool.blackContrastTitle', { ratio: contrastFg.black })"
             >
               Aa {{ contrastFg.black }}
             </div>
           </div>
-          <span class="text-[9px] text-faint">WCAG AA 正文 ≥ 4.5:1，大字 ≥ 3:1</span>
+          <span class="text-[9px] text-faint">{{ t("colorTool.wcagHint") }}</span>
         </div>
       </div>
     </div>

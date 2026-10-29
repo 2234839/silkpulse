@@ -9,6 +9,7 @@
  *
  * 各工具的实现已拆分到 tools/ 目录下的独立子组件。
  */
+import { useI18n } from "vue-i18n";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useTheme } from "../composables/useTheme";
 import { useRoute, useRouter } from "vue-router";
@@ -27,15 +28,17 @@ const nowTs = ref(Date.now());
 const nowTimer = setInterval(() => (nowTs.value = Date.now()), 30_000);
 onUnmounted(() => clearInterval(nowTimer));
 
+const { t } = useI18n();
+
 /** 工具 tab 列表（按重要性排序：JSON 第一，Diff 第二） */
 const tools = [
   { id: "json", icon: "📦", label: "JSON" },
   { id: "diff", icon: "📋", label: "Diff" },
-  { id: "log", icon: "📜", label: "日志" },
-  { id: "codec", icon: "🔐", label: "编解码" },
-  { id: "color", icon: "🎨", label: "颜色" },
-  { id: "regex", icon: "🔍", label: "正则" },
-  { id: "endpoints", icon: "🧪", label: "测试端点" },
+  { id: "log", icon: "📜", label: "toolsPanel.tabLog" },
+  { id: "codec", icon: "🔐", label: "toolsPanel.tabCodec" },
+  { id: "color", icon: "🎨", label: "toolsPanel.tabColor" },
+  { id: "regex", icon: "🔍", label: "toolsPanel.tabRegex" },
+  { id: "endpoints", icon: "🧪", label: "toolsPanel.tabEndpoints" },
 ];
 
 /** 当前激活工具 id（与 URL ?tool= 双向同步） */
@@ -231,25 +234,27 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
     <!-- 顶部栏 -->
     <header class="bg-gray-900 text-white px-4 py-2.5 flex items-center gap-4 shrink-0">
       <h1 class="text-base font-semibold">🔧 SilkPulse Tools</h1>
-      <span class="text-xs text-gray-400" title="快捷键：Alt + 1~9 切换到第 N 个可见工具"
-        >Web Debug 工具箱 · 纯前端 · 数据不出域 · Alt+数字切换工具</span
-      >
+      <span class="text-xs text-gray-400" :title="t('toolsPanel.shortcutTitle')">{{
+        t("toolsPanel.subtitle")
+      }}</span>
       <div class="ml-auto flex items-center gap-3">
         <button
           @click="toggleTheme()"
           class="text-xs text-gray-400 hover:text-white"
-          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+          :title="theme === 'dark' ? t('shell.toLightTitle') : t('shell.toDarkTitle')"
         >
           {{ theme === "dark" ? "☀️" : "🌙" }}
         </button>
         <button
           @click="showToolsSettings = true"
           class="text-xs text-gray-400 hover:text-white"
-          title="自定义工具页签：排序与显示/隐藏"
+          :title="t('toolsPanel.settingsTitle')"
         >
-          ⚙️ 工具设置
+          {{ t("toolsPanel.settingsBtn") }}
         </button>
-        <router-link to="/" class="text-xs text-blue-400 hover:text-blue-300">← 控制台</router-link>
+        <router-link to="/" class="text-xs text-blue-400 hover:text-blue-300">{{
+          t("toolsPanel.backToConsole")
+        }}</router-link>
       </div>
     </header>
 
@@ -266,7 +271,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
             : 'border-transparent text-muted hover:text-primary'
         "
       >
-        {{ t.icon }} {{ t.label }}
+        {{ t.icon }} {{ $t(t.label) }}
       </button>
     </nav>
 
@@ -310,17 +315,17 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
         class="bg-surface border border-base rounded-lg shadow-xl w-105 max-h-[80vh] flex flex-col"
       >
         <div class="px-4 py-3 border-b border-base flex items-center">
-          <h3 class="text-sm font-semibold">⚙️ 工具页签设置</h3>
+          <h3 class="text-sm font-semibold">{{ t("toolsPanel.settingsModalTitle") }}</h3>
           <button
             @click="showToolsSettings = false"
             class="ml-auto text-muted hover:text-primary text-sm"
-            title="关闭"
+            :title="t('toolsPanel.close')"
           >
             ✕
           </button>
         </div>
         <div class="flex-1 overflow-y-auto p-3">
-          <p class="text-xs text-muted mb-2">拖动行调整顺序，取消勾选隐藏页签。</p>
+          <p class="text-xs text-muted mb-2">{{ t("toolsPanel.settingsHint") }}</p>
           <div class="flex flex-col gap-1" @dragleave="onDragLeaveList">
             <div
               v-for="(item, idx) in settingsOrder"
@@ -342,7 +347,9 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
                   : '',
               ]"
             >
-              <span class="text-faint text-xs select-none" title="拖动排序">⠿</span>
+              <span class="text-faint text-xs select-none" :title="t('toolsPanel.dragToSort')"
+                >⠿</span
+              >
               <input
                 type="checkbox"
                 :checked="item.visible"
@@ -352,13 +359,13 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
               />
               <span class="text-sm flex-1 select-none">
                 {{ tools.find((t) => t.id === item.id)?.icon }}
-                {{ tools.find((t) => t.id === item.id)?.label }}
+                {{ $t(tools.find((tool) => tool.id === item.id)?.label ?? "") }}
               </span>
               <button
                 @click="onDrop(0)"
                 :disabled="idx === 0"
                 class="px-1.5 text-xs text-muted hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed"
-                title="置顶"
+                :title="t('toolsPanel.pinToTop')"
               >
                 ⤒
               </button>
@@ -370,13 +377,13 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
             @click="resetToolsSettings"
             class="px-3 py-1.5 text-xs rounded border border-base text-muted hover:text-primary"
           >
-            恢复默认
+            {{ t("toolsPanel.resetDefaults") }}
           </button>
           <button
             @click="applyToolsSettings"
             class="ml-auto px-4 py-1.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600"
           >
-            应用
+            {{ t("toolsPanel.apply") }}
           </button>
         </div>
       </div>

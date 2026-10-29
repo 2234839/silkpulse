@@ -13,7 +13,9 @@
  */
 import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { useConsoleSocket } from "./composables/useConsoleSocket";
+import { useLocale } from "./composables/useLocale";
 import { useAuth } from "./composables/useAuth";
 import { useTheme } from "./composables/useTheme";
 import AuthPage from "./components/AuthPage.vue";
@@ -32,6 +34,8 @@ import ConsolePanel from "./components/ConsolePanel.vue";
 import { useResizable } from "./composables/useResizable";
 
 const { theme, toggleTheme } = useTheme();
+const { t, locale } = useI18n();
+const { setLocale } = useLocale();
 
 /** 设备列表宽度可拖拽 */
 const { width: sidebarWidth, onDragStart: onSidebarResize } = useResizable({
@@ -281,7 +285,6 @@ onMounted(async () => {
   }
   if (!needAuth.value) connect();
 });
-
 </script>
 
 <template>
@@ -305,27 +308,34 @@ onMounted(async () => {
       <button
         class="md:hidden p-1.5 rounded text-gray-300 hover:text-white hover:bg-white/10 flex-shrink-0"
         @click="sidebarOpen = true"
-        title="打开设备列表"
+        :title="t('shell.openDeviceList')"
       >
         ☰
       </button>
       <h1 class="text-base sm:text-lg font-semibold flex-shrink-0">silkpulse</h1>
       <!-- 副标题：窄屏隐藏 -->
-      <span class="hidden lg:inline text-xs text-gray-400">远程设备调试控制台</span>
+      <span class="hidden lg:inline text-xs text-gray-400">{{ t("shell.subtitle") }}</span>
       <!-- 游客模式标识 -->
       <span
         v-if="isPlayground"
         class="px-2 py-0.5 text-xs rounded-full bg-yellow-900/40 text-yellow-400 border border-yellow-700/40"
-        title="游客模式 · 数据在公网共享，建议私有化部署"
-        >🎮 游客</span
+        :title="t('shell.guestBadgeTitle')"
+        >{{ t("shell.guestBadge") }}</span
       >
       <!-- 游客自建项目标识（临时项目，倒计销毁） -->
       <span
         v-if="isGuestProject"
         class="px-2 py-0.5 text-xs rounded-full bg-green-900/40 text-green-400 border border-green-700/40"
-        :title="`游客项目 · 最长存活 5 天，${projectExpiresAt ? new Date(projectExpiresAt).toLocaleString() : '到期后'}自动销毁。有长期需要建议自己部署（GitHub 开源）`"
-        >🔑 临时项目<template v-if="guestRemainDays !== undefined">
-          · {{ guestRemainDays }}天</template
+        :title="
+          t('shell.guestProjectBadgeTitle', {
+            time: projectExpiresAt
+              ? new Date(projectExpiresAt).toLocaleString()
+              : t('shell.guestProjectExpiresOn'),
+          })
+        "
+        >{{ t("shell.guestProjectBadge")
+        }}<template v-if="guestRemainDays !== undefined">
+          {{ t("shell.guestProjectDays", { days: guestRemainDays }) }}</template
         ></span
       >
       <span
@@ -336,7 +346,9 @@ onMounted(async () => {
           class="w-2 h-2 rounded-full flex-shrink-0"
           :class="connected ? 'bg-green-400' : 'bg-red-400'"
         />
-        <span class="hidden sm:inline">{{ connected ? "已连接" : "断开中" }}</span>
+        <span class="hidden sm:inline">{{
+          connected ? t("shell.connected") : t("shell.disconnected")
+        }}</span>
       </span>
 
       <!-- 桌面端：所有按钮平铺 -->
@@ -344,32 +356,39 @@ onMounted(async () => {
         <button
           @click="toggleTheme"
           class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
-          :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+          :title="theme === 'dark' ? t('shell.toLightTitle') : t('shell.toDarkTitle')"
         >
           {{ theme === "dark" ? "☀️" : "🌙" }}
+        </button>
+        <button
+          @click="setLocale(locale === 'en' ? 'zh' : 'en')"
+          class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
+          :title="t('shell.languageTitle')"
+        >
+          🌐 {{ t("shell.language") }}
         </button>
         <a
           :href="GITHUB_URL"
           target="_blank"
           rel="noopener noreferrer"
           class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1"
-          title="GitHub 开源地址，觉得有用求个 Star ⭐"
+          :title="t('shell.githubTitle')"
           >⭐ GitHub</a
         >
         <button
           @click="showInjectModal = true"
           class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
-          title="查看三种方式把设备接入到本控制台"
+          :title="t('shell.addDeviceTitle')"
         >
-          ➕ 接入新设备
+          {{ t("shell.addDevice") }}
         </button>
         <button
           v-if="isAdmin"
           @click="showProjectModal = true"
           class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-1"
-          title="管理项目和密钥"
+          :title="t('shell.projectsTitle')"
         >
-          📁 项目管理
+          {{ t("shell.projects") }}
         </button>
         <button
           v-if="selectedDevice"
@@ -377,35 +396,35 @@ onMounted(async () => {
           :disabled="showAiModal"
           class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
         >
-          <span v-if="showAiModal">生成中...</span>
-          <span v-else>📋 诊断上下文</span>
+          <span v-if="showAiModal">{{ t("shell.generating") }}</span>
+          <span v-else>{{ t("shell.aiContext") }}</span>
         </button>
         <router-link
           to="/tools"
           class="px-3 py-1.5 text-xs font-medium rounded bg-teal-600 text-white hover:bg-teal-700 flex items-center gap-1.5"
-          title="Web Debug 工具箱（不需要选中设备）"
-          >🔧 工具箱</router-link
+          :title="t('shell.toolboxTitle')"
+          >{{ t("shell.toolbox") }}</router-link
         >
         <router-link
           to="/blog"
           class="px-3 py-1.5 text-xs font-medium rounded bg-orange-600 text-white hover:bg-orange-700 flex items-center gap-1.5"
-          title="silkpulse blog —— 项目动态与技术文章"
+          :title="t('shell.blogTitle')"
           >📝 Blog</router-link
         >
         <button
           @click="openAgent"
           class="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
-          title="复制提示词，交给 AI agent 远程调试"
+          :title="t('shell.agentTitle')"
         >
-          🤖 Agent
+          {{ t("shell.agent") }}
         </button>
         <button
           v-if="authStatus?.authEnabled && apiKey"
           @click="logout"
           class="px-2 py-1 text-xs rounded text-gray-300 hover:text-white hover:bg-white/10"
-          title="退出登录"
+          :title="t('shell.signOutTitle')"
         >
-          🚪
+          {{ t("shell.signOut") }}
         </button>
       </div>
 
@@ -428,27 +447,34 @@ onMounted(async () => {
             @click="toggleTheme"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
           >
-            {{ theme === "dark" ? "☀️ 亮色" : "🌙 暗色" }}
+            {{ theme === "dark" ? t("shell.toLight") : t("shell.toDark") }}
+          </button>
+          <button
+            @click="setLocale(locale === 'en' ? 'zh' : 'en')"
+            class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
+            :title="t('shell.languageTitle')"
+          >
+            🌐 {{ t("shell.language") }}
           </button>
           <a
             :href="GITHUB_URL"
             target="_blank"
             rel="noopener noreferrer"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 block"
-            >⭐ GitHub 求个 Star</a
+            >{{ t("shell.githubStar") }}</a
           >
           <button
             @click="showInjectModal = true"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
           >
-            ➕ 接入新设备
+            {{ t("shell.addDevice") }}
           </button>
           <button
             v-if="isAdmin"
             @click="showProjectModal = true"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
           >
-            📁 项目管理
+            {{ t("shell.projects") }}
           </button>
           <button
             v-if="selectedDevice"
@@ -456,13 +482,13 @@ onMounted(async () => {
             :disabled="showAiModal"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 disabled:opacity-50"
           >
-            📋 诊断上下文
+            {{ t("shell.aiContext") }}
           </button>
           <router-link
             to="/tools"
             @click="headerMenuOpen = false"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10 block"
-            >🔧 工具箱</router-link
+            >{{ t("shell.toolbox") }}</router-link
           >
           <router-link
             to="/blog"
@@ -474,14 +500,14 @@ onMounted(async () => {
             @click="openAgent"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
           >
-            🤖 接入 Agent
+            {{ t("shell.agentConnect") }}
           </button>
           <button
             v-if="authStatus?.authEnabled && apiKey"
             @click="logout"
             class="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
           >
-            🚪 退出
+            {{ t("shell.signOutMenu") }}
           </button>
         </div>
       </div>
@@ -623,9 +649,11 @@ onMounted(async () => {
 
         <div v-else class="flex-1 flex items-center justify-center text-faint overflow-y-auto">
           <div class="text-center max-w-lg w-full px-6 py-8">
-            <p class="text-sm mb-6">从左侧选择一个设备查看详情</p>
+            <p class="text-sm mb-6">{{ t("shell.emptySelectDevice") }}</p>
             <div class="bg-surface border border-base rounded-lg p-4 text-left">
-              <h3 class="text-sm font-semibold text-primary mb-3">接入新设备</h3>
+              <h3 class="text-sm font-semibold text-primary mb-3">
+                {{ t("shell.emptyAddDeviceTitle") }}
+              </h3>
               <InjectPanel @go-create-project="handleGoCreateProject" />
             </div>
           </div>
@@ -658,12 +686,12 @@ onMounted(async () => {
       @click.self="dismissFirstKey"
     >
       <div class="bg-surface rounded-lg shadow-xl w-full max-w-[480px] mx-4 p-5">
-        <h3 class="text-sm font-semibold text-primary mb-2">🔑 你的项目密钥</h3>
+        <h3 class="text-sm font-semibold text-primary mb-2">{{ t("shell.firstKeyTitle") }}</h3>
         <p class="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">
-          仅展示这一次，请立即复制保存！
+          {{ t("shell.firstKeyWarning") }}
         </p>
         <p class="text-[11px] text-faint mb-3">
-          关闭后无法再查看（服务器只存哈希），丢了只能重新创建项目。
+          {{ t("shell.firstKeyHint") }}
         </p>
         <code
           class="block px-3 py-2 text-xs bg-base border border-base rounded font-mono break-all text-primary select-all mb-3"
@@ -679,13 +707,13 @@ onMounted(async () => {
             "
             class="px-3 py-1.5 rounded text-xs font-medium transition"
           >
-            {{ firstKeyCopied ? "✓ 已复制" : "📋 复制密钥" }}
+            {{ firstKeyCopied ? t("common.copied") : t("shell.copyKey") }}
           </button>
           <button
             @click="dismissFirstKey"
             class="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition"
           >
-            我已保存，进入控制台
+            {{ t("shell.firstKeySaved") }}
           </button>
         </div>
       </div>

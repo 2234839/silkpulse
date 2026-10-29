@@ -5,7 +5,10 @@
  * H/S/L 滑杆，轨道动态着色（拖 H 感受色相环）；v-model 为 { r,g,b,a }，内部转 HSL
  */
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { rgbToHsl, hslToRgb, type Rgb } from "../../../utils/color";
+
+const { t } = useI18n();
 
 /** 当前颜色 */
 const rgb = defineModel<Rgb>({ required: true });
@@ -100,7 +103,7 @@ const pointerStyle = computed(() => {
       <div
         class="relative w-14 h-14 rounded-full flex-shrink-0 cursor-crosshair wheel"
         :style="{ background: WHEEL_BG }"
-        title="色相环：H 是 0-360° 的角度（0° 红、120° 绿、240° 蓝），点击或拖动选取"
+        :title="t('hslPanel.wheelTitle')"
         @mousedown="onWheelPointerDown"
       >
         <!-- 中心挖白洞成环状 + 当前色相指针 -->
@@ -172,7 +175,7 @@ const pointerStyle = computed(() => {
       />
       <span class="w-7 text-right font-mono">{{ rgb.a.toFixed(2) }}</span>
     </label>
-    <p class="text-[10px] text-faint">色相环直观展示 H 是角度；也可拖滑杆。L 明暗、S 鲜淡</p>
+    <p class="text-[10px] text-faint">{{ t("hslPanel.footerHint") }}</p>
   </div>
 </template>
 

@@ -8,6 +8,7 @@
  * 输入经 300ms 防抖后才做行级 LCS diff。
  */
 import { ref, computed, watch, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import { useDebouncedRef } from "../../composables/useDebouncedRef";
 import { sortKeysDeep } from "../../utils/json-tools";
 import { diffLines, diffText, type TextDiffSegment } from "@silkpulse/renderer";
@@ -15,6 +16,8 @@ import ObjectInspector from "../ObjectInspector.vue";
 import { useUndoToast } from "../../composables/useUndoToast";
 import { useResizable } from "../../composables/useResizable";
 import UndoToast from "./UndoToast.vue";
+
+const { t } = useI18n();
 
 /** 清空撤销 toast */
 const { visible: undoVisible, toastMessage, clearWithUndo, undo: doUndo } = useUndoToast();
@@ -96,7 +99,7 @@ function diffClear() {
   clearWithUndo(() => {
     diffA.value = a;
     diffB.value = b;
-  }, "已清空两侧输入");
+  }, t("diffTool.clearedBoth"));
 }
 
 /** 字符级高亮：对变化的行进一步标出具体改了哪些字符 */
@@ -429,7 +432,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
         :style="inputAWidth > 0 ? { width: inputAWidth + 'px' } : undefined"
         :class="inputAWidth > 0 ? '' : 'flex-1'"
       >
-        <label class="text-xs text-muted">文本 A（期望）</label>
+        <label class="text-xs text-muted">{{ $t("diffTool.labelA") }}</label>
         <textarea
           v-model="diffA"
           rows="6"
@@ -441,7 +444,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
       <!-- A/B 宽度拖拽手柄 -->
       <div
         class="group relative w-1.5 cursor-col-resize flex-shrink-0 -mx-1 z-10"
-        title="拖拽调整两侧占比"
+        :title="$t('diffTool.dragRatioTitle')"
         @mousedown="onInputADrag"
       >
         <div class="absolute inset-y-0 -left-1 -right-1"></div>
@@ -450,7 +453,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
         ></div>
       </div>
       <div class="flex flex-col gap-1 flex-1 min-w-0">
-        <label class="text-xs text-muted">文本 B（实际）</label>
+        <label class="text-xs text-muted">{{ $t("diffTool.labelB") }}</label>
         <textarea
           v-model="diffB"
           rows="6"
@@ -463,7 +466,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
     <!-- 输入区高度拖拽手柄 -->
     <div
       class="group relative h-1.5 cursor-row-resize flex-shrink-0 -my-1 mb-1 z-10"
-      title="拖拽调整输入区高度"
+      :title="$t('toolCommon.dragHeightTitle')"
       @mousedown="onInputHeightDrag"
     >
       <div class="absolute inset-x-0 -top-1 -bottom-1"></div>
@@ -474,45 +477,51 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
     <!-- 工具栏 -->
     <div class="flex items-center gap-3 px-1 pb-2 border-b border-base flex-shrink-0 flex-wrap">
       <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
-        <input type="checkbox" v-model="diffJsonMode" class="cursor-pointer" /> JSON 格式化
+        <input type="checkbox" v-model="diffJsonMode" class="cursor-pointer" />
+        {{ $t("diffTool.jsonFormat") }}
       </label>
       <label
         v-if="diffJsonMode"
         class="text-xs text-muted flex items-center gap-1 cursor-pointer"
-        title="递归排序 object 的 key 后再对比，key 顺序不同将不再误报"
+        :title="$t('diffTool.sortKeysTitle')"
       >
-        <input type="checkbox" v-model="diffSortKeys" class="cursor-pointer" /> Key 排序
+        <input type="checkbox" v-model="diffSortKeys" class="cursor-pointer" />
+        {{ $t("diffTool.sortKeys") }}
       </label>
       <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
-        <input type="checkbox" v-model="diffCharLevel" class="cursor-pointer" /> 字符级高亮
+        <input type="checkbox" v-model="diffCharLevel" class="cursor-pointer" />
+        {{ $t("diffTool.charLevel") }}
       </label>
       <label class="text-xs text-muted flex items-center gap-1 cursor-pointer">
-        <input type="checkbox" v-model="diffCollapseSame" class="cursor-pointer" /> 折叠相同行
+        <input type="checkbox" v-model="diffCollapseSame" class="cursor-pointer" />
+        {{ $t("diffTool.collapseSame") }}
       </label>
       <label
         class="text-xs text-muted flex items-center gap-1 cursor-pointer"
-        title="滚动一侧的对象树，另一侧按比例跟随滚动"
+        :title="$t('diffTool.syncScrollTitle')"
       >
-        <input type="checkbox" v-model="diffSyncScroll" class="cursor-pointer" /> 同步滚动
+        <input type="checkbox" v-model="diffSyncScroll" class="cursor-pointer" />
+        {{ $t("diffTool.syncScroll") }}
       </label>
       <label
         class="text-xs text-muted flex items-center gap-1 cursor-pointer"
-        title="展开/折叠一侧节点时，另一侧同路径节点跟随展开/折叠"
+        :title="$t('diffTool.syncExpandTitle')"
       >
-        <input type="checkbox" v-model="diffSyncExpand" class="cursor-pointer" /> 同步展开
+        <input type="checkbox" v-model="diffSyncExpand" class="cursor-pointer" />
+        {{ $t("diffTool.syncExpand") }}
       </label>
       <div class="flex gap-1">
         <button
           @click="diffSwap"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          ⇄ 交换
+          {{ $t("diffTool.swap") }}
         </button>
         <button
           @click="diffClear"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          清空
+          {{ $t("diffTool.clear") }}
         </button>
       </div>
       <div class="flex rounded border border-base overflow-hidden">
@@ -525,7 +534,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
               : 'bg-surface text-muted hover:text-primary'
           "
         >
-          合并
+          {{ $t("diffTool.viewInline") }}
         </button>
         <button
           @click="diffViewMode = 'split'"
@@ -536,7 +545,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
               : 'bg-surface text-muted hover:text-primary'
           "
         >
-          并排
+          {{ $t("diffTool.viewSplit") }}
         </button>
         <div
           v-if="diffJsonMode"
@@ -552,7 +561,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
                 ? 'bg-blue-500/20 text-blue-500'
                 : 'bg-surface text-faint hover:text-primary'
             "
-            title="自动对象模式：开启后，只要两侧都能解析为 JSON，就自动切换到对象视图"
+            :title="$t('diffTool.autoObjectTitle')"
           >
             {{ diffAutoObject ? "✓" : "○" }}
           </button>
@@ -565,9 +574,9 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
                 ? 'bg-blue-500 text-white'
                 : 'bg-surface text-muted hover:text-primary'
             "
-            title="用 JSON 面板的 Object 渲染器并排展示两侧结构"
+            :title="$t('diffTool.viewObjectTitle')"
           >
-            对象
+            {{ $t("diffTool.viewObject") }}
           </button>
         </div>
       </div>
@@ -578,18 +587,18 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
         <template v-if="diffStats.total">
           <span class="text-green-500">+{{ diffStats.added }}</span>
           <span class="text-red-500">−{{ diffStats.removed }}</span>
-          <span v-if="diffCollapsed.hiddenCount" class="text-faint"
-            >省略 {{ diffCollapsed.hiddenCount }} 行</span
-          >
+          <span v-if="diffCollapsed.hiddenCount" class="text-faint">{{
+            $t("diffTool.hiddenLines", { count: diffCollapsed.hiddenCount })
+          }}</span>
         </template>
-        <span v-if="diffParseMs !== null" class="text-faint" title="JSON 解析 + 格式化耗时"
-          >解析 {{ diffParseMs.toFixed(1) }}ms</span
-        >
+        <span v-if="diffParseMs !== null" class="text-faint" :title="$t('diffTool.parseMsTitle')">{{
+          $t("diffTool.parseMs", { ms: diffParseMs.toFixed(1) })
+        }}</span>
         <span
           v-if="diffRenderMs !== null"
           class="text-faint"
-          title="对象树渲染耗时（DOM 更新 + 绘制）"
-          >渲染 {{ diffRenderMs.toFixed(1) }}ms</span
+          :title="$t('diffTool.renderMsTitle')"
+          >{{ $t("diffTool.renderMs", { ms: diffRenderMs.toFixed(1) }) }}</span
         >
       </div>
     </div>
@@ -601,11 +610,11 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
           <div
             class="px-2 py-1 text-xs text-muted bg-surface border-b border-base flex-shrink-0 flex items-center justify-between gap-2"
           >
-            <span>A（期望）</span>
+            <span>{{ $t("diffTool.paneA") }}</span>
             <input
               v-model="diffTreeSearchA"
               type="text"
-              placeholder="搜索节点..."
+              :placeholder="$t('diffTool.searchNodes')"
               class="w-32 px-2 py-0.5 text-xs bg-base border border-base rounded focus:outline-none focus:border-blue-400"
             />
           </div>
@@ -630,11 +639,11 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
           <div
             class="px-2 py-1 text-xs text-muted bg-surface border-b border-base flex-shrink-0 flex items-center justify-between gap-2"
           >
-            <span>B（实际）</span>
+            <span>{{ $t("diffTool.paneB") }}</span>
             <input
               v-model="diffTreeSearchB"
               type="text"
-              placeholder="搜索节点..."
+              :placeholder="$t('diffTool.searchNodes')"
               class="w-32 px-2 py-0.5 text-xs bg-base border border-base rounded focus:outline-none focus:border-blue-400"
             />
           </div>
@@ -662,10 +671,10 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
           v-if="diffResult.length === 0 && diffA && diffB"
           class="text-green-500 text-center py-4"
         >
-          ✅ 完全一致
+          {{ $t("diffTool.identical") }}
         </div>
         <div v-else-if="diffResult.length === 0" class="text-faint text-center py-4">
-          输入两段文本后自动对比...
+          {{ $t("diffTool.inputHint") }}
         </div>
 
         <!-- ════ Inline 视图（配对行合并：同一行内展示旧→新，字符级高亮） ════ -->
@@ -676,7 +685,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
               v-if="item.kind === 'collapse'"
               class="px-4 py-0.5 text-faint text-center bg-base/50 border-y border-base cursor-pointer select-none"
             >
-              ⋯ {{ item.count }} 行未变化 ⋯
+              ⋯ {{ $t("diffTool.collapsedInline", { count: item.count }) }} ⋯
             </div>
             <!-- diff 行（逐行渲染，VS Code inline 风格） -->
             <div
@@ -738,7 +747,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
                 v-if="item.kind === 'collapse'"
                 class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none"
               >
-                ⋯ {{ item.count }} 行 ⋯
+                ⋯ {{ $t("diffTool.collapsedSplit", { count: item.count }) }} ⋯
               </div>
               <div
                 v-else-if="item.line.type !== 'add'"
@@ -777,7 +786,7 @@ const { width: inputHeight, onDragStart: onInputHeightDrag } = useResizable({
                 v-if="item.kind === 'collapse'"
                 class="px-4 py-0.5 text-faint text-center bg-base/50 border-b border-base select-none"
               >
-                ⋯ {{ item.count }} 行 ⋯
+                ⋯ {{ $t("diffTool.collapsedSplit", { count: item.count }) }} ⋯
               </div>
               <div
                 v-else-if="item.line.type !== 'del'"

@@ -9,6 +9,7 @@
  * 提示词模板来自 @silkpulse/shared（服务端 + 控制台共用同一份）。
  */
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { copyText } from "../utils/clipboard";
 import SecretText from "./SecretText.vue";
 import { renderSkillPrompt, renderSkillSystemPrompt } from "@silkpulse/shared";
@@ -27,6 +28,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 
+const { t } = useI18n();
+
 /** 当前选中的 tab */
 type Tab = "full" | "lazy";
 const activeTab = ref<Tab>("lazy");
@@ -38,14 +41,14 @@ const fallbackOrigin = typeof location !== "undefined" ? location.origin : "";
 
 /** 渲染完整提示词（替换占位符） */
 const fullPrompt = computed(() => {
-  const key = props.apiKey || "<你的API密钥>";
+  const key = props.apiKey || t("agentPromptModal.fallbackKey");
   const origin = props.serverUrl || fallbackOrigin;
   return renderSkillPrompt(origin, key);
 });
 
 /** 渲染渐进式加载系统提示词 */
 const lazyPrompt = computed(() => {
-  const key = props.apiKey || "<你的API密钥>";
+  const key = props.apiKey || t("agentPromptModal.fallbackKey");
   const origin = props.serverUrl || fallbackOrigin;
   return renderSkillSystemPrompt(origin, key);
 });
@@ -94,8 +97,8 @@ watch(
       <!-- 标题栏 -->
       <div class="flex items-center justify-between px-5 py-3 border-b border-base">
         <div>
-          <h3 class="text-sm font-semibold text-primary">🤖 接入 AI Agent</h3>
-          <p class="text-xs text-muted mt-0.5">选择接入方式，复制提示词粘贴给你的 AI agent</p>
+          <h3 class="text-sm font-semibold text-primary">{{ t("agentPromptModal.title") }}</h3>
+          <p class="text-xs text-muted mt-0.5">{{ t("agentPromptModal.subtitle") }}</p>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -111,17 +114,17 @@ watch(
           >
             {{
               copyState === "copied"
-                ? "✓ 已复制"
+                ? t("common.copied")
                 : copyState === "error"
-                  ? "复制失败"
-                  : "📋 复制提示词"
+                  ? t("agentPromptModal.copyFailed")
+                  : t("agentPromptModal.copyPrompt")
             }}
           </button>
           <button
             @click="emit('update:modelValue', false)"
             class="px-3 py-1.5 text-xs rounded bg-elevated text-secondary hover:bg-elevated-hover"
           >
-            关闭
+            {{ t("agentPromptModal.close") }}
           </button>
         </div>
       </div>
@@ -137,7 +140,7 @@ watch(
               : 'border-transparent text-muted hover:text-secondary'
           "
         >
-          ⚡ 渐进式加载 <span class="text-muted/60">~50 token</span>
+          {{ t("agentPromptModal.lazyTab") }} <span class="text-muted/60">~50 token</span>
         </button>
         <button
           @click="activeTab = 'full'"
@@ -148,7 +151,7 @@ watch(
               : 'border-transparent text-muted hover:text-secondary'
           "
         >
-          📄 完整提示词 <span class="text-muted/60">~600 token</span>
+          {{ t("agentPromptModal.fullTab") }} <span class="text-muted/60">~600 token</span>
         </button>
       </div>
 
@@ -160,16 +163,18 @@ watch(
           class="mb-3 p-3 rounded bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700"
         >
           <p class="text-xs text-yellow-700 dark:text-yellow-300 leading-relaxed">
-            🔑 你在使用游客临时项目（最长存活 5 天，{{
-              projectExpiresAt ? new Date(projectExpiresAt).toLocaleString() : "到期"
-            }}自动销毁）。到期后此提示词中的 Key
-            失效，需重新创建。这是对游客的限制，有长期需要建议自己部署一份：
+            {{ t("agentPromptModal.guestNoticePrefix")
+            }}{{
+              projectExpiresAt
+                ? new Date(projectExpiresAt).toLocaleString()
+                : t("agentPromptModal.guestExpiresOn")
+            }}{{ t("agentPromptModal.guestNoticeMiddle") }}
             <a
               href="https://github.com/2234839/silkpulse"
               target="_blank"
               rel="noopener noreferrer"
               class="underline underline-offset-2"
-              >GitHub 开源，顺手求个 ⭐</a
+              >{{ t("agentPromptModal.guestNoticeLink") }}</a
             >
           </p>
         </div>
@@ -179,8 +184,9 @@ watch(
           class="mb-3 p-3 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800"
         >
           <p class="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-            💡 将这段极短提示词写入 agent 的<strong>系统提示词</strong>（system prompt）。 agent
-            会在需要远程调试时自动 curl 拉取完整文档，平时不占用 token。
+            {{ t("agentPromptModal.lazyTipPrefix")
+            }}<strong>{{ t("agentPromptModal.systemPromptLabel") }}</strong
+            >{{ t("agentPromptModal.lazyTipSuffix") }}
           </p>
         </div>
         <!-- 密钥部分模糊化（secret 精确匹配 + auto 正则兜底探测），点击查看明文 -->
@@ -195,13 +201,14 @@ watch(
       <div class="px-5 py-2.5 border-t border-base bg-elevated/30">
         <p class="text-xs text-muted">
           <template v-if="activeTab === 'lazy'">
-            🚀 提示词中的 curl 地址指向
-            <code class="text-blue-500">{{ serverUrl }}/api/skill/silkpulse</code>， agent
-            按需拉取完整 API 文档。
+            {{ t("agentPromptModal.lazyFooterPrefix") }}
+            <code class="text-blue-500">{{ serverUrl }}/api/skill/silkpulse</code
+            >{{ t("agentPromptModal.lazyFooterSuffix") }}
           </template>
           <template v-else>
-            💡 提示词包含服务地址 <code class="text-blue-500">{{ serverUrl }}</code> 和 API Key，
-            agent 可直接通过 HTTP API 查看设备、搜索日志、执行代码。
+            {{ t("agentPromptModal.fullFooterPrefix") }}
+            <code class="text-blue-500">{{ serverUrl }}</code
+            >{{ t("agentPromptModal.fullFooterSuffix") }}
           </template>
         </p>
       </div>

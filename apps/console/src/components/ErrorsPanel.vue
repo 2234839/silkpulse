@@ -8,8 +8,11 @@
  * 数据由 App.vue 通过 useConsoleSocket() 单源传入，本组件不自行订阅。
  */
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import type { ErrorEntry } from "@silkpulse/shared";
 import { copyText } from "../utils/clipboard";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 远程设备捕获的错误列表 */
@@ -19,14 +22,14 @@ const props = defineProps<{
 /** 关键词搜索（按 message / stack / mapped.source） */
 const errorSearch = ref("");
 
-/** 时间范围筛选选项 */
+/** 时间范围筛选选项（label 走消息包 key，切换语言实时生效） */
 const timeRangeOptions = [
   /** 全部时间 */
-  { value: "all", label: "全部" },
+  { value: "all", labelKey: "errorsPanel.rangeAll" },
   /** 最近 1 小时 */
-  { value: "1h", label: "最近 1 小时" },
+  { value: "1h", labelKey: "errorsPanel.range1h" },
   /** 最近 10 分钟 */
-  { value: "10m", label: "最近 10 分钟" },
+  { value: "10m", labelKey: "errorsPanel.range10m" },
 ] as const;
 /** 当前选中的时间范围 */
 const timeRange = ref<"all" | "1h" | "10m">("all");
@@ -112,10 +115,15 @@ function formatErrorText(e: ErrorEntry): string {
   const parts = [`[${new Date(e.timestamp).toLocaleString()}] ${e.message}`];
   if (e.mapped) {
     parts.push(
-      `  原始源码: ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}${e.mapped.name ? ` (${e.mapped.name})` : ""}`,
+      t("errorsPanel.formatMapped", {
+        source: e.mapped.source,
+        line: e.mapped.line,
+        column: e.mapped.column,
+        name: e.mapped.name ? ` (${e.mapped.name})` : "",
+      }),
     );
   } else if (e.source) {
-    parts.push(`  位置: ${e.source}:${e.line}:${e.col}`);
+    parts.push(t("errorsPanel.formatSource", { source: e.source, line: e.line, column: e.col }));
   }
   if (e.stack) parts.push(e.stack);
   return parts.join("\n");
@@ -154,20 +162,20 @@ async function copyAllErrors() {
       <span
         v-if="(props.droppedCount ?? 0) > 0"
         class="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap"
-        title="长会话缓冲区已满，最早的记录已被滚动淘汰（新日志不受影响）"
-        >⚠ 已滚动丢弃最早 {{ props.droppedCount }} 条</span
+        :title="t('errorsPanel.droppedTitle')"
+        >{{ t("errorsPanel.dropped", { count: props.droppedCount }) }}</span
       >
       <select
         v-model="timeRange"
         class="shrink-0 text-xs px-1.5 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
       >
         <option v-for="opt in timeRangeOptions" :key="opt.value" :value="opt.value">
-          {{ opt.label }}
+          {{ t(opt.labelKey) }}
         </option>
       </select>
       <input
         v-model="errorSearch"
-        placeholder="搜索错误（message / 堆栈 / 源码位置）"
+        :placeholder="t('errorsPanel.searchPlaceholder')"
         class="flex-1 text-xs px-2 py-1 border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
       />
       <button
@@ -175,7 +183,11 @@ async function copyAllErrors() {
         @click="copyAllErrors"
         class="shrink-0 text-xs px-2 py-1 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors whitespace-nowrap"
       >
-        {{ copyingAllErrors ? "✓ 已复制" : `复制全部 (${filteredErrors.length})` }}
+        {{
+          copyingAllErrors
+            ? t("common.copied")
+            : t("errorsPanel.copyAll", { count: filteredErrors.length })
+        }}
       </button>
     </div>
     <!-- 错误列表 -->
@@ -186,7 +198,7 @@ async function copyAllErrors() {
         @click="expandRenderWindow"
         class="w-full py-1.5 text-xs text-center rounded bg-elevated text-secondary hover:bg-elevated-hover"
       >
-        ↑ 加载更早错误（还有 {{ hiddenCount }} 条未渲染）
+        {{ t("errorsPanel.loadEarlier", { count: hiddenCount }) }}
       </button>
       <div
         v-for="(e, i) in renderedErrors"
@@ -201,7 +213,7 @@ async function copyAllErrors() {
             class="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary transition-colors"
             :title="formatErrorText(e).slice(0, 100)"
           >
-            {{ copyingErrorTs === e.timestamp ? "✓" : "复制" }}
+            {{ copyingErrorTs === e.timestamp ? t("common.copied") : t("common.copy") }}
           </button>
         </div>
         <div class="text-xs text-faint mt-1">{{ new Date(e.timestamp).toLocaleTimeString() }}</div>
@@ -216,9 +228,17 @@ async function copyAllErrors() {
           <button
             @click.stop="copyMappedLocation(e)"
             class="ml-1.5 text-[10px] px-1 py-0 rounded border border-blue-soft bg-elevated hover:bg-elevated-hover text-secondary transition-colors align-middle"
-            :title="`复制位置 ${e.mapped.source}:${e.mapped.line}:${e.mapped.column}`"
+            :title="
+              t('errorsPanel.copyLocationTitle', {
+                source: e.mapped.source,
+                line: e.mapped.line,
+                column: e.mapped.column,
+              })
+            "
           >
-            {{ copyingLocationTs === e.timestamp ? "✓" : "复制位置" }}
+            {{
+              copyingLocationTs === e.timestamp ? t("common.copied") : t("errorsPanel.copyLocation")
+            }}
           </button>
         </div>
         <div v-else-if="e.source" class="mt-1 text-xs text-faint font-mono">
@@ -227,13 +247,13 @@ async function copyAllErrors() {
         <!-- 堆栈可折叠（<details> 原生组件，默认收起，点击展开） -->
         <details v-if="e.stack" class="mt-2">
           <summary class="text-xs text-red-400 cursor-pointer hover:text-red-600 select-none">
-            堆栈
+            {{ t("errorsPanel.stack") }}
           </summary>
           <pre class="text-xs text-red-500 mt-1 whitespace-pre-wrap">{{ e.stack }}</pre>
         </details>
       </div>
       <div v-if="filteredErrors.length === 0" class="text-faint text-center py-8">
-        {{ props.errors.length === 0 ? "暂无错误" : "无匹配错误" }}
+        {{ props.errors.length === 0 ? t("errorsPanel.empty") : t("errorsPanel.noMatch") }}
       </div>
     </div>
   </div>

@@ -9,7 +9,7 @@
 import { ref, computed } from "vue";
 
 /** delay-test 自定义文件名（不含路径与扩展名，扩展名自动补 .js） */
-const fileName = ref("测试js延迟加载");
+const fileName = ref("test-js-latency");
 /** delay-test 延迟秒数（0~300 封顶，与服务端一致） */
 const delaySec = ref(30);
 /** 复制成功提示（短暂显示） */
@@ -47,16 +47,19 @@ function openDelay() {
   <div class="endpoint-tool">
     <!-- delay-test：可参数化生成 -->
     <section class="card">
-      <h3>⏱️ 延迟 JS 端点</h3>
+      <h3>{{ $t("endpointTool.delayTitle") }}</h3>
       <p class="desc">
-        生成一个延迟 N 秒才返回的 JS 地址（免鉴权）。把 URL 当
-        <code>&lt;script src&gt;</code> 或 fetch 目标，验证慢请求、加载占位与
-        SDK 的 network 采集。服务端会打印请求到达/响应完成日志。
+        {{ $t("endpointTool.delayDescA") }}
+        <code>&lt;script src&gt;</code>
+        {{ $t("endpointTool.delayDescB") }}
       </p>
       <div class="row">
-        <label>文件名 <input v-model="fileName" placeholder="测试js延迟加载" /></label>
+        <label
+          >{{ $t("endpointTool.fileNameLabel") }}
+          <input v-model="fileName" placeholder="test-js-latency" />
+        </label>
         <label>
-          延迟秒数
+          {{ $t("endpointTool.delayLabel") }}
           <input v-model.number="delaySec" type="number" min="0" max="300" step="1" />
         </label>
       </div>
@@ -64,41 +67,35 @@ function openDelay() {
         <code class="url">{{ delayUrl }}</code>
         <div class="btns">
           <button @click="copy(delayUrl, 'delay')">
-            {{ copied === "delay" ? "✓ 已复制" : "复制" }}
+            {{ copied === "delay" ? $t("common.copied") : $t("endpointTool.copy") }}
           </button>
-          <button class="primary" @click="openDelay">打开</button>
+          <button class="primary" @click="openDelay">{{ $t("endpointTool.open") }}</button>
         </div>
       </div>
-      <p class="hint">秒数 0~300；中文文件名会自动 URL 编码，服务端日志里会解码显示。</p>
+      <p class="hint">{{ $t("endpointTool.delayHint") }}</p>
     </section>
 
     <!-- 固定端点清单 -->
     <section class="card">
-      <h3>🧪 其他固定端点</h3>
+      <h3>{{ $t("endpointTool.fixedTitle") }}</h3>
       <ul class="list">
         <li>
           <div class="head">
             <code>/sse-test</code>
             <button @click="copy(origin + '/sse-test', 'sse')">
-              {{ copied === "sse" ? "✓ 已复制" : "复制" }}
+              {{ copied === "sse" ? $t("common.copied") : $t("endpointTool.copy") }}
             </button>
           </div>
-          <p class="desc">
-            SSE 流式端点：推送 5 条事件（含 event/id/data），每条间隔
-            500ms，推完关闭。验证 EventSource 与 SDK 的 SSE 采集。
-          </p>
+          <p class="desc">{{ $t("endpointTool.sseDesc") }}</p>
         </li>
         <li>
           <div class="head">
             <code>/test-fixtures/crash.js</code>
             <button @click="copy(origin + '/test-fixtures/crash.js', 'crash')">
-              {{ copied === "crash" ? "✓ 已复制" : "复制" }}
+              {{ copied === "crash" ? $t("common.copied") : $t("endpointTool.copy") }}
             </button>
           </div>
-          <p class="desc">
-            加载即抛错的压缩脚本 + source map（.map）。验证错误堆栈到
-            crash.ts 源码位置的 source map 解析能力。
-          </p>
+          <p class="desc">{{ $t("endpointTool.crashDesc") }}</p>
         </li>
       </ul>
     </section>

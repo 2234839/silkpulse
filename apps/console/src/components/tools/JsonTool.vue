@@ -7,9 +7,12 @@
  * 输入经 300ms 防抖后才做解析渲染，防大文本粘贴卡死。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { applyJq, parseByMode, type JsonParseMode } from "../../utils/json-tools";
 import ObjectInspector from "../ObjectInspector.vue";
 import ToolSplitLayout from "./ToolSplitLayout.vue";
+
+const { t } = useI18n();
 
 const jsonInput = defineModel<string>("input", { default: "" });
 const jsonJqFilter = defineModel<string>("jq", { default: "" });
@@ -29,10 +32,9 @@ const placeholder = computed(() => {
 
 /** 当前模式的提示文案 */
 const modeHint = computed(() => {
-  if (jsonParseMode.value === "jsonc") return "JSONC：支持单行/多行注释、尾逗号";
-  if (jsonParseMode.value === "json5")
-    return "JSON5：支持注释、单引号、无引号 key、尾逗号、十六进制";
-  return "语法：.key 取字段，.arr[] 遍历数组，.a.b 嵌套路径";
+  if (jsonParseMode.value === "jsonc") return t("jsonTool.hintJsonc");
+  if (jsonParseMode.value === "json5") return t("jsonTool.hintJson5");
+  return t("jsonTool.hintJq");
 });
 
 /** JSON 操作按钮的错误提示文本（格式化/压缩/转义/反转义共用） */
@@ -44,7 +46,7 @@ function parseInputOrError(): unknown | undefined {
     actionError.value = "";
     return parseByMode(jsonInput.value, jsonParseMode.value);
   } catch (e) {
-    actionError.value = "JSON 解析失败：" + (e as Error).message;
+    actionError.value = t("jsonTool.parseFailed", { message: (e as Error).message });
     return undefined;
   }
 }
@@ -74,7 +76,7 @@ function unescape() {
   const parsed = parseInputOrError();
   if (parsed === undefined) return;
   if (typeof parsed !== "string") {
-    actionError.value = "JSON 解析失败：结果不是字符串，无法反转义";
+    actionError.value = t("jsonTool.unescapeNotString");
     return;
   }
   jsonInput.value = parsed;
@@ -116,7 +118,7 @@ const parsed = computed<{ ok: true; data: unknown } | { ok: false; error: string
   <ToolSplitLayout storage-key="silkpulse.tools-split.json" :initial-width="480">
     <template #left>
       <div class="flex items-center gap-2">
-        <label class="text-xs text-muted">输入</label>
+        <label class="text-xs text-muted">{{ $t("jsonTool.inputLabel") }}</label>
         <div class="ml-auto flex items-center gap-1">
           <button
             v-for="m in [
@@ -149,25 +151,25 @@ const parsed = computed<{ ok: true; data: unknown } | { ok: false; error: string
           @click="format"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          格式化
+          {{ $t("jsonTool.format") }}
         </button>
         <button
           @click="minify"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          压缩
+          {{ $t("jsonTool.minify") }}
         </button>
         <button
           @click="escape"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          转义
+          {{ $t("jsonTool.escape") }}
         </button>
         <button
           @click="unescape"
           class="px-2 py-0.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          反转义
+          {{ $t("jsonTool.unescape") }}
         </button>
       </div>
       <p v-if="actionError" class="text-xs text-red-500">⚠ {{ actionError }}</p>
@@ -177,18 +179,18 @@ const parsed = computed<{ ok: true; data: unknown } | { ok: false; error: string
           type="text"
           spellcheck="false"
           class="flex-1 bg-input border border-base rounded px-2 py-1.5 text-xs font-mono text-primary focus:outline-none focus:border-blue-500"
-          placeholder="JQ 过滤（如 .items[].msg）"
+          :placeholder="$t('jsonTool.jqPlaceholder')"
         />
       </div>
       <p class="text-xs text-faint">{{ modeHint }}</p>
     </template>
     <template #right>
       <div class="flex items-center justify-between mb-2">
-        <label class="text-xs text-muted">可视化结果</label>
+        <label class="text-xs text-muted">{{ $t("jsonTool.resultLabel") }}</label>
         <input
           v-model="jsonTreeSearch"
           type="text"
-          placeholder="搜索节点..."
+          :placeholder="$t('jsonTool.searchNodes')"
           class="w-40 px-2 py-0.5 text-xs bg-base border border-base rounded focus:outline-none focus:border-blue-400"
         />
       </div>
@@ -201,7 +203,7 @@ const parsed = computed<{ ok: true; data: unknown } | { ok: false; error: string
       >
         ⚠ {{ parsed.error }}
       </div>
-      <div v-else class="text-xs text-faint">输入 JSON 后自动渲染...</div>
+      <div v-else class="text-xs text-faint">{{ $t("jsonTool.emptyInput") }}</div>
     </template>
   </ToolSplitLayout>
 </template>

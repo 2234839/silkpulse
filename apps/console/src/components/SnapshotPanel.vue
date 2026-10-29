@@ -6,6 +6,7 @@
  * 布局框图预览已移至 Element 面板（与 DOM 树联动）。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useSnapshot } from "../composables/useSnapshot";
 import { copyText } from "../utils/clipboard";
 
@@ -15,6 +16,8 @@ const props = defineProps<{
 }>();
 
 const { snapshotText, loading: snapLoading, fetchSnapshot } = useSnapshot();
+
+const { t } = useI18n();
 
 /** 进入面板时拉取快照（deviceId 变化时也重拉） */
 watch(
@@ -60,32 +63,34 @@ function refreshSnapshot() {
     <div class="flex items-center gap-2 px-4 py-2 border-b border-base bg-surface flex-wrap">
       <input
         v-model="snapshotSearch"
-        placeholder="搜索快照（元素名 / idx / 状态 token）"
+        :placeholder="t('snapshotPanel.searchPlaceholder')"
         class="flex-1 min-w-[120px] px-2 py-0.5 text-xs border border-input rounded bg-input text-primary focus:outline-none focus:border-blue-400"
       />
-      <span v-if="filteredSnapshotLines" class="text-xs text-faint whitespace-nowrap"
-        >{{ filteredSnapshotLines.length }} 行</span
-      >
+      <span v-if="filteredSnapshotLines" class="text-xs text-faint whitespace-nowrap">{{
+        t("snapshotPanel.linesCount", filteredSnapshotLines.length)
+      }}</span>
 
       <div class="ml-auto flex items-center gap-2">
         <button
           @click="copySnapshot"
           class="px-2 py-0.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
         >
-          {{ snapCopyState === "copied" ? "✓ 已复制" : "复制" }}
+          {{ snapCopyState === "copied" ? t("common.copied") : t("common.copy") }}
         </button>
         <button
           @click="refreshSnapshot"
           class="px-2 py-0.5 text-xs rounded border border-base bg-elevated hover:bg-elevated-hover text-secondary whitespace-nowrap"
         >
-          刷新
+          {{ t("snapshotPanel.refresh") }}
         </button>
       </div>
     </div>
 
     <!-- 快照文本 -->
     <div class="flex-1 overflow-auto">
-      <div v-if="snapLoading" class="text-faint text-center py-8">加载中...</div>
+      <div v-if="snapLoading" class="text-faint text-center py-8">
+        {{ t("snapshotPanel.loading") }}
+      </div>
       <div v-else class="p-4">
         <pre
           v-if="filteredSnapshotLines"
@@ -98,7 +103,7 @@ function refreshSnapshot() {
           v-if="filteredSnapshotLines && filteredSnapshotLines.length === 0"
           class="text-faint text-center py-8 text-sm"
         >
-          无匹配行
+          {{ t("snapshotPanel.noMatch") }}
         </div>
       </div>
     </div>

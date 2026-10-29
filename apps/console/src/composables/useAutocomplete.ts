@@ -13,6 +13,7 @@
  * 缓存策略：property 模式按 expr 缓存（同一对象不重复探测），root 模式每次实时。
  */
 import { ref } from "vue";
+import { t } from "../i18n";
 import { apiFetch } from "../utils/api";
 
 /** 单条补全建议 */
@@ -158,12 +159,17 @@ const SILKPULSE_HELPERS = [
 /** 静态补全项 */
 const STATIC_ITEMS: CompletionItem[] = [
   ...JS_KEYWORDS.map((k) => ({ text: k, label: k, kind: "keyword" as const })),
-  ...JS_GLOBALS.map((g) => ({ text: g, label: g, kind: "global" as const, detail: "内置全局" })),
+  ...JS_GLOBALS.map((g) => ({
+    text: g,
+    label: g,
+    kind: "global" as const,
+    detail: t("autocomplete.builtinGlobals"),
+  })),
   ...SILKPULSE_HELPERS.map((h) => ({
     text: h,
     label: h,
     kind: "helper" as const,
-    detail: "silkpulse 辅助函数",
+    detail: t("autocomplete.silkpulseHelpers"),
   })),
 ];
 
@@ -383,7 +389,12 @@ function getCompletions(
             kind: "dom" as const,
             detail: "DOM class",
           };
-        return { text: k, label: k, kind: "global" as const, detail: "远程变量" };
+        return {
+          text: k,
+          label: k,
+          kind: "global" as const,
+          detail: t("autocomplete.remoteVariable"),
+        };
       });
       const all = [
         ...remoteItems,

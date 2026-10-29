@@ -36,9 +36,9 @@ export interface BlogPostMeta {
 export const POSTS: BlogPostMeta[] = [
   {
     slug: "hello-silkpulse",
-    title: "silkpulse：让 AI 接管前端线上排障",
+    title: "silkpulse：让 AI 接管前端线上排障", // i18n-allowed: 博客内容另立需求
     summary:
-      '测试同学报「测试机上白屏」「手机上打不开」时，开发者无法用本地 DevTools 调试远在别处的设备。silkpulse 在页面里插一个 script 标签，console、网络请求、报错实时上报到网页控制台——你人工看，或直接让 AI 排查。本文同步发在公众号「崮生」，欢迎阅读关注。',
+      '测试同学报「测试机上白屏」「手机上打不开」时，开发者无法用本地 DevTools 调试远在别处的设备。silkpulse 在页面里插一个 script 标签，console、网络请求、报错实时上报到网页控制台——你人工看，或直接让 AI 排查。本文同步发在公众号「崮生」，欢迎阅读关注。', // i18n-allowed: 博客内容另立需求
     date: "2026-10-15",
     tags: ["silkpulse", "ai-native", "remote-debugging"],
     readingMinutes: 5,

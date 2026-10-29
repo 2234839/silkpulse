@@ -110,7 +110,8 @@ async function main() {
   const browser = await puppeteer.launch({
     executablePath: CHROMIUM,
     headless: true,
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+    /** --lang 固定 zh-CN：断言按中文文案定位元素，避免无头环境 navigator.language=en-US 触发 i18n 渲染英文 */
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--lang=zh-CN"],
   });
 
   /** 准备测试页：通过 server /demo 路由加载（同源，避免跨域影响 network 采集） */

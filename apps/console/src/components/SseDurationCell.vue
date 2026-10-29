@@ -8,6 +8,9 @@
  */
 import { ref, computed, onUnmounted } from "vue";
 import type { NetworkEntry } from "@silkpulse/shared";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** 网络请求条目 */
@@ -29,7 +32,12 @@ const isLive = computed(() => props.entry.sseState === "open");
 </script>
 
 <template>
-  <span :title="isLive ? `流式连接已持续 ${(value ?? 0) / 1000}s` : undefined"
+  <span
+    :title="
+      isLive
+        ? t('sseDurationCell.liveFor', { seconds: ((value ?? 0) / 1000).toFixed(0) })
+        : undefined
+    "
     >{{ value ?? 0 }}ms</span
   >
 </template>

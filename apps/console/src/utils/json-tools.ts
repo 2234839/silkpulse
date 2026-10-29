@@ -4,6 +4,7 @@
  * 从 ToolsPanel.vue 抽出：JSONC/JSON5 预处理、JQ 风格路径、key 排序、
  * SSE/JSONL 解析、时长人性化。后续拆分工具子组件时共享此模块。
  */
+import { t } from "../i18n";
 
 /**
  * 去除 JSONC 注释（不破坏字符串内的内容）
@@ -152,7 +153,7 @@ export function applyJq(data: unknown, expr: string): unknown {
   for (let ti = 0; ti < tokens.length; ti++) {
     const tok = tokens[ti];
     if (tok === "[]") {
-      if (!Array.isArray(cur)) throw new Error("[] 只能用于数组");
+      if (!Array.isArray(cur)) throw new Error(t("jsonTools.arrayOnly"));
       /** 剩余 tokens 重新拼接为子表达式递归应用于每个元素 */
       const rest = tokens.slice(ti + 1).join("");
       if (!rest) return cur;
@@ -160,7 +161,7 @@ export function applyJq(data: unknown, expr: string): unknown {
     }
     const key = tok.startsWith(".") ? tok.slice(1) : tok.slice(1, -1);
     cur = (cur as Record<string, unknown>)[key];
-    if (cur === undefined) throw new Error(`路径 "${tok}" 无值`);
+    if (cur === undefined) throw new Error(t("jsonTools.pathNoValue", { tok }));
   }
   return cur;
 }
@@ -227,10 +228,10 @@ export function parseJsonl(text: string) {
 /** 毫秒数 → 人性化时长（如 "3分钟"、"2小时"） */
 export function humanDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
-  if (s < 60) return s + "秒";
-  if (s < 3600) return Math.floor(s / 60) + "分钟";
-  if (s < 86400) return Math.floor(s / 3600) + "小时";
-  return Math.floor(s / 86400) + "天";
+  if (s < 60) return t("jsonTools.seconds", { n: s });
+  if (s < 3600) return t("jsonTools.minutes", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("jsonTools.hours", { n: Math.floor(s / 3600) });
+  return t("jsonTools.days", { n: Math.floor(s / 86400) });
 }
 
 /**

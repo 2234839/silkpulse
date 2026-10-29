@@ -7,6 +7,7 @@
  * Expires 过期状态随父组件时钟自动判定。
  */
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCopyFlash } from "../../composables/useCopyFlash";
 import ToolSplitLayout from "./ToolSplitLayout.vue";
 
@@ -15,6 +16,13 @@ const { copiedKey, copy: copyWithFlash } = useCopyFlash();
 
 /** 父组件注入的响应式当前时间戳（ms），驱动过期状态随时间自动变化 */
 const props = defineProps<{ now: number }>();
+
+const { locale } = useI18n();
+
+/** 按当前界面语言格式化本地时间展示 */
+function localeString(d: Date): string {
+  return d.toLocaleString(locale.value === "zh" ? "zh-CN" : "en-US");
+}
 
 const cookieInput = ref("");
 
@@ -109,7 +117,7 @@ const cookieEntries = computed<CookieEntry[] | null>(() => {
         const d = new Date(val);
         if (!isNaN(d.getTime())) {
           entry.expired = d.getTime() < props.now;
-          entry.expiresLocal = d.toLocaleString("zh-CN");
+          entry.expiresLocal = localeString(d);
         }
       }
     }
@@ -123,15 +131,13 @@ const cookieEntries = computed<CookieEntry[] | null>(() => {
   <ToolSplitLayout storage-key="silkpulse.tools-split.cookie" :initial-width="400" :max-width="640">
     <template #left>
       <div class="flex flex-col gap-2 min-w-0 h-full">
-        <label class="text-xs text-muted"
-          >Cookie（document.cookie 或 Set-Cookie 头，自动识别）</label
-        >
+        <label class="text-xs text-muted">{{ $t("cookieTool.inputLabel") }}</label>
         <textarea
           v-model="cookieInput"
           rows="12"
           spellcheck="false"
           class="flex-1 w-full bg-input border border-base rounded p-2 text-xs font-mono text-primary resize-none focus:outline-none focus:border-blue-500"
-          :placeholder="'a=1; b=%E4%B8%AD\n或每行一条 Set-Cookie：\ntoken=abc123; Path=/; HttpOnly; Expires=Wed, 21 Oct 2026 07:28:00 GMT; SameSite=Lax'"
+          :placeholder="$t('cookieTool.placeholder')"
         ></textarea>
       </div>
     </template>
@@ -139,8 +145,11 @@ const cookieEntries = computed<CookieEntry[] | null>(() => {
       <div class="flex-1 overflow-auto min-w-0 h-full">
         <template v-if="cookieEntries">
           <div class="text-xs text-muted">
-            共 {{ cookieEntries.length }} 条 · 格式：{{
-              cookieEntries[0].isSetCookie ? "Set-Cookie" : "document.cookie"
+            {{
+              $t("cookieTool.summary", {
+                count: cookieEntries.length,
+                format: cookieEntries[0].isSetCookie ? "Set-Cookie" : "document.cookie",
+              })
             }}
           </div>
           <div
@@ -161,7 +170,7 @@ const cookieEntries = computed<CookieEntry[] | null>(() => {
                     : 'border-base text-muted hover:border-blue-500 hover:text-primary'
                 "
               >
-                {{ copiedKey === "cookie-" + i ? "✓ 已复制" : "复制" }}
+                {{ copiedKey === "cookie-" + i ? $t("common.copied") : $t("cookieTool.copy") }}
               </button>
             </div>
             <template v-if="c.isSetCookie">
@@ -183,13 +192,17 @@ const cookieEntries = computed<CookieEntry[] | null>(() => {
               </div>
               <div v-if="c.expiresRaw" class="flex items-center gap-2">
                 <span class="text-muted">Expires: {{ c.expiresLocal }}（{{ c.expiresRaw }}）</span>
-                <span v-if="c.expired" class="text-red-500 font-semibold">已过期</span>
-                <span v-else class="text-green-500 font-semibold">有效</span>
+                <span v-if="c.expired" class="text-red-500 font-semibold">{{
+                  $t("cookieTool.expired")
+                }}</span>
+                <span v-else class="text-green-500 font-semibold">{{
+                  $t("cookieTool.valid")
+                }}</span>
               </div>
             </template>
           </div>
         </template>
-        <div v-else class="text-xs text-faint">粘贴 Cookie 后自动解析...</div>
+        <div v-else class="text-xs text-faint">{{ $t("cookieTool.emptyInput") }}</div>
       </div>
     </template>
   </ToolSplitLayout>

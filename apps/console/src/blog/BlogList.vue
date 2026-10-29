@@ -7,9 +7,12 @@
  * 帖子数据来自本地注册表（编译期集合，无后端依赖）。
  */
 import { onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import QRCode from "qrcode";
 import { POSTS } from "./posts";
 import BlogHeader from "./BlogHeader.vue";
+
+const { t } = useI18n();
 
 /** slug → 二维码 dataURL（仅外链帖子生成） */
 const qrDataUrls = ref<Record<string, string>>({});
@@ -35,8 +38,9 @@ onMounted(async () => {
       <section class="mb-10">
         <h1 class="text-3xl font-bold text-primary mb-3">silkpulse blog</h1>
         <p class="text-secondary leading-relaxed">
-          关于 <strong class="text-primary">AI 原生远程调试</strong> 的实践笔记—— 让 AI agent
-          直接查看、诊断、操作运行在远程设备上的网页。
+          {{ t("blog.introPrefix")
+          }}<strong class="text-primary">{{ t("blog.introHighlight") }}</strong
+          >{{ t("blog.introSuffix") }}
         </p>
       </section>
 
@@ -59,7 +63,7 @@ onMounted(async () => {
               <div class="flex items-center gap-3 text-xs text-faint mb-2">
                 <time :datetime="post.date">{{ post.date }}</time>
                 <span>·</span>
-                <span>约 {{ post.readingMinutes }} 分钟</span>
+                <span>{{ t("blog.readingTime", { minutes: post.readingMinutes }) }}</span>
               </div>
               <h2
                 class="text-xl font-semibold text-primary group-hover:text-blue-400 transition-colors mb-2"
@@ -77,23 +81,20 @@ onMounted(async () => {
                 <span
                   v-if="post.externalUrl"
                   class="ml-auto text-xs text-blue-400 group-hover:underline"
-                  >微信公众号「崮生」 · 阅读原文 →</span
+                  >{{ t("blog.externalLink") }}</span
                 >
               </div>
             </div>
             <!-- 手机扫码直达原文 -->
-            <div
-              v-if="post.externalUrl && qrDataUrls[post.slug]"
-              class="shrink-0 text-center"
-            >
+            <div v-if="post.externalUrl && qrDataUrls[post.slug]" class="shrink-0 text-center">
               <img
                 :src="qrDataUrls[post.slug]"
-                alt="扫码在手机上阅读原文"
+                :alt="t('blog.qrAlt')"
                 class="w-20 h-20 rounded-lg border border-base"
                 width="80"
                 height="80"
               />
-              <p class="text-[10px] text-faint mt-1">手机扫码阅读</p>
+              <p class="text-[10px] text-faint mt-1">{{ t("blog.qrHint") }}</p>
             </div>
           </component>
         </article>
@@ -102,10 +103,10 @@ onMounted(async () => {
 
     <footer class="max-w-3xl mx-auto px-4 sm:px-6 pb-10 text-center text-xs text-faint">
       <p>
-        silkpulse —— AI 原生的远程设备调试器 ·
-        <router-link to="/" class="hover:text-primary underline underline-offset-2"
-          >打开控制台</router-link
-        >
+        {{ t("blog.footerBrand") }}
+        <router-link to="/" class="hover:text-primary underline underline-offset-2">{{
+          t("blog.openConsole")
+        }}</router-link>
       </p>
     </footer>
   </div>

@@ -24,6 +24,7 @@
  */
 import { ref, computed, watch, provide, inject, triggerRef, onScopeDispose } from "vue";
 import type { Ref } from "vue";
+import { useI18n } from "vue-i18n";
 import type { SerializedValue } from "@silkpulse/shared";
 import { diffText, type TextDiffSegment } from "@silkpulse/renderer";
 import { onClickOutside } from "@vueuse/core";
@@ -106,6 +107,8 @@ const emit = defineEmits<{
   /** 右键菜单事件冒泡（子→父→根） */
   "context-menu": [ctx: MenuContext];
 }>();
+
+const { t } = useI18n();
 
 /* ==================== 跨实例同步展开总线（模块级，同 key 根实例互通） ==================== */
 
@@ -1056,9 +1059,9 @@ async function doCopy(text: string) {
   menuVisible.value = false;
   try {
     await navigator.clipboard.writeText(text);
-    showToast("✓ 已复制");
+    showToast(t("common.copied"));
   } catch {
-    showToast("✗ 复制失败");
+    showToast(t("objectInspector.copyFailed"));
   }
 }
 
@@ -1478,9 +1481,9 @@ function handleChildContextMenu(ctx: MenuContext) {
         <template v-else>
           <span :style="{ color: typeColor(node.type) }">{{ node.preview }}</span>
           <!-- 折叠容器看不到内部，用差异数提示里面有没有变化 -->
-          <span v-if="isDiffMode && diffDescendantCount > 0" class="oi-diff-count-hint"
-            >({{ diffDescendantCount }} 处差异)</span
-          >
+          <span v-if="isDiffMode && diffDescendantCount > 0" class="oi-diff-count-hint">{{
+            t("objectInspector.diffCount", { count: diffDescendantCount })
+          }}</span>
           <span v-if="node.type === 'function'" class="oi-collapsed-hint">
             ({{ (node.value || "").split("\n").length }} lines)
           </span>
@@ -1511,9 +1514,11 @@ function handleChildContextMenu(ctx: MenuContext) {
           @context-menu="handleChildContextMenu"
         />
         <div v-if="children.length > visibleCount" class="oi-more">
-          … 还有 {{ children.length - visibleCount }} 条
+          {{ t("objectInspector.moreRemaining", { count: children.length - visibleCount }) }}
           <button class="oi-more-btn" @click.stop="visibleCount += 50">+50</button>
-          <button class="oi-more-btn" @click.stop="visibleCount = children.length">全部</button>
+          <button class="oi-more-btn" @click.stop="visibleCount = children.length">
+            {{ t("objectInspector.showAll") }}
+          </button>
         </div>
         <!-- 原型链继承属性分组：折叠进单个 [[Prototype]] 节点 -->
         <div v-if="protoChildren.length > 0" class="oi-proto">
@@ -1534,10 +1539,12 @@ function handleChildContextMenu(ctx: MenuContext) {
               @context-menu="handleChildContextMenu"
             />
             <div v-if="protoChildren.length > visibleCount" class="oi-more">
-              … 还有 {{ protoChildren.length - visibleCount }} 条
+              {{
+                t("objectInspector.moreRemaining", { count: protoChildren.length - visibleCount })
+              }}
               <button class="oi-more-btn" @click.stop="visibleCount += 50">+50</button>
               <button class="oi-more-btn" @click.stop="visibleCount = protoChildren.length">
-                全部
+                {{ t("objectInspector.showAll") }}
               </button>
             </div>
           </div>
@@ -1555,20 +1562,20 @@ function handleChildContextMenu(ctx: MenuContext) {
         @contextmenu.prevent.stop
       >
         <button v-if="menuTargetHasChildren" class="oi-menu-item" @click="expandAll">
-          <span class="oi-menu-icon">▾</span> 展开全部子节点
+          <span class="oi-menu-icon">▾</span> {{ t("objectInspector.expandAll") }}
         </button>
         <button v-if="menuTargetHasChildren" class="oi-menu-item" @click="collapseAll">
-          <span class="oi-menu-icon">▸</span> 收起全部子节点
+          <span class="oi-menu-icon">▸</span> {{ t("objectInspector.collapseAll") }}
         </button>
         <div v-if="menuTargetHasChildren" class="oi-menu-sep"></div>
         <button class="oi-menu-item" @click="copyJson">
-          <span class="oi-menu-icon">📋</span> 复制 JSON
+          <span class="oi-menu-icon">📋</span> {{ t("objectInspector.copyJson") }}
         </button>
         <button class="oi-menu-item" @click="copyValue">
-          <span class="oi-menu-icon">📄</span> 复制值
+          <span class="oi-menu-icon">📄</span> {{ t("objectInspector.copyValue") }}
         </button>
         <button class="oi-menu-item" @click="copyJsonPath">
-          <span class="oi-menu-icon">📍</span> 复制 JSON 路径
+          <span class="oi-menu-icon">📍</span> {{ t("objectInspector.copyJsonPath") }}
         </button>
         <div class="oi-menu-sep"></div>
         <button
@@ -1577,7 +1584,7 @@ function handleChildContextMenu(ctx: MenuContext) {
           style="opacity: 0.5"
           @click="fontLarger"
         >
-          <span class="oi-menu-icon">🔍＋</span> 字号增大
+          <span class="oi-menu-icon">🔍＋</span> {{ t("objectInspector.fontLarger") }}
         </button>
         <button
           class="oi-menu-item"
@@ -1585,10 +1592,10 @@ function handleChildContextMenu(ctx: MenuContext) {
           style="opacity: 0.5"
           @click="fontSmaller"
         >
-          <span class="oi-menu-icon">🔍－</span> 字号减小
+          <span class="oi-menu-icon">🔍－</span> {{ t("objectInspector.fontSmaller") }}
         </button>
         <button class="oi-menu-item" :disabled="fontSize === 12" @click="fontReset">
-          <span class="oi-menu-icon">↺</span> 重置字号
+          <span class="oi-menu-icon">↺</span> {{ t("objectInspector.fontReset") }}
         </button>
       </div>
       <!-- 遮罩层：点击关闭菜单 -->

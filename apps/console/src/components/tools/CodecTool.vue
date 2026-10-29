@@ -14,6 +14,7 @@
  * 两个框都可单独复制（带「✓ 已复制」反馈）；清空支持撤销。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCopyFlash } from "../../composables/useCopyFlash";
 import { utf8ToBase64, base64ToUtf8 } from "../../utils/json-tools";
 import { useUndoToast } from "../../composables/useUndoToast";
@@ -24,6 +25,8 @@ import UrlTool from "./UrlTool.vue";
 import CookieTool from "./CookieTool.vue";
 import TimestampTool from "./TimestampTool.vue";
 
+const { t } = useI18n();
+
 /** 父组件注入的响应式当前时间戳（ms），驱动 JWT/Cookie 过期状态随时间自动变化 */
 const props = defineProps<{ now: number }>();
 
@@ -33,13 +36,13 @@ const { visible: undoVisible, toastMessage, clearWithUndo, undo: doUndo } = useU
 /** 工具箱复制按钮的统一「✓ 已复制」反馈（key 前缀 codec:） */
 const { copiedKey, copy: copyWithFlash } = useCopyFlash();
 
-/** 工具类别 */
+/** 工具类别（label 为 i18n 消息键） */
 const kinds = [
-  { id: "codec", label: "编解码" },
-  { id: "jwt", label: "JWT 解码" },
-  { id: "url", label: "URL 解析" },
-  { id: "cookie", label: "Cookie 解析" },
-  { id: "timestamp", label: "⏰ 时间戳" },
+  { id: "codec", label: "codecTool.kindCodec" },
+  { id: "jwt", label: "codecTool.kindJwt" },
+  { id: "url", label: "codecTool.kindUrl" },
+  { id: "cookie", label: "codecTool.kindCookie" },
+  { id: "timestamp", label: "codecTool.kindTimestamp" },
 ] as const;
 /** 工具类别 id */
 type KindId = (typeof kinds)[number]["id"];
@@ -160,8 +163,8 @@ function onSourceInput(target: "plain" | "encoded") {
       if (runCodec(effectiveMode.value, dir, s) === s) {
         note =
           dir === "encode"
-            ? "输入已是编码形式，再次编码无变化"
-            : `按 ${effectiveMode.value} 解码后无变化（输入可能不是该编码）`;
+            ? t("codecTool.noChangeEncode")
+            : t("codecTool.noChangeDecode", { mode: effectiveMode.value });
       }
     } catch {
       note = ""; // 错误由 syncFollowText 统一给出
@@ -195,7 +198,7 @@ function codecClear() {
     plainText.value = p;
     encodedText.value = e;
     lastEdited.value = src;
-  }, "已清空输入");
+  }, t("codecTool.cleared"));
 }
 
 /** JWT 状态桥（切类别不丢输入；Url/Cookie 工具输入为内部状态，切类别会重置） */
@@ -229,7 +232,7 @@ const isCodec = computed(() => kind.value === "codec");
             : 'border-base text-primary hover:border-blue-500'
         "
       >
-        {{ k.label }}
+        {{ $t(k.label) }}
       </button>
     </div>
 
@@ -249,14 +252,22 @@ const isCodec = computed(() => kind.value === "codec");
         >
           {{ c }}
           <template v-if="c === 'Auto' && detectedMode">
-            （{{ detectedMode }}·{{ lastEdited === "plain" ? "编码" : "解码" }}）
+            {{
+              lastEdited === "plain"
+                ? $t("codecTool.detectedEncode", { mode: detectedMode })
+                : $t("codecTool.detectedDecode", { mode: detectedMode })
+            }}
           </template>
         </button>
       </div>
       <label class="text-xs text-muted">
-        原文
-        <span v-if="lastEdited === 'plain'" class="text-blue-500">（数据源）</span>
-        <span class="text-faint ml-1">{{ plainText.length }} 字符</span>
+        {{ $t("codecTool.plainLabel") }}
+        <span v-if="lastEdited === 'plain'" class="text-blue-500">{{
+          $t("codecTool.sourceBadge")
+        }}</span>
+        <span class="text-faint ml-1">{{
+          $t("codecTool.charCount", { count: plainText.length })
+        }}</span>
       </label>
       <textarea
         v-model="plainText"
@@ -271,7 +282,7 @@ const isCodec = computed(() => kind.value === "codec");
     <template v-if="isCodec">
       <div
         class="group relative h-1.5 cursor-row-resize shrink-0 -my-1 z-10"
-        title="拖拽调整输入区高度"
+        :title="$t('toolCommon.dragHeightTitle')"
         @mousedown="onInputHeightDrag"
       >
         <div class="absolute inset-x-0 -top-1 -bottom-1"></div>
@@ -284,9 +295,13 @@ const isCodec = computed(() => kind.value === "codec");
     <!-- 编解码结果（可编辑：编辑此框即成为消息源，原文框跟随解码） -->
     <template v-if="isCodec">
       <label class="text-xs text-muted">
-        编码结果
-        <span v-if="lastEdited === 'encoded'" class="text-blue-500">（数据源）</span>
-        <span class="text-faint ml-1">{{ encodedText.length }} 字符</span>
+        {{ $t("codecTool.encodedLabel") }}
+        <span v-if="lastEdited === 'encoded'" class="text-blue-500">{{
+          $t("codecTool.sourceBadge")
+        }}</span>
+        <span class="text-faint ml-1">{{
+          $t("codecTool.charCount", { count: encodedText.length })
+        }}</span>
       </label>
       <textarea
         v-model="encodedText"
@@ -305,7 +320,7 @@ const isCodec = computed(() => kind.value === "codec");
           @click="codecClear"
           class="px-3 py-1.5 text-xs rounded border border-base text-primary hover:border-blue-500"
         >
-          清空
+          {{ $t("codecTool.clear") }}
         </button>
         <button
           v-if="plainText"
@@ -317,7 +332,7 @@ const isCodec = computed(() => kind.value === "codec");
               : 'border-base text-primary hover:border-blue-500'
           "
         >
-          {{ copiedKey === "codec:plain" ? "✓ 已复制" : "📋 复制原文" }}
+          {{ copiedKey === "codec:plain" ? $t("common.copied") : $t("codecTool.copyPlain") }}
         </button>
         <button
           v-if="encodedText"
@@ -329,10 +344,10 @@ const isCodec = computed(() => kind.value === "codec");
               : 'border-base text-primary hover:border-blue-500'
           "
         >
-          {{ copiedKey === "codec:encoded" ? "✓ 已复制" : "📋 复制编码结果" }}
+          {{ copiedKey === "codec:encoded" ? $t("common.copied") : $t("codecTool.copyEncoded") }}
         </button>
         <span class="text-xs text-faint ml-1">
-          编辑哪一框，哪一框就是数据源
+          {{ $t("codecTool.sourceHint") }}
           <span v-if="syncNote && !syncNote.startsWith('⚠')">{{ syncNote }}</span>
           <span v-if="syncNote.startsWith('⚠')" class="text-red-500">{{ syncNote }}</span>
         </span>

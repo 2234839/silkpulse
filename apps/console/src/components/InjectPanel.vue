@@ -9,6 +9,7 @@
  * 但能看到全部项目——拉取列表让超管选择设备要接入哪个项目。
  */
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useAuth } from "../composables/useAuth";
 import { copyText } from "../utils/clipboard";
 import { apiFetch } from "../utils/api";
@@ -21,6 +22,8 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; goCreateProject: [] }>();
 
 const { authStatus, userRole, projectId, isPlayground } = useAuth();
+
+const { t } = useI18n();
 
 const serverOrigin = location.origin;
 
@@ -344,10 +347,10 @@ const currentInjectSnippet = computed(() => {
 /** 场景说明文案 */
 const scenarioText = computed(() => {
   const map: Record<InjectTab, string> = {
-    script: "适合：能改源码的项目（自己的网站 / App）",
-    iife: "适合：临时调试某个页面，F12 打开 console 粘贴即注入",
-    bookmarklet: "适合：改不了源码的线上站，临时接入一次",
-    userscript: "适合：长期调试某个站 / 强 CSP 站（含 connect-src 限制），需 Tampermonkey 或脚本猫（ScriptCat）",
+    script: t("injectPanel.scenarioScript"),
+    iife: t("injectPanel.scenarioIife"),
+    bookmarklet: t("injectPanel.scenarioBookmarklet"),
+    userscript: t("injectPanel.scenarioUserscript"),
   };
   return map[injectTab.value];
 });
@@ -355,12 +358,10 @@ const scenarioText = computed(() => {
 /** 粘贴位置说明 */
 const locationText = computed(() => {
   const map: Record<InjectTab, string> = {
-    script:
-      "→ 粘贴到目标页面的 HTML 里（如 index.html 的 <head> 或 <body> 顶部），重新部署/刷新即接入",
-    iife: "→ F12 打开目标页面的 DevTools console，粘贴上面代码回车即注入（页面刷新后失效）",
-    bookmarklet: "→ 复制后新建书签，URL 粘贴为上面的代码；在目标页面点这个书签即注入",
-    userscript:
-      "→ 粘贴到 Tampermonkey / 脚本猫（ScriptCat）新建的脚本里，保存后自动在所有页面生效；GM_addElement 特权注入穿过 CSP script-src，内置 GM 桥接宿主用 GM_xmlhttpRequest 承载全部通信，connect-src 限制也不影响（需 Tampermonkey ≥ 4.10 或 ScriptCat）",
+    script: t("injectPanel.locationScript"),
+    iife: t("injectPanel.locationIife"),
+    bookmarklet: t("injectPanel.locationBookmarklet"),
+    userscript: t("injectPanel.locationUserscript"),
   };
   return map[injectTab.value];
 });
@@ -382,12 +383,12 @@ async function copyInject() {
   <div>
     <!-- Modal 头部（仅 closable 模式） -->
     <div v-if="closable" class="flex items-center justify-between px-5 py-3 border-b border-base">
-      <h3 class="text-sm font-semibold text-primary">接入新设备</h3>
+      <h3 class="text-sm font-semibold text-primary">{{ t("injectPanel.modalTitle") }}</h3>
       <button
         @click="emit('close')"
         class="px-3 py-1 text-xs rounded bg-elevated text-secondary bg-elevated-hover"
       >
-        关闭
+        {{ t("injectPanel.close") }}
       </button>
     </div>
 
@@ -397,16 +398,16 @@ async function copyInject() {
         v-if="isPlayground"
         class="mb-3 px-3 py-2 rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950 text-xs text-amber-800 dark:text-amber-200"
       >
-        <p class="font-semibold">⚠️ 游客模式：该设备对所有人可见</p>
+        <p class="font-semibold">{{ t("injectPanel.guestWarnTitle") }}</p>
         <p class="mt-1">
-          Playground
-          是公共项目，你接入设备的页面快照、console、网络请求（含响应体）等数据<b>所有访客都能看到</b>。
-          <b>切勿接入有登录态或敏感信息的页面</b>。长期使用请<a
-            href="#"
-            class="underline font-medium"
-            @click.prevent="emit('goCreateProject')"
-            >创建我的项目 Key</a
-          >，获得仅自己可见的私有项目（免费免注册，5 天有效）。
+          {{ t("injectPanel.guestWarnPrefix") }}<b>{{ t("injectPanel.guestWarnVisibleToAll") }}</b
+          >{{ t("injectPanel.guestWarnMiddle") }}
+          <b>{{ t("injectPanel.guestWarnNeverSensitive") }}</b
+          >{{ t("injectPanel.guestWarnLongTermPrefix")
+          }}<a href="#" class="underline font-medium" @click.prevent="emit('goCreateProject')">{{
+            t("injectPanel.guestWarnCreateKey")
+          }}</a
+          >{{ t("injectPanel.guestWarnSuffix") }}
         </p>
       </div>
       <!-- Tab 切换 -->
@@ -424,12 +425,12 @@ async function copyInject() {
         >
           {{
             tab === "script"
-              ? "Script 标签"
+              ? t("injectPanel.tabScript")
               : tab === "iife"
-                ? "IIFE 立即执行"
+                ? t("injectPanel.tabIife")
                 : tab === "bookmarklet"
-                  ? "Bookmarklet"
-                  : "Userscript"
+                  ? t("injectPanel.tabBookmarklet")
+                  : t("injectPanel.tabUserscript")
           }}
         </button>
       </div>
@@ -439,19 +440,19 @@ async function copyInject() {
       <!-- Alt 点选元素开关：开启后接入片段带 data-element-picker -->
       <label
         class="flex items-center gap-2 mb-3 text-xs text-secondary cursor-pointer select-none"
-        title="开启后，页面里按住 Alt 点击任意元素会弹出定位信息面板，可一键复制定位 + 提示词 + 接入调用方法发给 AI"
+        :title="t('injectPanel.elementPickerTitle')"
       >
         <input v-model="elementPicker" type="checkbox" class="accent-blue-600" />
-        开启「Alt 点选元素」—— 选中页面元素后一键复制定位信息，发给 AI 直接指哪改哪
+        {{ t("injectPanel.elementPickerLabel") }}
       </label>
 
       <!-- 悬浮球开关：默认开启 -->
       <label
         class="flex items-center gap-2 mb-3 text-xs text-secondary cursor-pointer select-none"
-        title="开启后，接入页面右下角出现悬浮球：实时展示调试状态，拖住可联动控制台 Element 面板选元素"
+        :title="t('injectPanel.floatingBallTitle')"
       >
         <input v-model="floatingBall" type="checkbox" class="accent-blue-600" />
-        开启「悬浮球」—— 页面右下角实时展示调试状态，拖出可联动选元素
+        {{ t("injectPanel.floatingBallLabel") }}
       </label>
 
       <!-- 超管：选择设备归属（默认未分组，全局可见；需要归组管理时再选项目） -->
@@ -459,14 +460,14 @@ async function copyInject() {
         v-if="authStatus?.authEnabled && userRole === 'admin'"
         class="flex items-center gap-2 mb-3"
       >
-        <label class="text-xs text-secondary shrink-0">设备归属</label>
+        <label class="text-xs text-secondary shrink-0">{{ t("injectPanel.ownerLabel") }}</label>
         <select
           v-model="adminSelectedProjectId"
           class="px-2 py-1 text-xs rounded border border-input bg-elevated text-primary"
         >
-          <option value="">未分组（全局可见）</option>
+          <option value="">{{ t("injectPanel.ungroupedOption") }}</option>
           <option v-for="p in adminProjects" :key="p.id" :value="p.id" :disabled="!p.enabled">
-            {{ p.name }}（{{ p.id }}）{{ p.enabled ? "" : " · 已停用" }}
+            {{ p.name }} ({{ p.id }}){{ p.enabled ? "" : t("injectPanel.disabledSuffix") }}
           </option>
         </select>
       </div>
@@ -474,13 +475,13 @@ async function copyInject() {
       <div class="relative">
         <pre
           class="bg-base border border-input rounded p-3 pr-16 text-[11px] font-mono text-primary overflow-x-auto whitespace-pre-wrap break-all max-h-48"
-          >{{ currentInjectSnippet || "加载中..." }}</pre>
+          >{{ currentInjectSnippet || t("injectPanel.loading") }}</pre>
         <button
           @click="copyInject"
           :disabled="!currentInjectSnippet"
           class="absolute top-2 right-2 px-2 py-1 text-[10px] font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {{ copyingInject === injectTab ? "✓ 已复制" : "复制" }}
+          {{ copyingInject === injectTab ? t("common.copied") : t("common.copy") }}
         </button>
       </div>
 
