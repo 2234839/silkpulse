@@ -490,7 +490,39 @@ function handleExecKeydown(e: KeyboardEvent) {
     runExecInput();
     return;
   }
-  /** 补全列表关闭时 ↑/↓ 翻阅执行历史 */
+
+  /**
+   * Tab 缩进（补全列表未打开时）：单行插入/移除 2 空格，多行选区批量缩进/反缩进。
+   * 移植自原 Exec 面板编辑器——Exec 并入 Console 时不能丢这块编辑体验。
+   */
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const ta = e.target as HTMLTextAreaElement;
+    const { selectionStart: start, selectionEnd: end, value } = ta;
+    /** 有选区（start !== end）：对选区内每行批量缩进/反缩进 */
+    if (start !== end) {
+      handleMultilineIndent(ta, start, end, value, e.shiftKey);
+      return;
+    }
+    /** 单光标：Tab 加 2 空格，Shift+Tab 移除行首 2 空格（反缩进） */
+    if (e.shiftKey) {
+      /** 找当前行起始 */
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      const lineHead = value.slice(lineStart, lineStart + 2);
+      if (lineHead === "  ") {
+        execInput.value = value.slice(0, lineStart) + value.slice(lineStart + 2);
+        /** nextTick 等 v-model 把新 value 同步到 textarea，再恢复光标（rAF 会在 DOM 更新前跑，被 v-model 覆盖） */
+        nextTick(() => {
+          ta.selectionStart = ta.selectionEnd = start - 2;
+        });
+      }
+    } else {
+      execInput.value = value.slice(0, start) + "  " + value.slice(end);
+      nextTick(() => {
+        ta.selectionStart = ta.selectionEnd = start + 2;
+      });
+    }
+  }
   if (e.key === "ArrowUp") {
     if (!execHistory.value.length) return;
     e.preventDefault();
@@ -519,6 +551,33 @@ function handleExecKeydown(e: KeyboardEvent) {
 /** 清空执行结果区（与日志清空独立） */
 function clearExecResults() {
   execResults.value = [];
+}
+
+/**
+ * 多行选区的批量缩进/反缩进
+ *
+ * Tab：选区内每行行首加 2 空格；Shift+Tab：每行行首移除最多 2 空格。
+ * 保持选区覆盖同样的行范围（让用户能连续操作）。
+ */
+function handleMultilineIndent(
+  ta: HTMLTextAreaElement,
+  start: number,
+  end: number,
+  value: string,
+  shift: boolean,
+): void {
+  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+  const selected = value.slice(lineStart, end);
+  const lines = selected.split("\n");
+  /** 反缩进：每行移除最多 2 个行首空格；缩进：每行行首加 2 空格 */
+  const newLines = shift
+    ? lines.map((l) => l.replace(/^ {1,2}/, ""))
+    : lines.map((l) => "  " + l);
+  execInput.value = value.slice(0, lineStart) + newLines.join("\n") + value.slice(end);
+  nextTick(() => {
+    ta.selectionStart = lineStart;
+    ta.selectionEnd = lineStart + newLines.join("\n").length;
+  });
 }
 </script>
 

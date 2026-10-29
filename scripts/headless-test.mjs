@@ -104,6 +104,13 @@ async function waitForDemoDevice(expectedId, timeoutMs = 10000) {
 
 async function main() {
   console.log("启动无头浏览器...");
+  /** 环境清理：删掉上轮残留的离线幽灵设备（持久化恢复的旧设备会带旧标签/旧数据，
+   *  污染「第一台 /demo 设备」假设，导致标签/下线历史/面板数据用例假失败）。
+   *  DELETE /api/devices 只删离线设备，不影响真实在线页签。 */
+  try {
+    await apiFetch("/api/devices", { method: "DELETE" });
+    await new Promise((r) => setTimeout(r, 500));
+  } catch {}
   try {
     for (const id of await fetchDevices()) baselineDeviceIds.add(id);
   } catch {}
@@ -552,21 +559,22 @@ async function main() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            code: `for (let i = 0; i < 500; i++) { console.log("log-" + String(i).padStart(3, '0')) }; return "done"`,
+            code: `for (let i = 0; i < 1200; i++) { console.log("log-" + String(i).padStart(3, '0')) }; return "done"`,
           }),
         })
       ).json();
       const logs = floodRes.logs ?? [];
       const hasEllipsis = logs.some((l) => l.includes("省略"));
       const hasHead = logs.some((l) => l.includes("log-000"));
-      const hasTail = logs.some((l) => l.includes("log-499"));
-      if (floodRes.success && logs.length <= 202 && hasEllipsis && hasHead && hasTail) {
+      const hasTail = logs.some((l) => l.includes("log-1199"));
+      /** 上限：head 500 + 省略标注 1 + tail 500 = 1001 */
+      if (floodRes.success && logs.length <= 1001 && logs.length >= 500 && hasEllipsis && hasHead && hasTail) {
         ok(
-          `exec 日志截断保护生效（500 条 → ${logs.length} 条，含省略标注 ✓，头部 log-000 ✓，尾部 log-499 ✓）`,
+          `exec 日志截断保护生效（1200 条 → ${logs.length} 条，含省略标注 ✓，头部 log-000 ✓，尾部 log-1199 ✓）`,
         );
       } else {
         fail(
-          `exec 日志截断异常：logs=${logs.length}条(期望≤202)，省略=${hasEllipsis}，头部=${hasHead}，尾部=${hasTail}`,
+          `exec 日志截断异常：logs=${logs.length}条(期望500~1001)，省略=${hasEllipsis}，头部=${hasHead}，尾部=${hasTail}`,
         );
       }
     }
@@ -1280,6 +1288,10 @@ async function main() {
       }
     });
     await new Promise((r) => setTimeout(r, 300));
+    /** 多设备用例结束即关闭第二台设备页：它 title 与 testPage 相同，
+     *  若一直在线会在后续 UI 用例中干扰「在线测试页设备」的选中 */
+    await testPage2.close();
+    await new Promise((r) => setTimeout(r, 500));
 
     /** 11. AI 诊断上下文 —— 控制台"复制 AI 诊断上下文"按钮 */
     /** 先在测试页触发错误和网络请求，制造诊断现场 */
@@ -1342,6 +1354,9 @@ async function main() {
     } else {
       fail(`bookmarklet 注入未上线新设备（${beforeCount} → ${afterCount}）`);
     }
+    /** 用例结束即关闭 bmPage：注入设备与 testPage 同 origin，长期在线会干扰后续设备选中 */
+    await bmPage.close();
+    await new Promise((r) => setTimeout(r, 500));
 
     /** 13. 断线重连 —— 模拟网络闪断，验证设备自动重连 + 历史保留（断网的是 testPage，用其精确 id） */
     const reconDev = device;
@@ -1486,21 +1501,35 @@ async function main() {
       const offlineDevs = await fetchDevices();
       /** 只精确匹配页面自己的 SDK 会话 id——回退会误打到别的在线设备上 */
       const offlineDev = offlineDevs.find((d) => pageDevId && d.id === pageDevId);
-      /** close page 触发 WS 断开 → server 有 5s 下线宽限期（防 reload 抖动），须等满宽限期后才真正下线 */
+      /** close page 触发 WS 断开 → server 有 5s 下线宽限期（防 reload 抖动），轮询等它真正下线 */
       await offlinePage.close();
-      await new Promise((r) => setTimeout(r, 6500));
-      const { devices: onlineNow, recentlyOffline: offlineHist } = await fetchDevicesResponse();
-      const inOnline = onlineNow.some((d) => d.id === offlineDev.id);
+      let offlineHist = [];
+      let onlineNow = [];
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const resp = await fetchDevicesResponse();
+        onlineNow = resp.devices ?? [];
+        offlineHist = resp.recentlyOffline ?? [];
+        if (!onlineNow.some((d) => d.id === offlineDev.id) && offlineHist.some((o) => o.id === offlineDev.id)) break;
+      }
+      /** 下线设备在 devices 中保留（标记 offlineAt，缓存数据仍可查看）——这是产品语义，
+       *  断言「devices 里标记下线 + recentlyOffline 有摘要」而非「从 devices 消失」 */
+      const inOnline = onlineNow.some((d) => d.id === offlineDev.id && !d.offlineAt);
+      const stillListed = onlineNow.find((d) => d.id === offlineDev.id);
       const inOffline = offlineHist.find((o) => o.id === offlineDev.id);
-      if (!inOnline && inOffline && typeof inOffline.offlineAt === "number") {
-        ok(`最近下线设备历史生效（${inOffline.title}，offlineAt 已记录）`);
+      if (stillListed && stillListed.offlineAt && inOffline && typeof inOffline.offlineAt === "number") {
+        ok(`最近下线设备历史生效（${inOffline.title}，devices 标记 offlineAt + recentlyOffline 摘要均记录）`);
       } else {
-        fail(`下线历史异常：online=${inOnline} offline=${!!inOffline}`);
+        fail(`下线历史异常：listed=${!!stillListed} offlineAt=${stillListed?.offlineAt ?? null} summary=${!!inOffline}`);
       }
     }
 
     /** 14. 设备标签/备注 —— POST /tags 设置，GET /devices 反映，再触发 SPA 路由确认不被覆盖 */
-    const tagDev = await waitForDemoDevice();
+    /** 精确锁定本测试自己的设备页（残留的同名 /demo 幽灵设备会干扰回退匹配） */
+    const tagDevId = await testPage
+      .evaluate(() => sessionStorage.getItem("__silkpulse_device_id__"))
+      .catch(() => null);
+    const tagDev = tagDevId ? await waitForDemoDevice(tagDevId) : await waitForDemoDevice();
     if (tagDev) {
       /** 初始应为空标签 */
       if ((tagDev.tags ?? []).length === 0) ok(`设备初始无标签（符合预期）`);
@@ -1715,13 +1744,24 @@ async function main() {
 
     /** 19. Errors 搜索 + 堆栈折叠 —— 控制台 UI 错误面板的关键词过滤与堆栈展开 */
     {
+      /** 自足注入一条真实错误（setTimeout 异步 throw 走 window.onerror 上报），不依赖前置用例遗留数据 */
+      await testPage.evaluate(() => {
+        setTimeout(() => {
+          throw new Error("source map 测试错误锚点XYZ");
+        }, 0);
+      });
+      await new Promise((r) => setTimeout(r, 1500));
       /** 选中 testPage 对应设备（按 id 精确匹配，避免误选环境里其他在线设备） */
       await consolePage.evaluate((deviceId) => {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
         /** 设备条目带 data-id 或按位置匹配；回退：第一个 */
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
       }, device.id);
       await new Promise((r) => setTimeout(r, 600));
@@ -1782,14 +1822,23 @@ async function main() {
        * Errors 面板之前只能手动选中复制。现在每条错误卡片加了复制按钮，
        * 格式化 message + 源码位置 + stack 为文本。验证按钮存在 + 点击反馈态。
        */
+      /** headless Chrome 默认拒绝 clipboard 写入，需显式授权；且 writeText 要求页面 focused，
+       *  多 page 场景必须 bringToFront，否则 NotAllowedError → 复制失败无反馈态 */
+      {
+        const ctx = consolePage.browserContext();
+        await ctx.overridePermissions(SERVER, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
+        await consolePage.bringToFront();
+      }
       /** 清空搜索（前面测试可能留了搜索词）后确保错误列表有卡片 */
       const copyBtnResult = await consolePage.evaluate(() => {
         const cards = document.querySelectorAll(".bg-red-soft.border.border-red-soft.rounded.p-3");
         if (cards.length === 0) return { error: "no error cards" };
-        /** 找第一个卡片内的复制按钮（文本"复制"或"✓"） */
+        /** 找第一个卡片内的复制按钮（文案可能带 icon 前缀，用包含匹配，排除复制全部） */
         const firstCard = cards[0];
         const btns = Array.from(firstCard.querySelectorAll("button"));
-        const copyBtn = btns.find((b) => b.textContent.trim() === "复制");
+        const copyBtn = btns.find(
+          (b) => b.textContent.includes("复制") && !b.textContent.includes("全部"),
+        );
         if (!copyBtn) return { error: "no 复制 button in first card" };
         copyBtn.click();
         return { clicked: true };
@@ -1805,15 +1854,13 @@ async function main() {
           );
           if (cards.length === 0) return { error: "no cards" };
           const btns = Array.from(cards[0].querySelectorAll("button"));
-          /** 复制后按钮文本应变"✓" */
+          /** 复制后按钮文本应变为含"已复制"的反馈态 */
           return {
-            text: btns.find((b) => b.textContent.trim() === "✓")
-              ? "✓"
-              : (btns[0]?.textContent?.trim() ?? ""),
+            text: btns.find((b) => b.textContent.includes("已复制"))?.textContent?.trim() ?? "",
           };
         });
-        if (feedback.text === "✓") {
-          ok(`错误复制按钮反馈成功（点击后 → ✓）`);
+        if (feedback.text.includes("已复制")) {
+          ok(`错误复制按钮反馈成功（点击后 → ✓ 已复制）`);
         } else {
           fail(`错误复制按钮反馈异常：${JSON.stringify(feedback)}`);
         }
@@ -1826,9 +1873,9 @@ async function main() {
        * 格式化为文本（对齐 inspect CLI 格式）一次性复制。
        */
       const copyAllResult = await consolePage.evaluate(() => {
-        /** 找搜索栏区域的"复制全部"按钮 */
+        /** 找搜索栏区域的"复制全部"按钮（文案可能带 icon 前缀，用包含匹配） */
         const btns = Array.from(document.querySelectorAll("button"));
-        const copyAllBtn = btns.find((b) => b.textContent.trim().startsWith("复制全部"));
+        const copyAllBtn = btns.find((b) => b.textContent.includes("复制全部"));
         if (!copyAllBtn) return { error: "no 复制全部 button" };
         const before = copyAllBtn.textContent.trim();
         copyAllBtn.click();
@@ -1841,7 +1888,7 @@ async function main() {
         const feedback = await consolePage.evaluate(() => {
           const btns = Array.from(document.querySelectorAll("button"));
           const btn = btns.find(
-            (b) => b.textContent.includes("已复制") || b.textContent.trim().startsWith("复制全部"),
+            (b) => b.textContent.includes("已复制") || b.textContent.includes("复制全部"),
           );
           return { text: btn?.textContent?.trim() ?? "" };
         });
@@ -1886,6 +1933,9 @@ async function main() {
 
     /** 20. Network 搜索 —— 控制台 UI 网络面板的关键词过滤 */
     {
+      /** 自足产生一条 echo 请求（不依赖前置用例遗留数据——重连/窗口化可能已清掉旧记录） */
+      await testPage.evaluate(() => fetch("/api/echo", { method: "POST", body: "search-anchor" }));
+      await new Promise((r) => setTimeout(r, 1200));
       /** 切到 network 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll("nav button"));
@@ -1956,50 +2006,50 @@ async function main() {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
       });
       await new Promise((r) => setTimeout(r, 400));
-      /** 切到 exec 面板 */
+      /** exec 已并入 Console 面板（底部输入行），切到 Console 即可 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll("nav button"));
-        const execTab = tabs.find((t) => t.textContent.trim().startsWith("Exec"));
-        if (execTab) execTab.click();
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith("Console"));
+        if (cTab) cTab.click();
       });
       await new Promise((r) => setTimeout(r, 300));
 
-      /** 执行成功代码（含快照） */
+      /** 执行成功代码（Enter 触发 handleExecKeydown） */
       await consolePage.evaluate(() => {
         const ta = document.querySelector("textarea");
         if (ta) {
+          ta.focus();
           ta.value = "return 1 + 1";
           ta.dispatchEvent(new Event("input", { bubbles: true }));
+          ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         }
       });
-      await consolePage.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const runBtn = btns.find((b) => b.textContent.includes("执行"));
-        if (runBtn) runBtn.click();
-      });
       await new Promise((r) => setTimeout(r, 1500));
+      /** 读执行结果区（日志流下方的 border-t 区块）：最后一组的 ← 标记颜色与结果文本 */
       const successView = await consolePage.evaluate(() => {
-        const pre = document.querySelector("pre");
-        const details = document.querySelector("details");
-        return {
-          resultText: pre ? pre.textContent : "",
-          resultColor: pre ? pre.className : "",
-          hasSnapshotDetails: !!details,
-          snapshotCollapsed: details ? !details.hasAttribute("open") : false,
-        };
+        const resultsBox = document.querySelector(".border-t.border-light.pt-2");
+        if (!resultsBox) return { resultText: "", markerCls: "" };
+        const groups = resultsBox.querySelectorAll(":scope > div.border-b, :scope .border-b.border-light");
+        const last = groups[groups.length - 1] ?? resultsBox;
+        const marker = Array.from(last.querySelectorAll("span")).find((s) => s.textContent.trim() === "←" || s.textContent.trim() === "✗");
+        return { resultText: last.textContent, markerCls: marker ? marker.className : "" };
       });
-      /** 成功：结果含返回值，颜色正常（text-primary，非 red）；快照折叠 */
+      /** 成功：结果含返回值 2，标记为绿色 ←（非红 ✗） */
       const okSuccess =
+        successView.resultText.includes("return 1 + 1") &&
         successView.resultText.includes("2") &&
-        !successView.resultColor.includes("red") &&
-        successView.hasSnapshotDetails &&
-        successView.snapshotCollapsed;
+        successView.markerCls.includes("green") &&
+        !successView.markerCls.includes("red");
       if (okSuccess) {
-        ok(`exec 成功结果正常色 + 快照默认折叠（${successView.resultText.slice(0, 30).trim()}…）`);
+        ok(`exec 成功结果绿色 ←（${successView.resultText.slice(0, 40).trim()}…）`);
       } else {
         fail(`exec 成功样式异常：${JSON.stringify(successView).slice(0, 200)}`);
       }
@@ -2008,26 +2058,24 @@ async function main() {
       await consolePage.evaluate(() => {
         const ta = document.querySelector("textarea");
         if (ta) {
+          ta.focus();
           ta.value = 'throw new Error("测试失败")';
           ta.dispatchEvent(new Event("input", { bubbles: true }));
+          ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         }
-      });
-      await consolePage.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const runBtn = btns.find((b) => b.textContent.includes("执行"));
-        if (runBtn) runBtn.click();
       });
       await new Promise((r) => setTimeout(r, 1500));
       const failView = await consolePage.evaluate(() => {
-        const pre = document.querySelector("pre");
-        return {
-          resultText: pre ? pre.textContent : "",
-          resultColor: pre ? pre.className : "",
-        };
+        const resultsBox = document.querySelector(".border-t.border-light.pt-2");
+        if (!resultsBox) return { resultText: "", markerCls: "" };
+        const groups = resultsBox.querySelectorAll(":scope > div.border-b, :scope .border-b.border-light");
+        const last = groups[groups.length - 1] ?? resultsBox;
+        const marker = Array.from(last.querySelectorAll("span")).find((s) => s.textContent.trim() === "←" || s.textContent.trim() === "✗");
+        return { resultText: last.textContent, markerCls: marker ? marker.className : "" };
       });
-      /** 失败：含错误信息，颜色为红 */
-      if (failView.resultText.includes("失败") && failView.resultColor.includes("red")) {
-        ok(`exec 失败结果红色高亮（${failView.resultText.slice(0, 40).trim()}…）`);
+      /** 失败：含错误信息，标记为红色 ✗ */
+      if (failView.resultText.includes("失败") && failView.markerCls.includes("red")) {
+        ok(`exec 失败结果红色 ✗ 高亮（${failView.resultText.slice(0, 40).trim()}…）`);
       } else {
         fail(`exec 失败样式异常：${JSON.stringify(failView).slice(0, 200)}`);
       }
@@ -2042,14 +2090,19 @@ async function main() {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
       });
       await new Promise((r) => setTimeout(r, 400));
+      /** exec 已并入 Console 面板（底部输入行），20.5 Tab 缩进用例在 Console 输入框上验证 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll("nav button"));
-        const execTab = tabs.find((t) => t.textContent.trim().startsWith("Exec"));
-        if (execTab) execTab.click();
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith("Console"));
+        if (cTab) cTab.click();
       });
       await new Promise((r) => setTimeout(r, 300));
 
@@ -2159,73 +2212,33 @@ async function main() {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
       });
       await new Promise((r) => setTimeout(r, 400));
-      /** 切到 exec 面板 */
+      /** exec 已并入 Console 面板底部输入行（历史无独立侧栏 UI，靠 ↑/↓ 翻阅 + localStorage） */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll("nav button"));
-        const execTab = tabs.find((t) => t.textContent.trim().startsWith("Exec"));
-        if (execTab) execTab.click();
+        const cTab = tabs.find((t) => t.textContent.trim().startsWith("Console"));
+        if (cTab) cTab.click();
       });
       await new Promise((r) => setTimeout(r, 300));
-      /** 填入代码并执行 */
+      /** 填入代码并 Enter 执行 */
       await consolePage.evaluate(() => {
         const ta = document.querySelector("textarea");
         if (ta) {
+          ta.focus();
           ta.value = "return 1 + 1";
           ta.dispatchEvent(new Event("input", { bubbles: true }));
+          ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         }
-      });
-      await new Promise((r) => setTimeout(r, 100));
-      /** 点执行按钮 */
-      await consolePage.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const runBtn = btns.find(
-          (b) => b.textContent.includes("执行") && !b.textContent.includes("执行中"),
-        );
-        if (runBtn) runBtn.click();
       });
       await new Promise((r) => setTimeout(r, 1000));
-      /** 验证历史侧栏出现该条（历史项为 font-mono truncate 的 code 行） */
-      const histAfterRun = await consolePage.evaluate(() => {
-        const panel = Array.from(document.querySelectorAll("div")).find(
-          (d) => d.textContent?.trim().startsWith("执行历史") && d.className.includes("border-l"),
-        );
-        if (!panel) return [];
-        return Array.from(panel.querySelectorAll(".truncate")).map((el) => el.textContent.trim());
-      });
-      if (histAfterRun.some((c) => c.includes("return 1 + 1"))) {
-        ok(`exec 历史记录成功（侧栏含执行的代码）`);
-      } else {
-        fail(`exec 历史未记录：侧栏=${JSON.stringify(histAfterRun)}`);
-      }
-
-      /** 验证点击历史项回填到编辑区 */
-      await consolePage.evaluate(() => {
-        const panel = Array.from(document.querySelectorAll("div")).find(
-          (d) => d.textContent?.trim().startsWith("执行历史") && d.className.includes("border-l"),
-        );
-        if (!panel) return;
-        for (const it of panel.querySelectorAll(".truncate")) {
-          if (it.textContent.includes("return 1 + 1")) {
-            it.parentElement.click();
-            break;
-          }
-        }
-      });
-      await new Promise((r) => setTimeout(r, 200));
-      const backfilled = await consolePage.evaluate(
-        () => document.querySelector("textarea")?.value,
-      );
-      if (backfilled && backfilled.includes("return 1 + 1")) {
-        ok(`exec 历史点击回填成功（textarea 内容已更新）`);
-      } else {
-        fail(`exec 历史回填失败：textarea="${backfilled}"`);
-      }
-
-      /** 验证历史持久化到 localStorage */
+      /** 验证历史写入 localStorage（执行历史持久化） */
       const persisted = await consolePage.evaluate(() => {
         const raw = localStorage.getItem("silkpulse-exec-history");
         if (!raw) return null;
@@ -2239,28 +2252,25 @@ async function main() {
         Array.isArray(persisted) &&
         persisted.some((h) => h.code && h.code.includes("return 1 + 1"))
       ) {
-        ok(`exec 历史 localStorage 持久化成功（${persisted.length} 条）`);
+        ok(`exec 历史记录 + localStorage 持久化成功（${persisted.length} 条，含执行的代码）`);
       } else {
-        fail(`exec 历史 localStorage 未持久化：${JSON.stringify(persisted)}`);
+        fail(`exec 历史未持久化：${JSON.stringify(persisted)}`);
       }
 
-      /** 清空历史 */
+      /** 验证 ↑ 键翻阅历史回填到输入框 */
       await consolePage.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const clearBtn = btns.find((b) => b.textContent.trim() === "清空");
-        if (clearBtn) clearBtn.click();
+        const ta = document.querySelector("textarea");
+        if (ta) ta.focus();
       });
+      await consolePage.keyboard.press("ArrowUp");
       await new Promise((r) => setTimeout(r, 200));
-      const histAfterClear = await consolePage.evaluate(() => {
-        const panel = Array.from(document.querySelectorAll("div")).find(
-          (d) => d.textContent?.trim().startsWith("执行历史") && d.className.includes("border-l"),
-        );
-        return panel ? panel.querySelectorAll(".truncate").length : 0;
-      });
-      if (histAfterClear === 0) {
-        ok(`exec 历史清空成功`);
+      const backfilled = await consolePage.evaluate(
+        () => document.querySelector("textarea")?.value,
+      );
+      if (backfilled && backfilled.includes("return 1 + 1")) {
+        ok(`exec 历史 ↑ 翻阅回填成功（textarea 内容已更新）`);
       } else {
-        fail(`exec 历史清空失败：仍剩 ${histAfterClear} 条`);
+        fail(`exec 历史回填失败：textarea="${backfilled}"`);
       }
     }
 
@@ -2271,7 +2281,11 @@ async function main() {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
       });
       await new Promise((r) => setTimeout(r, 800));
@@ -2345,6 +2359,15 @@ async function main() {
      * 而非压缩的单行 JSON。调试者看详情时压缩 JSON 可读性极差。
      */
     {
+      /** 自足产生一条 JSON 响应的 POST /api/echo（旧记录可能已被窗口化/重连清掉） */
+      await testPage.evaluate(() =>
+        fetch("/api/echo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ping: 1 }),
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 1200));
       /** 已在 network 面板。找 echo 请求行（URL 含 echo），点击展开详情 */
       const formatted = await consolePage.evaluate(() => {
         const rows = Array.from(document.querySelectorAll("tbody tr"));
@@ -2397,7 +2420,11 @@ async function main() {
         const items = Array.from(
           document.querySelectorAll('aside li, aside [class*="cursor-pointer"]'),
         );
-        const target = items.find((el) => el.textContent?.includes("silkpulse 测试页")) ?? items[0];
+        /** 优先点在线的测试页设备（离线幽灵设备同名，点到它面板永远没新数据） */
+        const target =
+          items.find((el) => el.textContent?.includes("silkpulse 测试页") && !el.textContent?.includes("离线")) ??
+          items.find((el) => el.textContent?.includes("silkpulse 测试页")) ??
+          items[0];
         if (target) target.click();
         const tabs = Array.from(document.querySelectorAll("nav button"));
         const netTab = tabs.find((t) => t.textContent.trim().startsWith("Network"));
@@ -2640,6 +2667,9 @@ async function main() {
      * 之前的测试已产生成功（2xx）+ 失败（404）请求，切到 network 面板验证筛选。
      */
     {
+      /** 自足触发一条 404，确保「失败」筛选有数据可隔离 */
+      await testPage.evaluate(() => fetch("/api/not-exist"));
+      await new Promise((r) => setTimeout(r, 1200));
       /** 切到 network 面板 */
       await consolePage.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll("nav button"));
@@ -2726,13 +2756,10 @@ async function main() {
         if (cTab) cTab.click();
       });
       await new Promise((r) => setTimeout(r, 400));
-      /** 记录清空前日志条数 */
-      const beforeCount = await consolePage.evaluate(() => {
-        const logs = document.querySelectorAll(
-          '.font-mono.text-sm .border-b.border-light, [class*="border-b"][class*="border-light"]',
-        );
-        return logs.length;
-      });
+      /** 记录清空前日志条数（限定在 Console 日志容器内，全局匹配会污染计数） */
+      const beforeCount = await consolePage.evaluate(
+        () => document.querySelectorAll(".font-mono.text-sm .border-b.border-light").length,
+      );
       /** 点"清空"按钮 */
       await consolePage.evaluate(() => {
         const btns = Array.from(document.querySelectorAll("button"));
@@ -2742,10 +2769,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 300));
       /** 清空后视图应几乎为空（只剩"暂无日志"或极少数） */
       const afterClear = await consolePage.evaluate(
-        () =>
-          document.querySelectorAll(
-            '.font-mono.text-sm .border-light, [class*="border-b"][class*="border-light"]',
-          ).length,
+        () => document.querySelectorAll(".font-mono.text-sm .border-b.border-light").length,
       );
 
       /** 触发一条新日志（通过 exec 打一条 console.log） */
@@ -2913,10 +2937,12 @@ async function main() {
       });
       await new Promise((r) => setTimeout(r, 300));
 
-      /** 复制按钮可点击并反馈 */
+      /** 复制按钮可点击并反馈（文案带 icon 前缀，用包含匹配并排除复制全部） */
       const copyOk = await consolePage.evaluate(() => {
         const btns = Array.from(document.querySelectorAll("button"));
-        const copyBtn = btns.find((b) => b.textContent.trim() === "复制");
+        const copyBtn = btns.find(
+          (b) => b.textContent.includes("复制") && !b.textContent.includes("全部"),
+        );
         if (!copyBtn) return false;
         copyBtn.click();
         return true;
