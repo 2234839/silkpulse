@@ -120,6 +120,10 @@ node tools/skill/scripts/silkpulse.mjs exec <id> "return location.href"  # 在�
 
 ## 社区
 
+和开发者一起交流项目使用经验、讨论问题、分享想法：
+
+[![扫码加入开发者社群](https://tsfullstack.heartstack.space/group/gs.svg?from=silkpulse)](https://tsfullstack.heartstack.space/group/gs?from=silkpulse)
+
 感谢 [阮一峰的科技爱好者周刊（第 416 期）](https://www.ruanyifeng.com/blog/2026/10/weekly-issue-416.html#:~:text=6%E3%80%81silkpulse) 收录本项目 🎉
 
 感谢 [LINUX DO](https://linux.do/t/topic/2765326) 社区佬友们的支持与反馈 🙏
