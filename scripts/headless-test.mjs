@@ -118,7 +118,17 @@ async function main() {
     executablePath: CHROMIUM,
     headless: true,
     /** --lang 固定 zh-CN：断言按中文文案定位元素，避免无头环境 navigator.language=en-US 触发 i18n 渲染英文 */
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--lang=zh-CN"],
+    args: [
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--lang=zh-CN",
+      /** Chrome 146 本地网络访问检查会拦 localhost WS；开发机 shell 的 http_proxy
+       *  会被 Chromium 继承拦 localhost 请求——本地 E2E 必须双排除 */
+      "--disable-features=LocalNetworkAccessChecks",
+      "--proxy-server=direct://",
+      "--proxy-bypass-list=*",
+    ],
   });
 
   /** 准备测试页：通过 server /demo 路由加载（同源，避免跨域影响 network 采集） */

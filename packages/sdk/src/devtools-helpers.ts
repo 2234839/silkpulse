@@ -367,6 +367,14 @@ export function installDevToolsHelpers(): void {
       return node;
     };
 
+    /** 单次树读取的组件节点预算：超大应用（数千组件）截断而不是生成巨型 JSON
+     *  拖垮 exec 通道与内存；截断时以 marker 节点提示后续兄弟被省略 */
+    const nodeBudget = { left: 2000 };
+    const budgetMarker = (): DevToolsComponentNode => ({
+      name: `…(组件数超出 ${2000} 上限，已截断)`,
+      id: 0,
+    });
+
     /** 在 fiber 子树里收集「直接子组件」：沿 sibling 链完整扫一层层下沉，
      *  中途遇到组件即停（它内部的后代归它自己的 children）。
      *  fiber 树的兄弟只链在每层首节点上（first.child → sibling*），
@@ -377,13 +385,20 @@ export function installDevToolsHelpers(): void {
     ): DevToolsComponentNode[] => {
       const found: DevToolsComponentNode[] = [];
       const walk = (first: Record<string, unknown> | null, d: number): void => {
-        if (!first || d > 40) return;
+        if (!first || d > 40 || nodeBudget.left <= 0) return;
         for (
           let cur: Record<string, unknown> | null = first;
           cur;
           cur = cur.sibling as Record<string, unknown> | null
         ) {
+          if (nodeBudget.left <= 0) {
+            if (found.length === 0 || found[found.length - 1].name !== budgetMarker().name) {
+              found.push(budgetMarker());
+            }
+            return;
+          }
           if (isComponentTag(cur.tag)) {
+            nodeBudget.left--;
             const node = makeNode(cur);
             const kids = collectChildren(cur, d + 1);
             if (kids.length > 0) node.children = kids;
@@ -586,6 +601,13 @@ export function installDevToolsHelpers(): void {
     $forceUpdate?: () => void;
   }
 
+  /** Vue 树节点预算（与 React 一致，防超大应用生成巨型 JSON） */
+  const vueNodeBudget = { left: 2000 };
+  const vueBudgetMarker = (): DevToolsComponentNode => ({
+    name: `…(组件数超出 ${2000} 上限，已截断)`,
+    id: "0",
+  });
+
   /** 组件实例 → 树节点（递归收集子组件；跨过中间 DOM vnode 层） */
   function vueInstanceNode(instance: VueInstance, depth: number): DevToolsComponentNode {
     const node: DevToolsComponentNode = {
@@ -599,6 +621,13 @@ export function installDevToolsHelpers(): void {
     const collect = (vnode: Record<string, unknown> | null | undefined, d: number): void => {
       if (!vnode || d > 40) return;
       if (vnode.component) {
+        if (vueNodeBudget.left <= 0) {
+          if (children.length === 0 || children[children.length - 1].name !== vueBudgetMarker().name) {
+            children.push(vueBudgetMarker());
+          }
+          return;
+        }
+        vueNodeBudget.left--;
         children.push(vueInstanceNode(vnode.component as VueInstance, d + 1));
         return;
       }

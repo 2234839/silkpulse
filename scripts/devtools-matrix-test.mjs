@@ -35,14 +35,11 @@ function fail(msg, detail = "") {
 }
 
 async function api(path, init = {}) {
-  return fetch(`${SERVER}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${ADMIN_KEY}`,
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
-  });
+  /** ADMIN_KEY 未设置时不发 Authorization（server 对无效凭证回 401，
+   *  "Bearer undefined" 会把无鉴权部署的本地矩阵全部误杀） */
+  const headers = { "Content-Type": "application/json", ...init.headers };
+  if (ADMIN_KEY) headers.Authorization = `Bearer ${ADMIN_KEY}`;
+  return fetch(`${SERVER}${path}`, { ...init, headers });
 }
 
 async function execOn(deviceId, code) {
@@ -154,6 +151,10 @@ async function launchCase() {
       "--no-sandbox",
       "--disable-dev-shm-usage",
       "--disable-features=LocalNetworkAccessChecks",
+      /** 开发机 shell 常带 http_proxy 环境变量，Chromium 会继承导致 localhost
+       *  WS/请求被代理拦截——本地矩阵必须强制直连 */
+      "--proxy-server=direct://",
+      "--proxy-bypass-list=*",
       `--user-data-dir=${path.join(profileDir, `matrix-${caseSeq}`)}`,
     ],
   });

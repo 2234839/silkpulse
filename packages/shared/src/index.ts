@@ -89,6 +89,8 @@ export type ServerToDeviceMessage =
   | { type: "get-network-body"; bodySeq: number }
   /** deviceId 已被另一个活着的标签页占用（复制标签页场景），设备需换 id 重新注册 */
   | { type: "device-id-conflict" }
+  /** register 消息格式非法（缺 device 字段），连接保持但不注册 */
+  | { type: "register-rejected"; reason: string }
   /** devtools 插件消息透传（vue: SuperJSON 信封字符串 / react: {event,payload} 对象） */
   | { type: "devtools-relay"; plugin: string; payload: string | Record<string, unknown> }
   /** 资产代理响应：server 把请求的静态资产文本下发（ok=false 时 error 说明原因） */

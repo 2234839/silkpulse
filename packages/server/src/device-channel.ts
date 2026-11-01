@@ -70,7 +70,15 @@ export class DeviceChannel {
 
     switch (msg.type) {
       case "register": {
-        /** 设备首次注册：分配/复用 id，建立映射 */
+        /** 设备首次注册：分配/复用 id，建立映射。
+         *  device 字段缺失/非对象时拒绝该消息（不 crash——畸形消息来自恶意或
+         *  版本不匹配的 SDK，一条坏消息不应打死整个 server） */
+        if (msg.device == null || typeof msg.device !== "object") {
+          this.conn.send(
+            JSON.stringify({ type: "register-rejected", reason: "invalid device info" } satisfies ServerToDeviceMessage),
+          );
+          return;
+        }
         deviceId = msg.device.id || generateDeviceId();
         const info: DeviceInfo = {
           ...msg.device,
