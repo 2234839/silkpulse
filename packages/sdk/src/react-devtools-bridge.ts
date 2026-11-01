@@ -32,6 +32,7 @@
 
 import { send } from "./ws-client.js";
 import { registerServerMessageHandler } from "./message-router.js";
+import { findReactRoots } from "./react-root-discovery.js";
 
 /** backend bundle 加载后的全局名（IIFE global-name） */
 const BACKEND_GLOBAL = "ReactDevToolsBackend";
@@ -248,25 +249,7 @@ function recoverReactRoots(): void {
   if (stubRenderersRecovered) return;
   if (pendingRenderers.length > 0) return;
 
-  const roots = new Set<unknown>();
-  for (const el of document.querySelectorAll("*")) {
-    for (const key of Object.getOwnPropertyNames(el)) {
-      if (!key.startsWith("__reactContainer$")) continue;
-      const container = (el as unknown as Record<string, unknown>)[key];
-      if (!container) continue;
-      /** 容器上挂的是 HostRoot fiber（tag=3）：其 stateNode 恒指向真实 FiberRoot
-       *  （alternate fiber 克隆时 stateNode 一并复制，不受 double buffering 影响）。
-       *  注意不能用 `stateNode.current === fiber` 做身份校验——commit 后 root.current
-       *  切到 alternate，容器标记仍是初始 fiber，恒 false。backend 的 recordMount
-       *  按 fiber.stateNode 做 map key，必须注册真实 FiberRoot 而非合成包装 */
-      const fiber = container as { stateNode?: { current?: unknown } };
-      const fiberRoot =
-        fiber.stateNode && typeof fiber.stateNode === "object" && "current" in fiber.stateNode
-          ? fiber.stateNode
-          : { current: container };
-      if ((fiberRoot as { current?: unknown }).current) roots.add(fiberRoot);
-    }
-  }
+  const roots = new Set(findReactRoots());
   if (roots.size === 0) return;
 
   /** 探测 React 版本（页面全局可能有 React 挂载信息） */

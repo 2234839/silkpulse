@@ -17,6 +17,11 @@
  */
 
 import { ensureReactBackendActive, getActiveReactHook } from "./react-devtools-bridge.js";
+import {
+  findReactRoots,
+  hasReactRootContainer,
+  toReactFiberRoot,
+} from "./react-root-discovery.js";
 import { getElement } from "./snapshot.js";
 
 /** React DevTools Agent 的最小形状（backend bundle 挂在 hook 上的实例） */
@@ -153,12 +158,7 @@ export function installDevToolsHelpers(): void {
     const vueHook = window as unknown as { __VUE_DEVTOOLS_GLOBAL_HOOK__?: { apps?: unknown[] } };
     let react = (reactHook.__REACT_DEVTOOLS_GLOBAL_HOOK__?.renderers?.size ?? 0) > 0;
     if (!react) {
-      for (const el of document.querySelectorAll("#root, #app, #__next, body > div")) {
-        if (Object.getOwnPropertyNames(el).some((k) => k.startsWith("__reactContainer$"))) {
-          react = true;
-          break;
-        }
-      }
+      react = hasReactRootContainer();
     }
     let vue = (vueHook.__VUE_DEVTOOLS_GLOBAL_HOOK__?.apps?.length ?? 0) > 0;
     if (!vue) {
@@ -413,21 +413,15 @@ export function installDevToolsHelpers(): void {
    *  （不能用 stateNode.current === fiber 校验，double buffering 下恒 false），
    *  缺失时才合成 { current: fiber } 包装 */
   function domBasedReactRoots(): object[] {
-    const roots: object[] = [];
+    const roots = findReactRoots();
+    if (roots.length > 0) return roots;
+
+    /** 没有 __reactContainer$ 的旧 React 版本保留原有 HostFiber 读取路径 */
     for (const el of document.querySelectorAll("#root, #app, [data-reactroot], body > div")) {
-      const key = Object.getOwnPropertyNames(el).find(
-        (k) => k.startsWith("__reactContainer$") || k.startsWith("__reactFiber$"),
-      );
-      if (key) {
-        const container = (el as unknown as Record<string, object>)[key];
-        if (!container) continue;
-        const fiber = container as { stateNode?: { current?: unknown } };
-        const fiberRoot =
-          fiber.stateNode && typeof fiber.stateNode === "object" && "current" in fiber.stateNode
-            ? fiber.stateNode
-            : { current: container };
-        roots.push(fiberRoot as object);
-      }
+      const key = Object.getOwnPropertyNames(el).find((k) => k.startsWith("__reactFiber$"));
+      if (!key) continue;
+      const container = (el as unknown as Record<string, object>)[key];
+      if (container) roots.push(toReactFiberRoot(container));
     }
     return roots;
   }

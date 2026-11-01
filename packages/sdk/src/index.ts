@@ -31,6 +31,7 @@ import { startElementPicker } from "./element-picker.js";
 import { startFloatingBall } from "./floating-ball.js";
 import { initVueDevToolsBridge } from "./devtools-bridge.js";
 import { initReactDevToolsBridge } from "./react-devtools-bridge.js";
+import { hasReactRootContainer } from "./react-root-discovery.js";
 import {
   initElementsBridge,
   feedNetworkEntry,
@@ -270,12 +271,7 @@ function detectFrameworks(): string[] {
     reactRegistered = count > 0;
   }
   if (!reactRegistered) {
-    for (const el of document.querySelectorAll("#root, #app, #__next, body *")) {
-      if (Object.getOwnPropertyNames(el).some((k) => k.startsWith("__reactContainer$"))) {
-        reactRegistered = true;
-        break;
-      }
-    }
+    reactRegistered = hasReactRootContainer();
   }
   if (reactRegistered) fw.push("react");
   return fw;

@@ -1,16 +1,16 @@
 /**
  * DevTools 桥接全矩阵验证 —— 开发/生产构建 × 先注入/后注入 × Vue/React
  *
- * 矩阵（8 个场景）：
- *   A. Vue dev + 先注入（examples/vue-test-page.html 语义：SDK 在 Vue 前加载）
- *   B. Vue dev + 后注入（dev 构建但 SDK 晚注入）
- *   C. Vue prod + 先注入（生产构建 + SDK 先加载）
- *   D. Vue prod + 后注入（最严苛：无事件 + 无 devtools 标记，靠 __vue_app__ 恢复）
- *   E-H. 同上四格 × React 18 生产构建（__reactContainer$ 恢复）
+ * 矩阵（7 个场景，编号沿用历史用例）：
+ *   A/B. Vue dev × 先注入/后注入
+ *   C/D. Vue prod × 先注入/后注入（后注入无事件，靠 __vue_app__ 恢复）
+ *   G/H. React prod × 先注入/后注入（后注入靠 __reactContainer$ 恢复）
+ *   I. React prod + Document root + 后注入（Next.js App Router 根容器形态）
  *
  * 每格验证：available 探测 → 组件树 → inspect → set（响应式生效）→ 后续交互
  *
  * 运行：node scripts/devtools-matrix-test.mjs（需 8080 server 在跑）
+ * 单场景：MATRIX_ONLY=I node scripts/devtools-matrix-test.mjs
  */
 import puppeteer from "puppeteer-core";
 import { execSync } from "node:child_process";
@@ -81,13 +81,22 @@ function detectChromium() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function waitDevice(urlHint, timeoutMs = 20000) {
+async function waitDevice(page, urlHint, timeoutMs = 20000) {
   const start = Date.now();
+  let lastMatch = null;
+  let lastProbe = null;
+  let lastPageDeviceId = null;
   while (Date.now() - start < timeoutMs) {
     const data = await (await api("/api/devices")).json();
-    /** 按 URL 匹配（先注入场景注册时 title 可能还是空，URL 恒在） */
-    const dev = (data.devices ?? []).find((d) => (d.url ?? "").includes(urlHint));
-    if (dev) {
+    const pageDeviceId = await page
+      .evaluate(() => sessionStorage.getItem("__silkpulse_device_id__"))
+      .catch(() => null);
+    lastPageDeviceId = pageDeviceId;
+    /** URL 初筛后按页面 sessionStorage 精确认领；同 URL 的离线宽限期旧设备不能抢匹配 */
+    const matches = (data.devices ?? []).filter((d) => (d.url ?? "").includes(urlHint));
+    const candidates = pageDeviceId ? matches.filter((d) => d.id === pageDeviceId) : matches;
+    lastMatch = candidates.map((d) => ({ id: d.id, url: d.url }));
+    for (const dev of candidates) {
       /** 探活：设备条目可能在离线宽限期（同 id 重连/reload 续接场景），
        *  旧 sock 已关但条目还在列表——试一次轻量 exec 确认 WS 真正可用 */
       try {
@@ -96,11 +105,18 @@ async function waitDevice(urlHint, timeoutMs = 20000) {
           body: JSON.stringify({ code: "1" }),
         });
         const pd = await probe.json();
+        lastProbe = { success: pd.success, error: pd.error };
         if (pd.success) return dev;
-      } catch {}
+      } catch (error) {
+        lastProbe = { error: String(error) };
+      }
     }
     await sleep(400);
   }
+  console.error(
+    "    [waitDevice 超时]",
+    JSON.stringify({ server: SERVER, urlHint, lastPageDeviceId, lastMatch, lastProbe }),
+  );
   return null;
 }
 
@@ -151,6 +167,7 @@ async function launchCase() {
  *                 preInject=true 时用 requestAnimationFrame 拦截法在页面脚本前注入（先注入语义）
  */
 async function runCase(cfg) {
+  if (process.env.MATRIX_ONLY && !cfg.name.startsWith(process.env.MATRIX_ONLY)) return;
   console.log(`\n■ ${cfg.name}`);
   const browser = await launchCase();
   const page = await browser.newPage();
@@ -191,9 +208,14 @@ async function runCase(cfg) {
       await injectSDK(page);
     }
 
-    const dev = await waitDevice(cfg.urlHint, 20000);
+    const dev = await waitDevice(page, cfg.urlHint, 20000);
     if (!dev) {
-      fail("SDK 未注册到 server");
+      const pageState = await page.evaluate(() => ({
+        url: location.href,
+        sdk: typeof window.SilkPulseSDK,
+        deviceId: sessionStorage.getItem("__silkpulse_device_id__"),
+      }));
+      fail("SDK 未注册到 server", JSON.stringify(pageState));
       return;
     }
     ok(`SDK ${cfg.preInject ? "先注入" : "后注入"}，设备已注册 (${dev.id})`);
@@ -207,6 +229,14 @@ async function runCase(cfg) {
     avail?.[cfg.framework] === true
       ? ok(`available 探测正确：${cfg.framework}=true`)
       : fail("available 探测失败", JSON.stringify(avail).slice(0, 200));
+
+    if (cfg.checkDeviceFramework) {
+      const devices = await (await api("/api/devices")).json();
+      const current = (devices.devices ?? []).find((device) => device.id === dev.id);
+      current?.frameworks?.includes(cfg.framework)
+        ? ok(`设备框架识别正确：frameworks 包含 ${cfg.framework}`)
+        : fail("设备框架识别失败", JSON.stringify(current?.frameworks));
+    }
 
     /** 2. 组件树 */
     const tree = await execOn(dev.id, `__silkpulse_devtools_tree()`);
@@ -291,6 +321,12 @@ async function runCase(cfg) {
 }
 
 async function main() {
+  /** 回归页源文件受 Git 跟踪；server 从 public 构建目录提供静态页，运行前同步 */
+  fs.copyFileSync(
+    path.resolve("examples/post-inject-react-document-test.html"),
+    path.resolve("packages/server/public/post-inject-react-document-test.html"),
+  );
+
   const vueCfg = {
     framework: "vue",
     rootName: "ProdApp",
@@ -345,6 +381,16 @@ async function main() {
     urlHint: "post-inject-react-test.html",
     url: `${SERVER}/post-inject-react-test.html`,
     preInject: true,
+  });
+  await runCase({
+    ...reactCfg,
+    name: "I. React prod + Document root + 后注入（Next.js App Router 根容器形态）",
+    rootName: "DocumentRoot",
+    childName: "ProdApp",
+    checkDeviceFramework: true,
+    url: `${SERVER}/post-inject-react-document-test.html`,
+    urlHint: "post-inject-react-document-test.html",
+    preInject: false,
   });
   await runCase({
     ...vueCfg,
