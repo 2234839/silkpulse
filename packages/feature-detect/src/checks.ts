@@ -310,6 +310,14 @@ export const FEATURE_CHECKS: Array<FeatureCheck & { category: FeatureCategory }>
     mdn: "Web/API/Web_Animations_API",
     desc: "用 JS API（element.animate）驱动动画，替代 CSS",
   },
+  {
+    id: "js.prompt-api",
+    label: "Prompt API (Built-in AI)",
+    category: "js-api",
+    test: `'LanguageModel' in window`,
+    mdn: "Web/API/Prompt_API",
+    desc: "浏览器内置本地大模型（Gemini Nano）。注意：接口存在不代表可用，实际使用前需 await LanguageModel.availability() 确认",
+  },
 
   // ────────────────── Network ──────────────────
   {
