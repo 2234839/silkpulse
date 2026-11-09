@@ -314,9 +314,17 @@ export const FEATURE_CHECKS: Array<FeatureCheck & { category: FeatureCategory }>
     id: "js.prompt-api",
     label: "Prompt API (Built-in AI)",
     category: "js-api",
-    test: `'LanguageModel' in window`,
+    test: `'LanguageModel' in window
+      ? (async () => {
+          try {
+            return '存在，availability: ' + (await LanguageModel.availability());
+          } catch (e) {
+            return '存在，availability() 调用失败: ' + (e && e.message ? e.message : String(e));
+          }
+        })()
+      : false`,
     mdn: "Web/API/Prompt_API",
-    desc: "浏览器内置本地大模型（Gemini Nano）。注意：接口存在不代表可用，实际使用前需 await LanguageModel.availability() 确认",
+    desc: "浏览器内置本地大模型（Gemini Nano）。availability 返回 available/downloadable/downloading/unavailable；available 才可直接使用，downloadable 需先触发下载",
   },
 
   // ────────────────── Network ──────────────────

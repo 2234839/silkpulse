@@ -265,6 +265,10 @@ function cdpResourceType(entry: NetworkEntry): string {
 function postNetworkHistoryEntry(iframe: HTMLIFrameElement, entry: NetworkEntry): void {
   const requestId = `hist-net${entry.seq}`;
   const wallTime = Date.parse(entry.timestamp) / 1000 || Date.now() / 1000;
+  /** 完成时刻：resource 条目优先用 SDK 采集的真实 completedAt，其余用 开始+duration 推算 */
+  const completedWallTime = entry.completedAt
+    ? Date.parse(entry.completedAt) / 1000
+    : wallTime + (entry.duration ?? 0) / 1000;
   const type = cdpResourceType(entry);
   iframe.contentWindow?.postMessage(
     JSON.stringify({
@@ -294,7 +298,7 @@ function postNetworkHistoryEntry(iframe: HTMLIFrameElement, entry: NetworkEntry)
         method: "Network.loadingFailed",
         params: {
           requestId,
-          timestamp: wallTime + (entry.duration ?? 0) / 1000,
+          timestamp: completedWallTime,
           type,
           errorText: entry.error,
           canceled: false,
@@ -310,7 +314,36 @@ function postNetworkHistoryEntry(iframe: HTMLIFrameElement, entry: NetworkEntry)
     headers["Content-Type"] ??
     entry.resBodyMime ??
     "") as string;
-  const endTs = wallTime + (entry.duration ?? 0) / 1000;
+  const endTs = completedWallTime;
+  /**
+   * 分段耗时 → CDP ResourceTiming（官方面板 Timing 页签的数据源）
+   * 有真实分段才传，其余字段补 0（CDP 要求 -1 表示缺失，0 表示无耗时）
+   */
+  const p = entry.timingPhases;
+  const startSec = wallTime;
+  const timing = p
+    ? {
+        requestTime: startSec,
+        proxyStart: -1,
+        proxyEnd: -1,
+        dnsStart: p.dns !== undefined ? 0 : -1,
+        dnsEnd: p.dns !== undefined ? p.dns / 1000 : -1,
+        connectStart: p.tcp !== undefined ? p.dns !== undefined ? p.dns / 1000 : 0 : -1,
+        connectEnd:
+          p.tcp !== undefined
+            ? ((p.dns ?? 0) + p.tcp) / 1000
+            : -1,
+        sslStart: p.tls !== undefined ? ((p.dns ?? 0) + Math.max(0, p.tcp - p.tls)) / 1000 : -1,
+        sslEnd: p.tls !== undefined ? ((p.dns ?? 0) + p.tcp) / 1000 : -1,
+        workerStart: -1,
+        workerReady: -1,
+        sendStart: p.ttfb !== undefined ? ((p.dns ?? 0) + p.tcp) / 1000 : -1,
+        sendEnd: p.ttfb !== undefined ? ((p.dns ?? 0) + p.tcp) / 1000 : -1,
+        pushStart: 0,
+        pushEnd: 0,
+        receiveHeadersEnd: p.ttfb !== undefined ? ((p.dns ?? 0) + p.tcp + p.ttfb) / 1000 : -1,
+      }
+    : undefined;
   iframe.contentWindow?.postMessage(
     JSON.stringify({
       method: "Network.responseReceived",
@@ -333,6 +366,7 @@ function postNetworkHistoryEntry(iframe: HTMLIFrameElement, entry: NetworkEntry)
           encodedDataLength: entry.resBodySize ?? -1,
           protocol: entry.protocol === "ws" || entry.kind === "ws" ? "websocket" : "http/1.1",
           securityState: "insecure",
+          ...(timing ? { timing } : {}),
         },
       },
     }),

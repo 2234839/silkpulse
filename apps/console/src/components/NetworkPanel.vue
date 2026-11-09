@@ -111,6 +111,15 @@ function resourceLabel(n: NetworkEntry): string {
   return labels[locale.value === "zh" ? "zh" : "en"];
 }
 
+/** 分段耗时 key → i18n 键（详情区分段展示用，顺序即展示顺序） */
+const PHASE_LABEL_KEYS = {
+  dns: "networkPanel.phaseDns",
+  tcp: "networkPanel.phaseTcp",
+  tls: "networkPanel.phaseTls",
+  ttfb: "networkPanel.phaseTtfb",
+  download: "networkPanel.phaseDownload",
+} as const;
+
 /**
  * 获取网络条目的显示图标
  *
@@ -222,6 +231,8 @@ function toExportObject(n: NetworkEntry): Record<string, unknown> {
     resHeaders: n.resHeaders ?? null,
     resBody: n.resBody ?? null,
     duration: n.duration,
+    completedAt: n.completedAt ?? null,
+    timingPhases: n.timingPhases ?? null,
     error: n.error ?? null,
   };
 }
@@ -1309,6 +1320,29 @@ function formatRefetchHeaders(h: Record<string, string>): string {
             <div>
               <span class="text-faint">{{ t("networkPanel.detailDuration") }}</span
               ><span class="font-mono text-primary">{{ calcDuration(selectedNetwork) }}ms</span>
+            </div>
+            <div v-if="selectedNetwork.completedAt">
+              <span
+                class="text-faint"
+                :title="t('networkPanel.detailCompletedAtTitle')"
+                >{{ t("networkPanel.detailCompletedAt") }}</span
+              ><span class="font-mono text-primary">{{
+                new Date(selectedNetwork.completedAt).toLocaleString()
+              }}</span>
+            </div>
+            <div
+              v-if="selectedNetwork.timingPhases"
+              class="basis-full w-full"
+              :title="t('networkPanel.detailPhasesTitle')"
+            >
+              <span class="text-faint">{{ t("networkPanel.detailPhases") }}</span>
+              <span class="font-mono text-primary text-xs">
+                <template v-for="(label, key) in PHASE_LABEL_KEYS" :key="key">
+                  <span v-if="selectedNetwork.timingPhases[key] !== undefined"
+                    >{{ t(label) }} {{ selectedNetwork.timingPhases[key] }}ms · </span
+                  >
+                </template>
+              </span>
             </div>
             <div v-if="selectedNetwork.kind === 'resource'">
               <span class="text-faint">{{ t("networkPanel.detailKind") }}</span>

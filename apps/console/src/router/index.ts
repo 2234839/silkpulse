@@ -33,6 +33,12 @@ export const router = createRouter({
       /** blog 详情页（按 slug 懒加载对应帖子组件） */
       component: () => import("../blog/BlogPost.vue"),
     },
+    {
+      path: "/prompt-api-demo",
+      name: "prompt-api-demo",
+      /** Chrome Prompt API（端侧 Gemini Nano）体验页：模型作为页面原语的四个场景 */
+      component: () => import("../demo/PromptApiDemo.vue"),
+    },
     /** 兜底：未知路由重定向到控制台 */
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],

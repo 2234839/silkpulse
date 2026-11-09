@@ -91,6 +91,24 @@ export const networkEn = {
     detailSize: "Size:",
     /** 详情基本信息：耗时 */
     detailDuration: "Duration:",
+    /** 详情基本信息：加载完成时刻（resource 类型） */
+    detailCompletedAt: "Completed:",
+    /** 加载完成时刻 title */
+    detailCompletedAtTitle: "Resource load completion time (= start time + duration)",
+    /** 详情分段耗时标签 */
+    detailPhases: "Phases:",
+    /** 分段耗时 title */
+    detailPhasesTitle: "Resource timing phases (DNS / TCP / TLS / TTFB / download)",
+    /** 分段：DNS */
+    phaseDns: "DNS",
+    /** 分段：TCP 建连 */
+    phaseTcp: "TCP",
+    /** 分段：TLS 握手 */
+    phaseTls: "TLS",
+    /** 分段：首字节等待 */
+    phaseTtfb: "TTFB",
+    /** 分段：内容下载 */
+    phaseDownload: "DL",
     /** 详情基本信息：类型 */
     detailKind: "Type:",
     /** 静态资源提示标题 */
@@ -247,6 +265,15 @@ export const networkZh: typeof networkEn = {
     statusUnknown: "未知",
     detailSize: "大小：",
     detailDuration: "耗时：",
+    detailCompletedAt: "完成：",
+    detailCompletedAtTitle: "资源加载完成时刻（= 开始时间 + 耗时）",
+    detailPhases: "分段：",
+    detailPhasesTitle: "资源加载分段耗时（DNS / TCP / TLS / 首字节等待 / 内容下载）",
+    phaseDns: "DNS",
+    phaseTcp: "TCP",
+    phaseTls: "TLS",
+    phaseTtfb: "首字节",
+    phaseDownload: "下载",
     detailKind: "类型：",
     resourceNoticeTitle: "📦 静态资源加载",
     resourceNoticeBody:

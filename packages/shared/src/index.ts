@@ -348,6 +348,24 @@ export interface NetworkEntry {
   mimeType?: string;
   /** 资源体积（字节，仅 resource 类型） */
   size?: number;
+  /** 加载完成时刻（绝对时间 ISO，仅 resource 类型；timestamp 是开始时刻） */
+  completedAt?: string;
+  /**
+   * Resource Timing 分段耗时（ms，仅 resource 类型，相对开始时刻）
+   * 能拿到完整分段时才有值（跨域资源无 Timing-Allow-Origin 时各段为 0，只有 duration 可用，此时不传）
+   */
+  timingPhases?: {
+    /** DNS 解析耗时（domainLookupEnd - domainLookupStart） */
+    dns?: number;
+    /** TCP 建连耗时（connectEnd - connectStart，含 TLS） */
+    tcp?: number;
+    /** TLS 握手耗时（connectEnd - secureConnectionStart） */
+    tls?: number;
+    /** 首字节等待 TTFB（responseStart - requestStart） */
+    ttfb?: number;
+    /** 内容下载耗时（responseEnd - responseStart） */
+    download?: number;
+  };
   /** WebSocket readyState（0=CONNECTING/1=OPEN/2=CLOSING/3=CLOSED），仅 WS 条目 */
   wsState?: number;
   /** 帧时间线（send/recv/event），仅 WS 条目，上限 50 帧 FIFO */

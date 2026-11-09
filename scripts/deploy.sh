@@ -65,11 +65,13 @@ for ref in $(grep -o 'assets/[^"]*\.[jt]s' packages/server/public/index.html | h
   [[ -f "packages/server/public/$ref" ]] || { echo "✗ public/$ref（index.html 引用）不存在——html 与 assets 不同套！" >&2; exit 1; }
 done
 echo "  产物自洽 ✓"
-echo "▶ [3/4] rsync 双路径同步 + 重启容器…"
+echo "▶ [3/4] rsync 双路径同步 + 重启 dynapm 服务…"
 rsync -az --delete packages/server/dist/ "$DEPLOY_SSH_HOST:$DEPLOY_REMOTE_CODE_DIR/dist/"
 rsync -az --delete packages/server/public/ "$DEPLOY_SSH_HOST:$DEPLOY_REMOTE_CODE_DIR/public/"
 # server bundle staticRoot=dist/public，双目录都同步（见 deploy-workflow.md 2026-08-24 教训）
-ssh "$DEPLOY_SSH_HOST" "mkdir -p $DEPLOY_REMOTE_CODE_DIR/dist/public && rm -rf $DEPLOY_REMOTE_CODE_DIR/dist/public/assets && cp -r $DEPLOY_REMOTE_CODE_DIR/public/* $DEPLOY_REMOTE_CODE_DIR/dist/public/ && cd $DEPLOY_REMOTE_COMPOSE_DIR && docker compose restart"
+# 线上由 dynapm 管理（非 docker 容器，见 deploy-workflow.md），stop/start 命令与
+# dynapm.config.json services.silkpulse 保持一致；setsid 保证 ssh 会话结束后进程存活
+ssh "$DEPLOY_SSH_HOST" "mkdir -p $DEPLOY_REMOTE_CODE_DIR/dist/public && rm -rf $DEPLOY_REMOTE_CODE_DIR/dist/public/assets && cp -r $DEPLOY_REMOTE_CODE_DIR/public/* $DEPLOY_REMOTE_CODE_DIR/dist/public/ && pkill -f '[s]ilkpulse.mjs' || true; sleep 2; cd $DEPLOY_REMOTE_CODE_DIR && setsid env SILKPULSE_DATA_DIR=$DEPLOY_REMOTE_CODE_DIR/data SILKPULSE_ADMIN_KEY=$SILKPULSE_ADMIN_KEY SILKPULSE_PLAYGROUND_KEY=$SILKPULSE_PLAYGROUND_KEY STATS_TOKEN=$STATS_TOKEN node dist/bin/silkpulse.mjs --port 8080 >> $DEPLOY_REMOTE_CODE_DIR/dynapm-app.log 2>&1 < /dev/null & sleep 1; echo 重启指令已发出"
 
 echo "▶ [4/4] 等待启动并验证…"
 sleep 5

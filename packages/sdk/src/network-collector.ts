@@ -256,6 +256,21 @@ function installResourceObserver(sink: NetworkSink): void {
     /** fetch/xmlhttprequest 已经被 hook 采集了，不重复 */
     if (initType === "fetch" || initType === "xmlhttprequest" || initType === "navigation") return;
 
+    /**
+     * 分段耗时：跨域资源无 Timing-Allow-Origin 时 requestStart 等为 0，
+     * 只有 duration 可用——此时不传 timingPhases（半真半假的数据比没有更误导）
+     */
+    const hasDetailedTiming = e.requestStart > 0 && e.responseStart > 0;
+    const timingPhases = hasDetailedTiming
+      ? {
+          dns: Math.max(0, e.domainLookupEnd - e.domainLookupStart),
+          tcp: Math.max(0, e.connectEnd - e.connectStart),
+          tls: e.secureConnectionStart > 0 ? Math.max(0, e.connectEnd - e.secureConnectionStart) : undefined,
+          ttfb: Math.max(0, e.responseStart - e.requestStart),
+          download: Math.max(0, e.responseEnd - e.responseStart),
+        }
+      : undefined;
+
     sink({
       seq: seq++,
       timestamp: new Date(e.startTime + performance.timeOrigin).toISOString(),
@@ -268,6 +283,9 @@ function installResourceObserver(sink: NetworkSink): void {
       /** 用 initiatorType 作为 mimeType 前缀（前端据此分类显示资源图标） */
       mimeType: initType,
       size: e.transferSize || e.encodedBodySize || undefined,
+      /** 加载完成时刻（startTime + duration 换算为绝对时间），配合 timestamp 区分"开始得晚"和"传得慢" */
+      completedAt: new Date(e.startTime + e.duration + performance.timeOrigin).toISOString(),
+      timingPhases,
     });
   };
 

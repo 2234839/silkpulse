@@ -11,10 +11,12 @@ import { CATEGORY_LABELS } from "./types.js";
  * 设计要点：
  * - 检测项清单内联到脚本里（不依赖目标页面有任何模块系统）
  * - 每条 test 用 new Function 隔离执行（避免检测项之间污染全局）
+ * - test 表达式支持 async（exec 桥侧包了 async IIFE，await 会生效）；
+ *   异步检测必须自行控制时长，不要长时间 pending
  * - 抛异常/语法错误统一视为不支持（value: false）
  */
 export function generateFeatureDetectScript(): string {
-  return `return (function(){
+  return `return (async function(){
   var checks = ${JSON.stringify(
     FEATURE_CHECKS.map((c) => ({
       id: c.id,
@@ -31,7 +33,7 @@ export function generateFeatureDetectScript(): string {
     var value = false;
     try {
       var fn = new Function('return (' + c.test + ')');
-      value = fn();
+      value = await fn();
       if (value === undefined) value = false;
     } catch(e) {
       value = false;
