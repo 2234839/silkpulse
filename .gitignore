@@ -22,6 +22,7 @@ packages/server/public/blog/
 packages/server/public/vendor/
 packages/server/public/post-inject-*.html
 packages/server/public/react-vite-*.html
+packages/server/public/iframe-repro-*.html
 
 # dotenv environment variable files
 .env

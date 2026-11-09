@@ -386,11 +386,19 @@ export async function createServer(
        * 会被误判为无 hash → 降级 no-cache，导致长缓存失效。
        */
       const isHashed = pathname.includes("/assets/") && /-[a-zA-Z0-9_-]{8,}\.\w+$/.test(pathname);
+      /**
+       * iframe back 复现的 demo 页（autotest / executor / host / child）允许被任意源嵌入：
+       * 它们是无密钥无敏感数据的纯静态测试页，跨域 iframe 嵌入是这类复现实验的必要条件
+       * （验证 OOPIF 场景）；带 SAMEORIGIN 会直接挡掉跨域用例。其余页面维持 SAMEORIGIN 不变。
+       */
+      const isEmbeddableDemoPage = /\/iframe-repro-(autotest|autotest-executor|host|child)\.html$/.test(
+        pathname,
+      );
       serveFile(
         ctx,
         filePath,
         guessContentType(filePath),
-        securityHeaders,
+        isEmbeddableDemoPage ? { "X-Content-Type-Options": "nosniff" } : securityHeaders,
         isHashed ? "longCache" : "noCache",
       );
       return;

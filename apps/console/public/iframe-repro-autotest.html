@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>iframe back 一键检测（autotest）</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 0; padding: 10px; font-size: 14px; }
+    button { display: block; width: 100%; margin: 6px 0; padding: 12px; font-size: 15px; }
+    #status { font-size: 12px; color: #555; min-height: 1.2em; margin: 4px 0; }
+    #report { white-space: pre-wrap; background: #111; color: #0f0; padding: 8px; font-size: 11px; height: 40vh; overflow: auto; }
+    iframe { width: 100%; height: 80px; border: 1px dashed #999; box-sizing: border-box; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <button id="start" onclick="runAll()">开始一键检测</button>
+  <button id="copy" style="display:none" onclick="copyReport()">复制报告（发给崮生）</button>
+  <div id="status"></div>
+  <div id="report"></div>
+  <div id="frames"></div>
+  <script>
+    /** ========== 环境与常量 ========== */
+    const HERE = location.origin;
+    /** 跨域 executor 地址：?cross= 覆盖，默认 ift 子域名（网关反代到同一服务） */
+    const CROSS = new URLSearchParams(location.search).get("cross") || "https://ift.heartstack.space";
+    const EXECUTOR_PATH = "/iframe-repro-autotest-executor.html";
+    const CMD_TIMEOUT = 2500;
+
+    const $report = document.getElementById("report");
+    const $status = (m) => (document.getElementById("status").textContent = m);
+    const now = () => (performance.now() / 1000).toFixed(3);
+
+    /** ========== 报告收集 ========== */
+    const reportLines = [];
+    const rep = (line) => {
+      reportLines.push(line);
+      $report.textContent = reportLines.join("\n");
+      $report.scrollTop = $report.scrollHeight;
+    };
+
+    /** ========== executor 驱动 ========== */
+    /** executor iframe 加载后 resolve；reject 则该源不可用（网关拦截/证书问题）。
+     * ready 监听必须在设置 src 之前挂上（executor 脚本可能在 onload 前就发 ready，存在竞态） */
+    function loadExecutor(origin) {
+      return new Promise((resolve, reject) => {
+        const f = document.createElement("iframe");
+        let ready = false;
+        const onMsg = (e) => {
+          const d = e.data;
+          if (d && d.ns === "ift" && d.t === "ready" && e.source === f.contentWindow) ready = true;
+        };
+        addEventListener("message", onMsg);
+        const timer = setTimeout(() => {
+          removeEventListener("message", onMsg);
+          f.remove();
+          reject(new Error(`加载或 ready 超时: ${origin}`));
+        }, 8000);
+        f.onload = () => {
+          /** onload 后等一小会确认 ready 已到（executor 是同步脚本，正常几毫秒内 ready） */
+          setTimeout(() => {
+            if (ready) {
+              clearTimeout(timer);
+              removeEventListener("message", onMsg);
+              resolve(f);
+            }
+          }, 300);
+        };
+        f.onerror = () => {
+          clearTimeout(timer);
+          removeEventListener("message", onMsg);
+          f.remove();
+          reject(new Error(`加载失败: ${origin}`));
+        };
+        f.src = origin + EXECUTOR_PATH;
+        document.getElementById("frames").appendChild(f);
+      });
+    }
+
+    /** 发一条 cmd 并等待对应 id 的 result；超时返回 TIMEOUT */
+    function cmd(frame, action, id) {
+      return new Promise((resolve) => {
+        const onMsg = (e) => {
+          const d = e.data;
+          if (d && d.ns === "ift" && d.t === "result" && d.id === id && e.source === frame.contentWindow) {
+            cleanup(); resolve(d);
+          }
+        };
+        const timer = setTimeout(() => { cleanup(); resolve({ status: "TIMEOUT", info: `${CMD_TIMEOUT}ms 无回包` }); }, CMD_TIMEOUT);
+        const cleanup = () => { clearTimeout(timer); removeEventListener("message", onMsg); };
+        addEventListener("message", onMsg);
+        frame.contentWindow.postMessage({ ns: "ift", t: "cmd", cmd: action, id }, "*");
+      });
+    }
+
+    /** 完整一轮 push→go(-1) 用例，返回 result（含宿主 popstate 观察口） */
+    async function runTraversalCase(frame, idPrefix, onHostPop) {
+      const hostPop = { hit: false };
+      const onPop = () => (hostPop.hit = true);
+      addEventListener("popstate", onPop);
+      frame.contentWindow.postMessage({ ns: "ift", t: "cmd", cmd: "pushB" }, "*");
+      await new Promise((r) => setTimeout(r, 400));
+      const result = await cmd(frame, "goBack", idPrefix);
+      removeEventListener("popstate", onPop);
+      return { result, hostPopped: hostPop.hit };
+    }
+
+    /** ========== 用例编排 ========== */
+    let running = false;
+    async function runAll() {
+      if (running) return;
+      running = true;
+      document.getElementById("start").disabled = true;
+      reportLines.length = 0;
+      $report.textContent = "";
+
+      const uaShort = navigator.userAgent.replace(/.*\((.*?)\).*/, "$1") + " " +
+        (navigator.userAgent.includes("UnionPay") || navigator.userAgent.includes("Chinaunicom") ? "" : "");
+      rep(`[ift-report] ${new Date().toISOString()} | UA=${navigator.userAgent.slice(0, 70)}`);
+      rep(`A(同域)=${HERE}  B(跨域)=${CROSS}`);
+
+      /** S0 环境 */
+      rep(`S0 inIframe=${window.self !== window.top} historyLen=${history.length}`);
+
+      let frameA = null, frameB = null;
+      try { frameA = await loadExecutor(HERE); }
+      catch { rep(`S1 setup: 同域 executor 加载失败 ❌（视为不可用）`); }
+
+      /** S1 同域 traversal */
+      if (frameA) {
+        $status("S1/4 同域 iframe go(-1)…");
+        const { result } = await runTraversalCase(frameA, "S1");
+        rep(`S1 同域iframe go(-1)  ${result.status === "PASS" ? "PASS ✅" : result.status + " ❌"}  ${result.info}`);
+        /** S4a 同域修复路 */
+        const s4a = await cmd(frameA, "fixReplace", "S4a");
+        rep(`S4a 同域 replaceState ${s4a.status === "PASS" ? "PASS ✅" : s4a.status + " ❌"}  ${s4a.info}`);
+        frameA.remove();
+      }
+
+      /** S2 跨域 traversal（同页不同源 = OOPIF 候选场景） */
+      try {
+        frameB = await loadExecutor(CROSS);
+      } catch (err) {
+        rep(`S2 跨域 iframe 加载失败 ❌（${err.message}）——B 源不可达或被嵌入策略拦截`);
+      }
+      if (frameB) {
+        $status("S2/4 跨域 iframe go(-1)…");
+        const { result } = await runTraversalCase(frameB, "S2");
+        rep(`S2 跨域iframe go(-1)  ${result.status === "PASS" ? "PASS ✅" : result.status + " ❌"}  ${result.info}`);
+        /** S4b 跨域修复路 */
+        const s4b = await cmd(frameB, "fixReplace", "S4b");
+        rep(`S4b 跨域 replaceState ${s4b.status === "PASS" ? "PASS ✅" : s4b.status + " ❌"}  ${s4b.info}`);
+        frameB.remove();
+      }
+
+      /** S3 联合历史夹带：executor push → host push → executor go(-1)，观察宿主是否被 pop */
+      if (frameA) {
+        $status("S3/4 联合历史夹带…");
+        frameA = await loadExecutor(HERE);
+        const hostPop = { hit: false };
+        const onPop = () => (hostPop.hit = true);
+        addEventListener("popstate", onPop);
+        frameA.contentWindow.postMessage({ ns: "ift", t: "cmd", cmd: "pushB" }, "*");
+        await new Promise((r) => setTimeout(r, 400));
+        /** 宿主夹带：此刻联合历史最新条目属于 host（H3 前置条件） */
+        const tag = Date.now();
+        history.pushState({ host: tag }, "", "#host" + tag);
+        const result = await cmd(frameA, "goBack", "S3");
+        removeEventListener("popstate", onPop);
+        rep(`S3 夹带: 子结果=${result.status}  host被pop=${hostPop.hit ? "是（H3 实证）" : "否"}  ${result.info}`);
+        /** 清理：host 夹带条目用 replaceState 归位，不用 go()（避免清理动作又被吞） */
+        history.replaceState(null, "", location.pathname);
+        frameA.remove();
+      }
+
+      /** S5 判读提示 */
+      const s1 = reportLines.find((l) => l.startsWith("S1"));
+      const s2 = reportLines.find((l) => l.startsWith("S2"));
+      const concl =
+        s2 && s2.includes("FAIL") && s1 && s1.includes("PASS")
+          ? "→ 跨域子 frame traversal 丢失（H1 跨域精化版）：落 iframe 内 replaceState 修复"
+          : s1 && s1.includes("FAIL")
+            ? "→ 同域也失败：与跨域无关，主 frame 在场即坏（H2/壳劫持方向）"
+            : s1 && s1.includes("PASS") && s2 && s2.includes("PASS")
+              ? "→ 实验室环境不复现：变量在生产宿主/SDK 在场，需升级 demo"
+              : "→ 数据不完整，参考各行详情";
+      rep(`结论: ${concl}`);
+
+      $status("完成 ✅ 点「复制报告」发给崮生");
+      document.getElementById("copy").style.display = "block";
+      document.getElementById("frames").innerHTML = "";
+      running = false;
+      document.getElementById("start").disabled = false;
+    }
+
+    /** ========== 复制报告 ========== */
+    async function copyReport() {
+      const text = reportLines.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        $status("已复制到剪贴板 ✅");
+      } catch {
+        /** iOS 低版本/非 https 场景降级：选中文本让用户手动复制 */
+        const range = document.createRange();
+        range.selectNodeContents($report);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        $status("自动复制失败，已全选报告文本，请手动复制");
+      }
+    }
+  </script>
+</body>
+</html>

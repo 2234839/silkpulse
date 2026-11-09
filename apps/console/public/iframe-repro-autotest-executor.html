@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>iframe back 一键检测 · executor（执行体）</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 0; padding: 10px; font-size: 14px; }
+    button { display: block; width: 100%; margin: 6px 0; padding: 10px; font-size: 14px; }
+    #env { font-size: 11px; color: #666; word-break: break-all; }
+    #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 8px; font-size: 11px; height: 50vh; overflow: auto; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="env"></div>
+  <div id="log"></div>
+  <div id="manual" style="display:none">
+    <button onclick="pushB()">1. pushState → B</button>
+    <button onclick="doGoBack('MANUAL')">2. go(-1)</button>
+    <button onclick="doFixReplace('MANUAL')">3. replaceState → A</button>
+  </div>
+  <script>
+    const log = (m) => {
+      const t = new Date().toISOString().slice(11, 23);
+      const el = document.getElementById("log");
+      el.textContent += `[exec ${t}] ${m}\n`;
+      el.scrollTop = el.scrollHeight;
+    };
+    const isTop = window.self === window.top;
+    document.getElementById("env").textContent =
+      `executor | inIframe=${!isTop} | href=${location.href.slice(0, 80)}`;
+    if (isTop) {
+      /** 单独打开 = 无 iframe 对照组，展示手动按钮（自动编排只发生在 iframe 内） */
+      document.getElementById("manual").style.display = "block";
+      log("单独打开：手动对照组模式，依次按 1→2（期望 ✅）再按 3");
+    }
+
+    /** popstate 计数：go(-1) 后窗口内归零 = traversal 被吞 */
+    let popCount = 0;
+    let lastPopHash = null;
+    addEventListener("popstate", (e) => {
+      popCount++;
+      lastPopHash = location.hash;
+      log(`popstate #${popCount} state=${JSON.stringify(e.state)} hash=${location.hash}`);
+    });
+    addEventListener("hashchange", () => log(`hashchange → ${location.hash}`));
+
+    /** 向父页上报（executor→parent 无从得知父 origin，消息体不含敏感数据） */
+    const send = (msg) => {
+      try { parent.postMessage(Object.assign({ ns: "ift" }, msg), "*"); } catch (err) { log(`postMessage 失败: ${err}`); }
+    };
+
+    function pushB() {
+      history.pushState({ p: "B" }, "", "#b");
+      log("pushState → #b 完成");
+    }
+
+    /**
+     * 执行 go(-1) 并在 1500ms 后按 popstate 计数与 hash 还原情况给出结论
+     * id 由编排方传入，用于报告行对号
+     */
+    function doGoBack(id) {
+      popCount = 0;
+      lastPopHash = null;
+      const before = { hash: location.hash, len: history.length, state: JSON.stringify(history.state) };
+      log(`go(-1) 前 hash=${before.hash} len=${before.len}`);
+      history.go(-1);
+      setTimeout(() => {
+        const ok = popCount > 0 && lastPopHash !== "#b";
+        const info = `popstate=${popCount} hash: ${before.hash}→${location.hash} state=${JSON.stringify(history.state)} len:${before.len}→${history.length}`;
+        log(`go(-1) +1500ms 判定 ${ok ? "PASS ✅" : "FAIL ❌"} ${info}`);
+        if (id && id !== "MANUAL") send({ t: "result", id, status: ok ? "PASS" : "FAIL", info });
+      }, 1500);
+    }
+
+    /** 修复路验证：replaceState 正向切换（不依赖 traversal，任何引擎/壳都应放行） */
+    function doFixReplace(id) {
+      history.replaceState({ p: "A" }, "", "#a");
+      const ok = location.hash === "#a";
+      log(`replaceState → #a ${ok ? "PASS ✅" : "FAIL ❌"}`);
+      if (id && id !== "MANUAL") send({ t: "result", id, status: ok ? "PASS" : "FAIL", info: `hash=${location.hash}` });
+    }
+
+    /** 编排消息处理：reset 清计数，其余动作转发到对应函数 */
+    addEventListener("message", (e) => {
+      const d = e.data;
+      if (!d || d.ns !== "ift" || d.t !== "cmd") return;
+      log(`收到 cmd=${d.cmd} id=${d.id || "-"}`);
+      if (d.cmd === "pushB") pushB();
+      else if (d.cmd === "goBack") doGoBack(d.id);
+      else if (d.cmd === "fixReplace") doFixReplace(d.id);
+    });
+
+    if (!isTop) {
+      send({ t: "ready", origin: location.origin, ua: navigator.userAgent.slice(0, 60) });
+      log("ready 已上报父页");
+    }
+  </script>
+</body>
+</html>

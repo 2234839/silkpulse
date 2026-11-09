@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>iframe back 复现 · child（模拟 uni H5）</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 0; padding: 10px; font-size: 15px; }
+    button { display: block; width: 100%; margin: 8px 0; padding: 12px; font-size: 15px; }
+    #env { font-size: 11px; color: #666; word-break: break-all; margin-bottom: 6px; }
+    #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 8px; font-size: 11px; height: 45vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div id="env"></div>
+  <div>当前虚拟页面：<b id="page">A</b></div>
+  <button onclick="pushB()">1. pushState → B（等价 uni.navigateTo）</button>
+  <button onclick="goBack()">2. history.go(-1)（线上返回按钮等价行为）</button>
+  <button onclick="fixSwitch()">3. replaceState → A（等价 reLaunch/redirectTo，修复方案）</button>
+  <div id="log"></div>
+  <script>
+    const log = (m) => {
+      const t = new Date().toISOString().slice(11, 23);
+      const el = document.getElementById("log");
+      el.textContent += `[child ${t}] ${m}\n`;
+      el.scrollTop = el.scrollHeight;
+    };
+    const dump = (tag) =>
+      log(`${tag} length=${history.length} state=${JSON.stringify(history.state)} hash=${location.hash || "(空)"}`);
+    /** popstate 计数：go(-1) 后 1.5s 内归零 = traversal 被吞 */
+    let popCount = 0;
+    const switchPage = (p) => (document.getElementById("page").textContent = p);
+    addEventListener("popstate", (e) => {
+      popCount++;
+      dump(`popstate #${popCount} event.state=${JSON.stringify(e.state)}`);
+      switchPage((e.state && e.state.p) || "A");
+    });
+    addEventListener("hashchange", (e) => log(`hashchange ${e.oldURL} → ${e.newURL}`));
+    function pushB() {
+      history.pushState({ p: "B" }, "", "#b");
+      switchPage("B");
+      dump("pushState 后（B）");
+    }
+    function goBack() {
+      popCount = 0;
+      dump("go(-1) 前");
+      history.go(-1);
+      setTimeout(() =>
+        dump(`go(-1)+300ms popCount=${popCount} ${popCount ? "✅ traversal 生效" : "❌ traversal 被吞（BUG 现场）"}`)
+      , 300);
+      setTimeout(() => dump(`go(-1)+1500ms popCount=${popCount} → 最终判定 ${popCount ? "✅" : "❌"}`), 1500);
+    }
+    function fixSwitch() {
+      dump("replaceState 前");
+      history.replaceState({ p: "A" }, "", "#a");
+      switchPage("A");
+      dump("replaceState 后（A，正向替换不依赖 traversal）");
+    }
+    document.getElementById("env").textContent =
+      `inIframe=${window.self !== window.top} | href=${location.href}`;
+    dump("init");
+  </script>
+</body>
+</html>
