@@ -493,7 +493,7 @@ vp run -r build      # 构建所有包
 vp run start         # 默认端口 8080
 
 # 在目标页面注入 SDK
-&lt;script src="http://localhost:8080/sdk.js"&gt;&lt;/script&gt;</code></pre>
+&lt;script src="http://localhost:8080/sdk.js" crossorigin="anonymous"&gt;&lt;/script&gt;</code></pre>
     <p>
       部署极轻：构建后只需三个产物目录（server bundle + 静态资源 + demo 页）， 无需
       node_modules，一个 Node 进程 + 一份 Dockerfile 就能上线。

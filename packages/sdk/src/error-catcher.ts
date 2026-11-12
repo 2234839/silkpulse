@@ -200,9 +200,16 @@ export function installErrorCatcher(sink: ErrorSink): void {
       }
 
       errorCount++;
+      /** 跨域清洗识别：页面以无 crossorigin 属性的 <script> 加载 sdk.js 时，
+       *  浏览器把 SDK 内抛出的异常清洗成 "Script error."（无 message/stack/filename）。
+       *  iOS Safari 对该清洗最严格，Android 部分场景尚能透出细节。
+       *  检测到这种形态时补提示，让控制台/AI 知道该让接入方加 crossorigin="anonymous" */
+      const message = /^Script error\.?$/i.test(e.message)
+        ? "Script error.（跨域脚本错误被浏览器清洗：script 标签需加 crossorigin=\"anonymous\"）"
+        : e.message || "Unknown error";
       const entry: ErrorEntry = {
         timestamp: new Date().toISOString(),
-        message: e.message || "Unknown error",
+        message,
         stack: e.error instanceof Error ? e.error.stack : undefined,
         source: e.filename,
         line: e.lineno,

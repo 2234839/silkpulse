@@ -111,7 +111,10 @@ const floatingBall = ref(true);
 const scriptSnippet = computed(() => {
   const lt = String.fromCharCode(60);
   const gt = String.fromCharCode(62);
-  const base = `${lt}script src="${serverOrigin}/sdk.js" data-server="${serverOrigin}"`;
+  /** crossorigin=anonymous：sdk.js 是跨域脚本，不加该属性时浏览器会把 SDK 内抛出的
+   *  未捕获异常清洗成 "Script error."（iOS Safari 尤其严格），错误细节全丢。
+   *  server 已对 /sdk.js 发 Access-Control-Allow-Origin: *，带属性即可拿到完整堆栈 */
+  const base = `${lt}script src="${serverOrigin}/sdk.js" crossorigin="anonymous" data-server="${serverOrigin}"`;
   /** 归属项目时带 projectId + 设备令牌；未分组/未启用鉴权不带也能接入 */
   let s = injectProjectId.value
     ? `${base} data-project-id="${injectProjectId.value}" data-device-token="${deviceToken.value}"`

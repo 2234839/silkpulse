@@ -539,6 +539,8 @@ function injectScriptCode(origin: string, projectId?: string): string {
   /** 动态拼 data-* 属性 */
   const dataAttrs = [
     `s.dataset.server='${origin}'`,
+    /** 跨域加载 sdk.js 必须带 crossorigin，否则错误被清洗成 Script error.（iOS 上必现） */
+    `s.crossOrigin='anonymous'`,
     projectId ? `s.dataset.projectId='${projectId}'` : "",
   ]
     .filter(Boolean)
@@ -736,6 +738,7 @@ function buildUserscript(origin: string, projectId?: string): string {
   window[k] = 1;
   GM_addElement('script', {
     src: '${origin}/sdk.js',
+    crossorigin: 'anonymous',
     ${dataAttrs}
   });
 })();
